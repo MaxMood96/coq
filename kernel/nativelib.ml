@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -43,7 +43,7 @@ let () = at_exit (fun () ->
         let d = Lazy.force my_temp_dir in
         Array.iter (fun f -> Sys.remove (Filename.concat d f)) (Sys.readdir d);
         Unix.rmdir d
-      with e ->
+      with (Unix.Unix_error _ | Sys_error _) as e ->
         Feedback.msg_warning
           Pp.(str "Native compile: failed to cleanup: " ++
               str(Printexc.to_string e) ++ fnl()))
@@ -75,7 +75,7 @@ let get_include_dirs () =
   then (Lazy.force my_temp_dir) :: base
   else base
 
-(* Pointer to the function linking an ML object into coq's toplevel *)
+(* Pointer to the function linking an ML object into Rocq's toplevel *)
 let load_obj = ref (fun _x -> () : string -> unit)
 
 let rt1 = ref (dummy_value ())
@@ -168,8 +168,8 @@ let compile_library (code, symb) fn =
   let header = mk_library_header symb in
   let fn = fn ^ source_ext in
   let basename = Filename.basename fn in
-  let dirname = Filename.dirname fn in
-  let dirname = dirname / !output_dir in
+  let dirname =
+    if Filename.is_relative !output_dir then Filename.dirname fn / !output_dir else !output_dir in
   let () =
     try Unix.mkdir dirname 0o755
     with Unix.Unix_error (Unix.EEXIST, _, _) -> ()

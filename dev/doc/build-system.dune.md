@@ -17,14 +17,26 @@ in `Makefile`, `make` will display help. Note that dune will call
 configure for you if needed, so no need to call `./configure` in the
 regular development workflow, unless you want to tweak options.
 
-4 common operations are:
+
+2 common operations are:
 
 - `make check` : build all ml targets as fast as possible
 - `make world` : build a complete Coq distribution
-- `dune exec -- dev/shim/coqtop` : build and launch coqtop + prelude [equivalent to `make states`].
+
+For more targeted builds, you can also call `dune` directly. First,
+call `make dunestrap` to generate necessary build files (the `make`
+targets above do it automatically). Then you can use:
+
+- `dune exec -- dev/shim/coqtop` : build and launch coqtop + prelude
+  [equivalent to `make states`].
+- `dune exec -- dev/shim/coqc <args...>`: build and launch `coqc` with
+  arguments of your choice
 - `dune build $target`: where `$target` can refer to the build
   directory or the source directory [but will be placed under
   `_build`]
+
+You need to run `make dunestrap` again if the dependencies between the
+standard library .v files have changed.
 
 `dune build @install` will build all the public Coq artifacts; `dune
 build` builds the `@default` alias, defined in the top level `dune` file.
@@ -56,11 +68,11 @@ tweak some low-level option.
 
 Dune is able to build all the OCaml parts of Coq in a pretty standard
 way, using its built-in rule generation for OCaml. Public tools
-written in OCaml are distributed in the `coq-core` package.
+written in OCaml are distributed in the `rocq-runtime` package.
 
 The set of public `.v` files present in this repository, usually
-referred as the "Coq Standard Library" are distributed in the
-`coq-stdlib` package. As of June 2022, Dune has a set of built-in
+referred as the "Coq prelude" are distributed in the
+`rocq-core` package. As of June 2022, Dune has a set of built-in
 rules for `.v` files which is capable of building Coq's standard
 library.
 
@@ -84,20 +96,9 @@ currently `coqnative` incurs a 33% build time overhead on a powerful
 16-core machine.
 
 There are several modes for the rule generation script to work,
-depending on the parameter passed. As of today, it support `-async`
-and `-vio`.
+depending on the parameter passed. As of today, it support `-async`.
 
 `-async` will pass `-async-proofs on` to `coqc`.
-
-`-vio` will have the script setup compilation such that `.vo` files
-are generated first going thru `.vio` files.
-
-In particular, `-vio` mode has several pitfalls, for example, no
-`.glob` files are generated (this is inherited from Coq
-itself). Moreover, it is not possible to do a full parallel build
-doing `.v -> .vio` and `.vio -> .vo`, as it'd be racy, so a barrier
-must be used (the first process must be completed) before running the
-`.vio -> .vo` step.
 
 ## Per-User Custom Settings
 
@@ -130,6 +131,19 @@ compiler.
 If you built the full standard library with the `world` target,
 then you can run the commands in the
 `_build/install/default/bin` directories (including `coq_makefile`).
+
+## Building custom toplevels
+
+You can build custom toplevels by tweaking the `toplevel/dune` files,
+for example, to add plugins to be linked statically using the
+`(libraries ...)` field.
+
+Note that Coq relies on a hidden Dune hack, which will add `-linkall`
+to binaries if they depend on the `findlib.dynload` library. As of
+today, `rocq-runtime.vernac` uses `findlib.dynload`, so if your toplevel
+hooks at the `rocq-runtime.vernac` or above level, you should be OK,
+otherwise add `-linkall` to Dune's `(link_flags ...)` field for your
+binary.
 
 ## Targets
 
@@ -200,6 +214,8 @@ dune exec -- dev/dune-dbg checker foo.vo
 (ocd) source db
 ```
 
+More info in the [wiki](https://github.com/coq/coq/wiki/OCamldebug).
+
 Unfortunately, dependency handling is not fully refined / automated,
 you may find the occasional hiccup due to libraries being renamed,
 etc... Please report any issue.
@@ -219,16 +235,14 @@ For running in emacs, use `coqdev-ocamldebug` from `coqdev.el`.
   depending on the error)
 
 - If there is a linking error (eg from "source db"), do a "dune
-  build coq-core.install" and try again.
+  build rocq-runtime.install" and try again.
 
 ## Dropping from coqtop:
 
 The following commands should work:
 ```
-dune exec -- dev/shim/coqbyte
+dune exec -- dev/shim/coqtop.byte
 > Drop.
-# #directory "dev";;
-# #use "include";;
 ```
 
 ## Compositionality, developer and release modes.

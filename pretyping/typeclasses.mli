@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -28,7 +28,7 @@ type class_method = {
 
 (** This module defines type-classes *)
 type typeclass = {
-  cl_univs : Univ.AbstractContext.t;
+  cl_univs : UVars.AbstractContext.t;
   (** The toplevel universe quantification in which the typeclass lives. In
       particular, [cl_props] and [cl_context] are quantified over it. *)
 
@@ -89,7 +89,7 @@ val class_info_exn : env -> evar_map -> GlobRef.t -> typeclass
 val dest_class_app : env -> evar_map -> EConstr.constr -> (typeclass * EConstr.EInstance.t) * constr list
 
 (** Get the instantiated typeclass structure for a given universe instance. *)
-val typeclass_univ_instance : typeclass Univ.puniverses -> typeclass
+val typeclass_univ_instance : typeclass UVars.puniverses -> typeclass
 
 (** Just return None if not a class *)
 val class_of_constr : env -> evar_map -> EConstr.constr ->
@@ -129,7 +129,6 @@ val is_class_type : evar_map -> EConstr.types -> bool
 
 val resolve_typeclasses : ?filter:evar_filter -> ?unique:bool ->
   ?fail:bool -> env -> evar_map -> evar_map
-val resolve_one_typeclass : ?unique:bool -> env -> evar_map -> EConstr.types -> evar_map * EConstr.constr
 
 val get_filtered_typeclass_evars : evar_filter -> evar_map -> Evar.Set.t
 
@@ -139,4 +138,12 @@ val error_unresolvable : env -> evar_map -> Evar.Set.t -> 'a
     Beware this action is not registed in the summary (the Undo system) so
     it is up to the plugin to do so. *)
 val set_solve_all_instances : (env -> evar_map -> evar_filter -> bool -> bool -> evar_map) -> unit
-val set_solve_one_instance : (env -> evar_map -> EConstr.types -> bool -> evar_map * EConstr.constr) -> unit
+
+val get_typeclasses_unique_solutions : unit -> bool
+
+(* Deprecated *)
+val resolve_one_typeclass : ?unique:bool -> env -> evar_map -> EConstr.types -> evar_map * EConstr.constr
+[@@deprecated "(9.0) Use Class_tactics.resolve_one_typeclass (\"unique\" argument was ignored)"]
+
+val set_solve_one_instance : (env -> evar_map -> EConstr.types -> evar_map * EConstr.constr) -> unit
+[@@deprecated "(9.0) For internal use only"]

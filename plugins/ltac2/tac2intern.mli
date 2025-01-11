@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -17,10 +17,28 @@ type context = (Id.t * type_scheme) list
 val intern : strict:bool -> context -> raw_tacexpr -> glb_tacexpr * type_scheme
 val intern_typedef : (KerName.t * int) Id.Map.t -> raw_quant_typedef -> glb_quant_typedef
 val intern_open_type : raw_typexpr -> type_scheme
+val intern_notation_data : Id.Set.t -> raw_tacexpr -> Tac2env.notation_data
+
+(** [check_unused] is deault true *)
+val genintern_warn_not_unit : ?check_unused:bool ->
+  Genintern.glob_sign ->
+  (Name.t * Tac2typing_env.mix_type_scheme) list ->
+  raw_tacexpr ->
+  glb_tacexpr
+
+val genintern : ?check_unused:bool ->
+  Genintern.glob_sign ->
+  (Name.t * Tac2typing_env.mix_type_scheme) list ->
+  Tac2typing_env.TVar.t glb_typexpr ->
+  raw_tacexpr ->
+  glb_tacexpr
 
 (** Check that a term is a value. Only values are safe to marshall between
     processes. *)
 val is_value : glb_tacexpr -> bool
+
+val is_pure_constructor : type_constant -> bool
+
 val check_unit : ?loc:Loc.t -> type_scheme -> unit
 
 val check_subtype : type_scheme -> type_scheme -> bool
@@ -39,6 +57,10 @@ val subst_rawexpr : substitution -> raw_tacexpr -> raw_tacexpr
 val globalize : Id.Set.t -> raw_tacexpr -> raw_tacexpr
 (** Replaces all qualified identifiers by their corresponding kernel name. The
     set represents bound variables in the context. *)
+
+val debug_globalize_allow_ext : Id.Set.t -> raw_tacexpr -> raw_tacexpr
+(** Variant of globalize which can accept CTacExt using the provided function.
+    Intended for debugging. *)
 
 (** Errors *)
 

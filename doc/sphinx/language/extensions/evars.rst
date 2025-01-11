@@ -16,7 +16,7 @@ values.
    | ?[ ?@ident ]
    | ?@ident {? @%{ {+; @ident := @term } %} }
 
-Coq terms can include existential variables that represent unknown
+Rocq terms can include existential variables that represent unknown
 subterms that are eventually replaced with actual subterms.
 
 Existential variables are generated in place of unsolved implicit
@@ -37,7 +37,7 @@ placeholder which generated it, or is used in the same context as the
 one in which it was generated, the context is not displayed and the
 existential variable is represented by “?” followed by an identifier.
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Parameter identity : forall (X:Set), X -> X.
 
@@ -54,7 +54,7 @@ this is why an existential variable used in the same context as its
 context of definition is written with no instance.
 This behavior may be changed: see :ref:`explicit-display-existentials`.
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Check (fun x y => _) 0 1.
 
@@ -83,7 +83,7 @@ Inferable subterms
 
    :n:`@term`\s may use :gdef:`holes <hole>`, denoted by :n:`_`, for purposes such as:
 
-   * Omitting redundant subterms.  Redundant subterms that Coq is able to infer can
+   * Omitting redundant subterms.  Redundant subterms that Rocq is able to infer can
      be replaced with :n:`_`.  For example HELP ME HERE.
    * Indicating where existential variables should be created in e* tactics such as
      :tacn:`assert`.
@@ -91,7 +91,7 @@ Inferable subterms
    is it possible to see holes in the context for any of these?
 
 Expressions often contain redundant pieces of information. Subterms that can be
-automatically inferred by Coq can be replaced by the symbol ``_`` and Coq will
+automatically inferred by Rocq can be replaced by the symbol ``_`` and Rocq will
 guess the missing piece of information.
 
 e* tactics that can create existential variables
@@ -106,22 +106,21 @@ it will create new existential variable(s) when :tacn:`apply` would fail.
 
    .. example:: apply vs eapply
 
-      Both tactics unify the goal with :n:`n < p` in the theorem.  :n:`m` is
+      Both tactics unify the goal with :n:`x = z` in the theorem.  :n:`y` is
       unspecified.  This makes :tacn:`apply` fail, while :tacn:`eapply`
-      creates a new existential variable :n:`?m`.
+      creates a new existential variable :n:`?y`.
 
-      .. coqtop:: none reset
+      .. rocqtop:: none reset
 
-         Require Import Arith.
-         Goal forall i j, i < j.
+         Goal forall i j : nat, i = j.
          intros.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
-         (* Theorem lt_trans : forall n m p, n < m -> m < p -> n < p. *)
+         (* Theorem eq_trans : forall (A : Type) (x y z : A), x = y -> y = z -> x = z. *)
 
-         Fail apply Nat.lt_trans.
-         eapply Nat.lt_trans.
+         Fail apply eq_trans.
+         eapply eq_trans.
 
 The :n:`e*` tactics include:
 
@@ -170,46 +169,44 @@ automatically as a side effect of other tactics.
 
 .. example:: Automatic resolution of existential variables
 
-   :n:`?x` and :n:`?m` are used in other goals.  The :tacn:`exact`
-   shown below determines the values of these variables by unification,
-   which resolves them.
+   :n:`?y` is used in other goals.  The :tacn:`exact`
+   shown below determines the value of this variable by unification,
+   which resolves it.
 
-   .. coqtop:: reset in
+   .. rocqtop:: reset in
 
-      Require Import Arith.
       Set Printing Goal Names.
-      Goal forall n m, n <= m -> ~ m < n.
 
-   .. coqtop:: all
+      Goal forall p n m : nat, n = p -> p = m -> n = m.
 
-      intros x y H1 H2.
-      eapply Nat.lt_irrefl. (* creates ?x : nat as a shelved goal *)
-      eapply Nat.le_lt_trans. (* creates ?m : nat as a shelved goal *)
+   .. rocqtop:: all
+
+      intros x y z H1 H2.
+      eapply eq_trans. (* creates ?y : nat as a shelved goal *)
       Unshelve. (* moves the shelved goals into focus--not needed and usually not done *)
-      exact H1. (* resolves the first goal and by side effect ?x and ?m *)
+      exact H1. (* resolves the first goal and by side effect ?y *)
 
-   The :n:`?x` and :n:`?m` goals ask for proof that :n:`nat` has a
-   :term:`witness`, i.e. it is not an empty type.  This can be proved directly
-   by applying a constructor of :n:`nat`, which assigns values for :n:`?x` and
-   :n:`?m`.  However if you choose poorly, you can end up with unprovable goals
-   (in this case :n:`0 < 0`).  Like this:
+   The :n:`?y` goal asks for proof that :n:`nat` has an
+   :term:`inhabitant`, i.e. it is not an empty type.  This can be proved directly
+   by applying a constructor of :n:`nat`, which assigns values for :n:`?y`.
+   However if you choose poorly, you can end up with unprovable goals
+   (in this case :n:`x = 0`).  Like this:
 
-   .. coqtop:: reset none
+   .. rocqtop:: reset none
 
-      Require Import Arith.
       Set Printing Goal Names.
-      Goal forall n m, n <= m -> ~ m < n.
-      intros x y H1 H2.
-      eapply Nat.lt_irrefl. (* creates ?x : nat as a shelved goal *)
-      eapply Nat.le_lt_trans. (* creates ?m : nat as a shelved goal *)
 
-   .. coqtop:: out
+      Goal forall p n m : nat, n = p -> p = m -> n = m.
+      intros x y z H1 H2.
+      eapply eq_trans. (* creates ?y : nat as a shelved goal *)
+
+   .. rocqtop:: out
 
       Unshelve. (* moves the shelved goals into focus--not needed and usually not done *)
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
-      3-4: apply 0.  (* assigns values to ?x and ?m *)
+      3: apply 0.  (* assigns value to ?y *)
 
 .. extracted from Gallina extensions chapter
 
@@ -224,7 +221,7 @@ Explicit display of existential instances for pretty-printing
    context of an existential variable is instantiated at each of the
    occurrences of the existential variable.  Off by default.
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Check (fun x y => _) 0 1.
 
@@ -247,7 +244,7 @@ between variables introduced by term binding as well as those
 introduced by tactic binding. The expression `tacexpr` can be any tactic
 expression as described in :ref:`ltac`.
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Definition foo (x : nat) : nat := ltac:(exact x).
 

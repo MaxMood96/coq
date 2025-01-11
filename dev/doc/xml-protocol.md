@@ -8,7 +8,7 @@ protocol that coqtop and IDEs use to communicate. The protocol first appeared
 with Coq 8.5, and is used by CoqIDE, [vscoq](https://github.com/coq-community/vscoq/), and other user interfaces.
 
 A somewhat out-of-date description of the async state machine is
-[documented here](https://github.com/ejgallego/jscoq/blob/v8.10/etc/notes/coq-notes.md).
+[documented here](https://github.com/ejgallego/jscoq/blob/v8.16/etc/notes/coq-notes.md).
 OCaml types for the protocol can be found in the [`ide/protocol/interface.ml` file](/ide/protocol/interface.ml).
 
 Changes to the XML protocol are documented as part of [`dev/doc/changes.md`](/dev/doc/changes.md).
@@ -100,27 +100,25 @@ Adds a toplevel command (e.g. vernacular, definition, tactic) to the given state
 
 ```html
 <call val="Add">
-  <call val="Add">
+  <pair>
     <pair>
       <pair>
         <pair>
-          <pair>
-            <string>${command}</string>
-            <int>${editId}</int>
-          </pair>
-          <pair>
-            <state_id val="${stateId}"/>
-            <bool val="${verbose}"/>
-          </pair>
+          <string>${command}</string>
+          <int>${editId}</int>
         </pair>
-        <int>${bp}</int>
+        <pair>
+          <state_id val="${stateId}"/>
+          <bool val="${verbose}"/>
+        </pair>
       </pair>
-      <pair>
-        <int>${line_nb}</int>
-        <int>${bol_pos}</int>
-      </pair>
+      <int>${bp}</int>
     </pair>
-  </call>
+    <pair>
+      <int>${line_nb}</int>
+      <int>${bol_pos}</int>
+    </pair>
+  </pair>
 </call>
 ```
 
@@ -153,17 +151,21 @@ state that should become the next tip.
 * Failure:
   - Syntax error. Error offsets are byte offsets (not character offsets) with respect to the start of the sentence, starting at 0.
   ```html
-  <value val="fail"
-      loc_s="${startOffsetOfError}"
-      loc_e="${endOffsetOfError}">
+  <value val="fail">
     <state_id val="${stateId}"/>
+    <option val="none|some">${loc}</option>
     <richpp>${errorMessage}</richpp>
   </value>
   ```
   - Another kind of error, for example, Qed with a pending goal.	
   ```html
-  <value val="fail"><state_id val="${stateId}"/><richpp>${errorMessage}</richpp></value>
+  <value val="fail"><state_id val="${stateId}"/><option val="some">${loc}</option><richpp>${errorMessage}</richpp></value>
   ```
+
+  Note that IDEs may need to convert byte offsets passed in the four position fields of the
+  location to character offsets to correctly handle multi-byte characters. Also, due to
+  asynchronous evaluation, line number fields of locations may need to be adjusted
+  if the sentence has moved since it was sent to Coqtop.
 
 -------------------------------
 
@@ -196,8 +198,9 @@ Moves current tip to `${stateId}`, such that commands may be added to the new st
 ```
 * Failure: If `stateId` is in an error-state and cannot be jumped to, `errorFreeStateId` is the parent state of `stateId` that should be edited instead.
 ```html
-<value val="fail" loc_s="${startOffsetOfError}" loc_e="${endOffsetOfError}">
+<value val="fail">
   <state_id val="${errorFreeStateId}"/>
+  <option val="none|some">${loc}</option>
   ${errorMessage}
 </value>
 ```
@@ -209,21 +212,18 @@ Moves current tip to `${stateId}`, such that commands may be added to the new st
 ```html
 <call val="Init"><option val="none"/></call>
 ```
-* With options. Looking at
-  [ide_slave.ml](https://github.com/coq/coq/blob/c5d0aa889fa80404f6c291000938e443d6200e5b/ide/ide_slave.ml#L355),
-  it seems that `options` is just the name of a script file, whose path
-  is added via `Add LoadPath` to the initial state.
+* With options:
 ```html
 <call val="Init">
   <option val="some">
-    <string>${options}</string>
+    <string>${v_file}.v</string>
   </option>
 </call>
 ```
-Providing the script file enables Coq to use .aux files created during
-compilation. Those file contain timing information that allow Coq to
-choose smartly between asynchronous and synchronous processing of
-proofs.
+Providing the script file `$v_file.v` enables Coq to use the `.$v_file.aux`
+file created during compilation. Those file contain timing information
+that allow Coq to choose smartly between asynchronous and synchronous
+processing of proofs.
 
 #### *Returns*
 * The initial stateId (not associated with a sentence)
@@ -926,13 +926,19 @@ Ex: `status = "Idle"` or `status = "proof: myLemmaName"` or `status = "Dead"`
   </feedback_content>
 </feedback>
 ```
+* <a name="location">Location</a>, a Coq location (`Loc.t`)
+```xml
+   <loc start="${start_offset}" stop="${stop_offset}
+        line_nb="${start_line}" bol_pos="${begin_of_start_line_offset}"
+        line_nb_last="${end_line}" bol_pos_last="${begin_of_end_line_offset}"
+```
 
-* <a name="feedback-custom">Custom</a>. A feedback message that Coq plugins can use to return structured results, including results from Ltac profiling. Optionally, `startPos` and `stopPos` define a range of offsets in the document that the message refers to; otherwise, they will be 0. `customTag` is intended as a unique string that identifies what kind of payload is contained in `customXML`.
+* <a name="feedback-custom">Custom</a>. A feedback message that Coq plugins can use to return structured results, including results from Ltac profiling. `customTag` is intended as a unique string that identifies what kind of payload is contained in `customXML`. An optional location may be attached if present in the message.
 ```xml
 <feedback object="state" route="0">
   <state_id val="${stateId}"/>
   <feedback_content val="custom">
-    <loc start="${startPos}" stop="${stopPos}"/>
+    <option val="none|some">${loc}</option>
     <string>${customTag}</string>
     ${customXML}
   </feedback_content>

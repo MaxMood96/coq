@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -28,7 +28,7 @@ val add_kn_delta_resolver :
   KerName.t -> KerName.t -> delta_resolver -> delta_resolver
 
 val add_inline_delta_resolver :
-  KerName.t -> (int * constr Univ.univ_abstracted option) -> delta_resolver -> delta_resolver
+  KerName.t -> (int * constr UVars.univ_abstracted option) -> delta_resolver -> delta_resolver
 
 val add_delta_resolver : delta_resolver -> delta_resolver -> delta_resolver
 
@@ -131,7 +131,7 @@ val subst_kn :
   substitution -> KerName.t -> KerName.t
 
 val subst_con :
-  substitution -> Constant.t -> Constant.t * constr Univ.univ_abstracted option
+  substitution -> Constant.t -> Constant.t * constr UVars.univ_abstracted option
 
 val subst_pcon :
   substitution -> pconstant -> pconstant
@@ -150,3 +150,4 @@ val replace_mp_in_kn : ModPath.t -> ModPath.t -> KerName.t -> KerName.t
 (** [subst_mps sub c] performs the substitution [sub] on all kernel
    names appearing in [c] *)
 val subst_mps : substitution -> constr -> constr
+val subst_mps_list : substitution list -> constr -> constr

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -56,6 +56,13 @@ let exists_dir dir =
   let dir = if Sys.os_type = "Win32" then strip_trailing_slash dir else dir in
   try Sys.is_directory dir with Sys_error _ -> false
 
+let rec mkdir dir =
+  if not (exists_dir dir) then
+    begin
+      mkdir (Filename.dirname dir);
+      Unix.mkdir dir 0o755;
+    end
+
 let apply_subdir f path name =
   (* we avoid all files and subdirs starting by '.' (e.g. .svn) *)
   (* as well as skipped files like CVS, ... *)
@@ -67,7 +74,7 @@ let apply_subdir f path name =
     | Unix.S_REG -> f (FileRegular name)
     | _ -> ()
 
-let readdir dir = try Sys.readdir dir with any -> [||]
+let readdir dir = try Sys.readdir dir with Sys_error _ -> [||]
 
 let process_directory f path =
   Array.iter (apply_subdir f path) (readdir path)
@@ -218,6 +225,21 @@ let is_in_system_path filename =
     warn_path_not_found ();
     false
 
+let warn_using_current_directory =
+  CWarnings.create ~name:"default-output-directory" ~category:CWarnings.CoreCategories.filesystem
+    Pp.(fun s ->
+           strbrk "Output directory is unset, using \"" ++ str s ++ str "\"." ++ spc () ++
+           strbrk "Use command line option \"-output-directory to set a default directory.")
+
+let get_output_path filename =
+  if not (Filename.is_relative filename) then filename
+  else match !Flags.output_directory with
+  | None ->
+    let pwd = Sys.getcwd () in
+    warn_using_current_directory pwd;
+    Filename.concat pwd filename
+  | Some dir -> Filename.concat dir filename
+
 let error_corrupted file s =
   CErrors.user_err (str file ++ str ": " ++ str s ++ str ". Try to rebuild it.")
 
@@ -241,17 +263,17 @@ type magic_number_error = {filename: string; actual: int32; expected: int32}
 exception Bad_magic_number of magic_number_error
 exception Bad_version_number of magic_number_error
 
-let with_magic_number_check f a =
+let with_magic_number_check ?loc f a =
   try f a
   with
   | Bad_magic_number {filename=fname; actual; expected} ->
-    CErrors.user_err
+    CErrors.user_err ?loc
     (str"File " ++ str fname ++ strbrk" has bad magic number " ++
     (str @@ Int32.to_string actual) ++ str" (expected " ++ (str @@ Int32.to_string expected) ++ str")." ++
     spc () ++
     strbrk "It is corrupted or was compiled with another version of Coq.")
   | Bad_version_number {filename=fname;actual=actual;expected=expected} ->
-    CErrors.user_err
+    CErrors.user_err ?loc
     (str"File " ++ str fname ++ strbrk" has bad version number " ++
     (str @@ Int32.to_string actual) ++ str" (expected " ++ (str @@ Int32.to_string expected) ++ str")." ++
     spc () ++
@@ -290,6 +312,8 @@ let output_int64 ch n =
 
 type time = {real: float; user: float; system: float; }
 type duration = time
+
+let empty_duration = { real = 0.; user = 0.; system = 0. }
 
 let get_time () =
   let t = Unix.times ()  in
@@ -352,11 +376,53 @@ let fmt_transaction_result x =
   in
   str msg ++ fmt_duration duration ++ str msg2
 
+type instruction_count = (Int64.t, string) Result.t
+
+let instruction_count_add c1 c2 =
+  match (c1, c2) with
+  | (Ok i1, Ok i2) -> Ok (Int64.add i1 i2)
+  | (Error _, _) -> c1
+  | (_, Error _) -> c2
+
+type 'a instructions_result =
+  (('a * instruction_count), (Exninfo.iexn * instruction_count)) Result.t
+
+let instructions_between ~c_start ~c_end =
+  match (c_start, c_end) with
+  | (Error _, _) -> c_start
+  | (_, Error _) -> c_end
+  | (Ok c0, Ok c1) -> Ok (Int64.sub c1 c0)
+
+let count_instructions f x =
+  let c_start = Instr.read_counter () in
+  try
+    let y = f x in
+    let c_end = Instr.read_counter () in
+    Ok(y, instructions_between ~c_start ~c_end)
+  with e ->
+    let exn = Exninfo.capture e in
+    let c_end = Instr.read_counter () in
+    Error(exn, instructions_between ~c_start ~c_end)
+
+let fmt_instructions_result r =
+  let (failing, count, status) =
+    match r with
+    | Ok(_, count) -> ("", count, " (successful)")
+    | Error(_, count) -> ("failing ", count, " (failure)"   )
+  in
+  match count with
+  | Ok i ->
+      str "Finished " ++ str failing ++ str "transaction in " ++ int64 i ++
+      str " instructions" ++ str status
+  | Error m ->
+      str "Finished " ++ str failing ++
+      str "transaction with instruction count error \"" ++
+      str m ++ str "\"" ++ str status
+
 (* We use argv.[0] as we don't want to resolve symlinks *)
-let get_toplevel_path ?(byte=Sys.(backend_type = Bytecode)) top =
+let get_toplevel_path top =
   let open Filename in
   let dir = if String.equal (basename Sys.argv.(0)) Sys.argv.(0)
             then "" else dirname Sys.argv.(0) ^ dir_sep in
   let exe = if Sys.(os_type = "Win32" || os_type = "Cygwin") then ".exe" else "" in
-  let eff = if byte then ".byte" else ".opt" in
-  dir ^ top ^ eff ^ exe
+  dir ^ top ^ exe

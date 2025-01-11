@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -48,7 +48,7 @@ let load_files filenames =
   let add f =
     selected_filenames := f::!selected_filenames in
   let warn_default_not_found () =
-    let dirs = Minilib.coqide_data_dirs () in
+    let dirs = Minilib.rocqide_data_dirs () in
     Ideutils.warning Format.(
         asprintf
           "@[Warning: the file 'ide/default.bindings' was not found in:@\n @[<v>%a@]@]."

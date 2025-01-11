@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,14 +8,14 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-(** * Declarative part of the interface of CoqIDE calls to Coq *)
+(** * Declarative part of the interface of CoqIDE calls to Rocq *)
 
 (** * Generic structures *)
 
 type raw = bool
 type verbose = bool
 
-(** The type of coqtop goals *)
+(** The type of rocqtop goals *)
 type goal = {
   goal_id : string;
   (** Unique goal identifier *)
@@ -106,7 +106,7 @@ type goal_flags = {
   gf_given_up : bool;
 }
 
-(** A named object in Coq. [coq_object_qualid] is the shortest path defined for
+(** A named object in Rocq. [coq_object_qualid] is the shortest path defined for
     the user. [coq_object_prefix] is the missing part to recover the fully
     qualified name, i.e [fully_qualified = coq_object_prefix + coq_object_qualid].
     [coq_object_object] is the actual content of the object. *)
@@ -133,7 +133,7 @@ type db_continue_opt =
 
 (** Calls result *)
 
-type location = (int * int) option (* start and end of the error *)
+type location = Loc.t option
 type state_id = Stateid.t
 type route_id = Feedback.route_id
 
@@ -148,7 +148,7 @@ type 'a value =
 
 type ('a, 'b) union = ('a, 'b) Util.union
 
-(* Request/Reply message protocol between Coq and CoqIDE *)
+(* Request/Reply message protocol between Rocq and CoqIDE *)
 
 (**  [add ((((s,eid),(sid,v)), bp), (line_nb, bol_pos) ] adds the phrase [s] with edit id [eid]
      on top of the current edit position (that is asserted to be [sid]).
@@ -172,7 +172,7 @@ type edit_at_rty = (unit, state_id * (state_id * state_id)) union
 
 (** [query s id] executes [s] at state [id].
 
-    query used to reply with the contents of Coq's console output, and
+    query used to reply with the contents of Rocq's console output, and
     has been deprecated in favor of sending the query answers as
     feedback. It will be removed in a future version of the protocol.
 *)

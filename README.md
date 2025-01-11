@@ -1,16 +1,20 @@
 # Coq
 
 [![GitLab CI][gitlab-badge]][gitlab-link]
-[![GitHub CI][action-badge]][action-link]
+[![GitHub macOS CI][gh-macos-badge]][gh-macos-link]
+[![GitHub Windows CI][gh-win-badge]][gh-win-link]
 [![Zulip][zulip-badge]][zulip-link]
 [![Discourse][discourse-badge]][discourse-link]
 [![DOI][doi-badge]][doi-link]
 
-[gitlab-badge]: https://gitlab.com/coq/coq/badges/master/pipeline.svg
-[gitlab-link]: https://gitlab.com/coq/coq/commits/master
+[gitlab-badge]: https://gitlab.inria.fr/coq/coq/badges/master/pipeline.svg
+[gitlab-link]: https://gitlab.inria.fr/coq/coq/commits/master
 
-[action-badge]: https://github.com/coq/coq/workflows/GitHub%20CI/badge.svg?branch=master
-[action-link]: https://github.com/coq/coq/actions?query=workflow:"GitHub%20CI"
+[gh-macos-badge]: https://github.com/coq/coq/actions/workflows/ci-macos.yml/badge.svg
+[gh-macos-link]: https://github.com/coq/coq/actions/workflows/ci-macos.yml
+
+[gh-win-badge]: https://github.com/coq/coq/actions/workflows/ci-windows.yml/badge.svg
+[gh-win-link]: https://github.com/coq/coq/actions/workflows/ci-windows.yml
 
 [discourse-badge]: https://img.shields.io/badge/Discourse-forum-informational.svg
 [discourse-link]: https://coq.discourse.group/
@@ -29,35 +33,11 @@ environment for semi-interactive development of machine-checked proofs.
 
 [![latest packaged version(s)][repology-badge]][repology-link]
 
-[![Arch package][arch-badge]][arch-link]
-[![Chocolatey package][chocolatey-badge]][chocolatey-link]
-[![Conda package][conda-badge]][conda-link]
-[![Homebrew package][homebrew-badge]][homebrew-link]
-[![nixpkgs unstable package][nixpkgs-badge]][nixpkgs-link]
-
 [![Docker Hub package][dockerhub-badge]][dockerhub-link]
 [![latest dockerized version][coqorg-badge]][coqorg-link]
 
 [repology-badge]: https://repology.org/badge/latest-versions/coq.svg
 [repology-link]: https://repology.org/metapackage/coq/versions
-
-[arch-badge]: https://repology.org/badge/version-for-repo/arch/coq.svg
-[arch-link]: https://www.archlinux.org/packages/community/x86_64/coq/
-
-[chocolatey-badge]: https://repology.org/badge/version-for-repo/chocolatey/coq.svg
-[chocolatey-link]: https://chocolatey.org/packages/Coq
-
-[conda-badge]: https://img.shields.io/conda/vn/conda-forge/coq.svg?label="Conda%20package"
-[conda-link]: https://github.com/conda-forge/coq-feedstock
-
-[homebrew-badge]: https://repology.org/badge/version-for-repo/homebrew/coq.svg
-[homebrew-link]: https://formulae.brew.sh/formula/coq
-
-[macports-badge]: https://repology.org/badge/version-for-repo/macports/coq.svg
-[macports-link]: https://www.macports.org/ports.php?by=name&substr=coq
-
-[nixpkgs-badge]: https://repology.org/badge/version-for-repo/nix_unstable/coq.svg
-[nixpkgs-link]: https://nixos.org/nixos/packages.html#coq
 
 [dockerhub-badge]: https://img.shields.io/badge/images%20on-Docker%20Hub-blue.svg
 [dockerhub-link]: https://hub.docker.com/r/coqorg/coq#supported-tags "Supported tags on Docker Hub"

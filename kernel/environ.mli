@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,6 +11,7 @@
 open Names
 open Constr
 open Univ
+open UVars
 open Declarations
 
 (** Unsafe environments. We define here a datatype for environments.
@@ -69,14 +70,30 @@ type env = private {
   env_globals       : Globals.t;
   env_named_context : named_context_val; (* section variables *)
   env_rel_context   : rel_context_val;
-  env_nb_rel        : int;
   env_universes : UGraph.t;
-  env_universes_lbound : UGraph.Bound.t;
-  irr_constants : Cset_env.t;
-  irr_inds : Indset_env.t;
+  env_qualities : Sorts.QVar.Set.t;
+  symb_pats : rewrite_rule list Cmap_env.t;
   env_typing_flags  : typing_flags;
+  vm_library : Vmlibrary.t;
   retroknowledge : Retroknowledge.retroknowledge;
+  rewrite_rules_allowed : bool;
+  (** Allow rewrite rules (breaks e.g. SR) *)
+
+  (** caches *)
+  env_nb_rel        : int;
+  irr_constants : Sorts.relevance Cmap_env.t
+(** [irr_constants] is a cache of the relevances which are not Relevant.
+    In other words, [const_relevance == Option.default Relevant (find_opt con irr_constants)]. *);
+  irr_inds : Sorts.relevance Indmap_env.t
+(** [irr_inds] is a cache of the relevances which are not Relevant. cf [irr_constants]. *);
+  constant_hyps : Names.Id.Set.t Names.Cmap_env.t
+(** Cache section variables depended on by each constant. Not present -> depends on nothing. *);
+  inductive_hyps : Names.Id.Set.t Names.Mindmap_env.t
+(** Cache section variables depended on by each inductive. Not present -> depends on nothing. *);
 }
+
+type rewrule_not_allowed = Symb | Rule
+exception RewriteRulesNotAllowed of rewrule_not_allowed
 
 val oracle : env -> Conv_oracle.oracle
 val set_oracle : env -> Conv_oracle.oracle -> env
@@ -86,8 +103,6 @@ val eq_named_context_val : named_context_val -> named_context_val -> bool
 val empty_env : env
 
 val universes     : env -> UGraph.t
-val universes_lbound : env -> UGraph.Bound.t
-val set_universes_lbound : env -> UGraph.Bound.t -> env
 val rel_context   : env -> Constr.rel_context
 val named_context : env -> Constr.named_context
 val named_context_val : env -> named_context_val
@@ -197,6 +212,8 @@ val evaluable_constant : Constant.t -> env -> bool
 
 val mem_constant : Constant.t -> env -> bool
 
+val add_rewrite_rules : (Constant.t * rewrite_rule) list -> env -> env
+
 (** New-style polymorphism *)
 val polymorphic_constant  : Constant.t -> env -> bool
 val polymorphic_pconstant : pconstant -> env -> bool
@@ -212,16 +229,17 @@ val type_in_type_constant : Constant.t -> env -> bool
 type const_evaluation_result =
   | NoBody
   | Opaque
-  | IsPrimitive of Univ.Instance.t * CPrimitives.t
+  | IsPrimitive of Instance.t * CPrimitives.t
+  | HasRules of Instance.t * bool * rewrite_rule list
 exception NotEvaluableConst of const_evaluation_result
 
 val constant_type : env -> Constant.t puniverses -> types constrained
 
 val constant_value_and_type : env -> Constant.t puniverses ->
-  constr option * types * Univ.Constraints.t
+  constr option * types * Constraints.t
 (** The universe context associated to the constant, empty if not
     polymorphic *)
-val constant_context : env -> Constant.t -> Univ.AbstractContext.t
+val constant_context : env -> Constant.t -> AbstractContext.t
 
 (* These functions should be called under the invariant that [env]
    already contains the constraints corresponding to the constant
@@ -230,24 +248,26 @@ val constant_value_in : env -> Constant.t puniverses -> constr
 val constant_type_in : env -> Constant.t puniverses -> types
 val constant_opt_value_in : env -> Constant.t puniverses -> constr option
 
+val is_symbol : env -> Constant.t -> bool
 val is_primitive : env -> Constant.t -> bool
 val get_primitive : env -> Constant.t -> CPrimitives.t option
 
 val is_array_type : env -> Constant.t -> bool
 val is_int63_type : env -> Constant.t -> bool
 val is_float64_type : env -> Constant.t -> bool
+val is_string_type : env -> Constant.t -> bool
 val is_primitive_type : env -> Constant.t -> bool
 
 
 (** {6 Primitive projections} *)
 
 (** Checks that the number of parameters is correct. *)
-val lookup_projection : Names.Projection.t -> env -> types
+val lookup_projection : Names.Projection.t -> env -> Sorts.relevance * types
 
 (** Anomaly when not a primitive record or invalid proj_arg. *)
-val get_projection : env -> inductive -> proj_arg:int -> Names.Projection.Repr.t
+val get_projection : env -> inductive -> proj_arg:int -> Names.Projection.Repr.t * Sorts.relevance
 
-val get_projections : env -> inductive -> Names.Projection.Repr.t array option
+val get_projections : env -> inductive -> (Names.Projection.Repr.t * Sorts.relevance) array option
 
 (** {5 Inductive types } *)
 val lookup_mind_key : MutInd.t -> env -> mind_key
@@ -262,7 +282,7 @@ val mem_mind : MutInd.t -> env -> bool
 
 (** The universe context associated to the inductive, empty if not
     polymorphic *)
-val mind_context : env -> MutInd.t -> Univ.AbstractContext.t
+val mind_context : env -> MutInd.t -> AbstractContext.t
 
 (** New-style polymorphism *)
 val polymorphic_ind  : inductive -> env -> bool
@@ -271,8 +291,30 @@ val type_in_type_ind : inductive -> env -> bool
 
 (** Old-style polymorphism *)
 val template_polymorphic_ind : inductive -> env -> bool
-val template_polymorphic_variables : inductive -> env -> Univ.Level.t list
 val template_polymorphic_pind : pinductive -> env -> bool
+
+(** {6 Changes of representation of Case nodes} *)
+
+(** Given an inductive type and its parameters, builds the context of the return
+    clause, including the inductive being eliminated. The additional binder
+    array is only used to set the names of the context variables, we use the
+    less general type to make it easy to use this function on Case nodes. *)
+val expand_arity : Declarations.mind_specif -> pinductive -> constr array ->
+  Name.t binder_annot array -> rel_context
+
+(** Given an inductive type and its parameters, builds the context of the return
+    clause, including the inductive being eliminated. The additional binder
+    array is only used to set the names of the context variables, we use the
+    less general type to make it easy to use this function on Case nodes. *)
+val expand_branch_contexts : Declarations.mind_specif -> UVars.Instance.t -> constr array ->
+  (Name.t binder_annot array * 'a) array -> rel_context array
+
+(** [instantiate_context u subst nas ctx] applies both [u] and [subst]
+  to [ctx] while replacing names using [nas] (order reversed). In particular,
+  assumes that [ctx] and [nas] have the same length. *)
+val instantiate_context : UVars.Instance.t -> Vars.substl -> Name.t binder_annot array ->
+  rel_context -> rel_context
+
 
 (** {6 Name quotients} *)
 
@@ -282,6 +324,7 @@ sig
   val equal : env -> t -> t -> bool
   val compare : env -> t -> t -> int
   val hash : env -> t -> int
+  val canonize : env -> t -> t
 end
 
 module QConstant : QNameS with type t = Constant.t
@@ -312,23 +355,26 @@ val lookup_modtype : ModPath.t -> env -> module_type_body
 
 (** {5 Universe constraints } *)
 
-val add_constraints : Univ.Constraints.t -> env -> env
+val add_constraints : Constraints.t -> env -> env
 (** Add universe constraints to the environment.
     @raise UniverseInconsistency. *)
 
-val check_constraints : Univ.Constraints.t -> env -> bool
+val check_constraints : Constraints.t -> env -> bool
 (** Check constraints are satifiable in the environment. *)
 
-val push_context : ?strict:bool -> Univ.UContext.t -> env -> env
+val push_context : ?strict:bool -> UContext.t -> env -> env
 (** [push_context ?(strict=false) ctx env] pushes the universe context to the environment.
     @raise UGraph.AlreadyDeclared if one of the universes is already declared. *)
 
-val push_context_set : ?strict:bool -> Univ.ContextSet.t -> env -> env
+val push_context_set : ?strict:bool -> ContextSet.t -> env -> env
 (** [push_context_set ?(strict=false) ctx env] pushes the universe
     context set to the environment. It does not fail even if one of the
     universes is already declared. *)
 
-val push_subgraph : Univ.ContextSet.t -> env -> env
+val push_floating_context_set : ContextSet.t -> env -> env
+(** Same as above but keep the universes floating for template. Do not use. *)
+
+val push_subgraph : ContextSet.t -> env -> env
 (** [push_subgraph univs env] adds the universes and constraints in
    [univs] to [env] as [push_context_set ~strict:false univs env], and
    also checks that they do not imply new transitive constraints
@@ -339,6 +385,8 @@ val set_impredicative_set : bool -> env -> env
 val set_type_in_type : bool -> env -> env
 val set_allow_sprop : bool -> env -> env
 val sprop_allowed : env -> bool
+val allow_rewrite_rules : env -> env
+val rewrite_rules_allowed : env -> bool
 
 val same_flags : typing_flags -> typing_flags -> bool
 
@@ -400,8 +448,14 @@ val remove_hyps : Id.Set.t -> (Constr.named_declaration -> Constr.named_declarat
 
 val is_polymorphic : env -> Names.GlobRef.t -> bool
 val is_template_polymorphic : env -> GlobRef.t -> bool
-val get_template_polymorphic_variables : env -> GlobRef.t -> Univ.Level.t list
 val is_type_in_type : env -> GlobRef.t -> bool
+
+(** {5 VM and native} *)
+
+val vm_library : env -> Vmlibrary.t
+val set_vm_library : Vmlibrary.t -> env -> env
+val link_vm_library : Vmlibrary.on_disk -> env -> env
+val lookup_vm_code : Vmlibrary.index -> env -> Vmemitcodes.to_patch
 
 (** Native compiler *)
 val no_link_info : link_info

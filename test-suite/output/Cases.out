@@ -18,7 +18,7 @@ Arguments t_rect (P f)%function_scope t
      : TT -> 0 = 0
 proj =
 fun (x y : nat) (P : nat -> Type) (def : P x) (prf : P y) =>
-match Nat.eq_dec x y with
+match eq_nat_dec x y with
 | left eqprf => match eqprf in (_ = z) return (P z) with
                 | eq_refl => def
                 end
@@ -31,8 +31,8 @@ foo =
 fix foo (A : Type) (l : list A) {struct l} : option A :=
   match l with
   | nil => None
-  | x0 :: nil => Some x0
-  | x0 :: (_ :: _) as l0 => foo A l0
+  | (x0 :: nil)%list => Some x0
+  | (x0 :: (_ :: _) as l0)%list => foo A l0
   end
      : forall A : Type, list A -> option A
 
@@ -102,31 +102,32 @@ Arguments lem3 k
   n, n0 := match x + 0 with
            | 0 | S _ => 0
            end : nat
-  e,
-  e0 := match x + 0 as y return (y = y) with
-        | 0 => eq_refl
-        | S n => eq_refl
-        end : x + 0 = x + 0
+  e, e0 :=
+    match x + 0 as y return (y = y) with
+    | 0 => eq_refl
+    | S n => eq_refl
+    end : x + 0 = x + 0
   n1, n2 := match x with
             | 0 | S _ => 0
             end : nat
   e1, e2 := match x return (x = x) with
             | 0 => eq_refl
             | S n => eq_refl
-            end : x = x
+            end
+    : x = x
   ============================
   x + 0 = 0
 1 goal
   
   p : nat
-  a,
-  a0 := match eq_refl as y in (_ = e) return (y = y /\ e = e) with
-        | eq_refl => conj eq_refl eq_refl
-        end : eq_refl = eq_refl /\ p = p
-  a1,
-  a2 := match eq_refl in (_ = e) return (p = p /\ e = e) with
-        | eq_refl => conj eq_refl eq_refl
-        end : p = p /\ p = p
+  a, a0 :=
+    match eq_refl as y in (_ = e) return (y = y /\ e = e) with
+    | eq_refl => conj eq_refl eq_refl
+    end : eq_refl = eq_refl /\ p = p
+  a1, a2 :=
+    match eq_refl in (_ = e) return (p = p /\ e = e) with
+    | eq_refl => conj eq_refl eq_refl
+    end : p = p /\ p = p
   ============================
   eq_refl = eq_refl
 fun x : comparison => match x with
@@ -260,3 +261,8 @@ silence this warning. [unused-pattern-matching-variable,default]
 File "./output/Cases.v", line 314, characters 3-4:
 Warning: Unused variable x might be a misspelled constructor. Use _ or _x to
 silence this warning. [unused-pattern-matching-variable,default]
+File "./output/Cases.v", line 325, characters 4-12:
+The command has indeed failed with message:
+Once notations are expanded, the resulting constructor true (in type bool) is
+expected to be applied to no arguments while it is actually applied to
+2 arguments.

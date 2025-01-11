@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -13,23 +13,23 @@ open Names
 open Constr
 open Term
 open Declarations
-open Univ
+open UVars
 open Cooking
 
 module NamedDecl = Context.Named.Declaration
-module RelDecl = Context.Rel.Declaration
 
 let lift_univs info univ_hyps = function
   | Monomorphic ->
-    assert (Univ.Instance.is_empty univ_hyps);
+    assert (UVars.Instance.is_empty univ_hyps);
     info, univ_hyps, Monomorphic
   | Polymorphic auctx ->
-    let info, n, auctx = lift_poly_univs info auctx in
+    let info, (qn, un), auctx = lift_poly_univs info auctx in
     let univ_hyps =
-      let open Univ.Instance in
-      let us = to_array univ_hyps in
-      let us = Array.sub us 0 (Array.length us - n) in
-      of_array us
+      let open UVars.Instance in
+      let qs, us = to_array univ_hyps in
+      let qs = Array.sub qs 0 (Array.length qs - qn) in
+      let us = Array.sub us 0 (Array.length us - un) in
+      of_array (qs,us)
     in
     info, univ_hyps, Polymorphic auctx
 
@@ -55,7 +55,7 @@ let cook_opaque_proofterm info c =
 (********************************)
 (* Discharging constant         *)
 
-let cook_constant env info cb =
+let cook_constant _env info cb =
   (* Adjust the info so that it is meaningful under the block of quantified universe binders *)
   let info, univ_hyps, univs = lift_univs info cb.const_univ_hyps cb.const_universes in
   let cache = create_cache info in
@@ -66,8 +66,8 @@ let cook_constant env info cb =
   | OpaqueDef o ->
     OpaqueDef (Opaqueproof.discharge_opaque info o)
   | Primitive _ -> CErrors.anomaly (Pp.str "Primitives cannot be cooked")
+  | Symbol _ -> CErrors.anomaly (Pp.str "Symbols cannot be cooked")
   in
-  let tps = Vmbytegen.compile_constant_body ~fail_on_error:false env univs body in
   let typ = abstract_as_type cache cb.const_type in
   let names = names_info info in
   let hyps = List.filter (fun d -> not (Id.Set.mem (NamedDecl.get_id d) names)) cb.const_hyps in
@@ -76,7 +76,7 @@ let cook_constant env info cb =
     const_univ_hyps = univ_hyps;
     const_body = body;
     const_type = typ;
-    const_body_code = tps;
+    const_body_code = ();
     const_universes = univs;
     const_relevance = cb.const_relevance;
     const_inline_code = cb.const_inline_code;
@@ -135,7 +135,7 @@ let cook_one_ind cache ~ntypes mip =
     mind_user_lc;
     mind_nrealargs = mip.mind_nrealargs;
     mind_nrealdecls = mip.mind_nrealdecls;
-    mind_kelim = mip.mind_kelim;
+    mind_squashed = mip.mind_squashed;
     mind_nf_lc;
     mind_consnrealargs = mip.mind_consnrealargs;
     mind_consnrealdecls = mip.mind_consnrealdecls;
@@ -174,22 +174,19 @@ let cook_inductive info mib =
     | None, None -> None, None
     | None, Some _ | Some _, None -> assert false
     | Some variance, Some sec_variance ->
+      (* no variance for qualities *)
+      let ulen  = snd (AbstractContext.size (universe_context_of_cooking_info info)) in
       let sec_variance, newvariance =
-        Array.chop (Array.length sec_variance - AbstractContext.size (universe_context_of_cooking_info info))
-          sec_variance
+        Array.chop (Array.length sec_variance - ulen) sec_variance
       in
       Some (Array.append newvariance variance), Some sec_variance
   in
   let mind_template = match mib.mind_template with
   | None -> None
-  | Some {template_param_levels=levels; template_context} ->
-      let sec_levels = CList.map_filter (fun d ->
-          if RelDecl.is_local_assum d then Some None
-          else None)
-          (rel_context_of_cooking_cache cache)
-      in
+  | Some {template_param_arguments=levels; template_context} ->
+      let sec_levels = List.make (Context.Rel.nhyps (rel_context_of_cooking_cache cache)) false in
       let levels = List.rev_append sec_levels levels in
-      Some {template_param_levels=levels; template_context}
+      Some {template_param_arguments=levels; template_context}
   in
   {
     mind_packets;

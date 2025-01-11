@@ -40,7 +40,7 @@ Notation "'tt'" := false : B_scope.
 
 Definition f (x : bool) := x.
 
-Arguments f x%A%B.
+Arguments f x%_A%_B.
 About f.
 
 Check f tt.
@@ -48,7 +48,7 @@ Set Printing All.
 Check f tt.
 Unset Printing All.
 
-Arguments f x%B%A.
+Arguments f x%_B%_A.
 About f.
 
 Check f tt.
@@ -78,3 +78,44 @@ Bind Scope B_scope with unit.  (* default: reset *)
 Definition g'' (x : unit) := x.
 
 About g''.
+
+Module SectionTest1.
+
+  Inductive A :=.
+  Inductive B :=.
+  Declare Scope X.
+  Section S.
+    Declare Scope Y.
+    Bind Scope X with A.
+    Bind Scope Y with B.
+    Definition f : A -> B -> A := fun x _ => x.
+    About f.
+  End S.
+  (* In section, Bind Scope do not survive the section nor have a persistent effect:
+     outside the section, f does not know any more about X and Y, even thoug X exists outside the section *)
+  About f.
+
+End SectionTest1.
+
+Module SectionTest2.
+
+  Inductive A :=.
+  Module M.
+    Declare Scope X.
+    Bind Scope X with A.
+  End M.
+  Module N.
+    Import M.
+    Section S.
+      Axiom f : A -> A.
+    End S.
+  End N.
+  (* In modules, Bind Scope has a persistent effect even if not imported:
+     f knows about X even if M not imported *)
+  About N.f.
+  Axiom g : A -> A.
+  (* Without the Import, Bind Scope has however no effect on declarations not
+     already aware of this binding *)
+  About g.
+
+End SectionTest2.

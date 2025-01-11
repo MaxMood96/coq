@@ -1,5 +1,5 @@
-Require Import Coq.Logic.FunctionalExtensionality.
-Require Import Coq.Program.Tactics.
+Require Import TestSuite.funext.
+Require Import Corelib.Program.Tactics.
 
 Global Set Primitive Projections.
 

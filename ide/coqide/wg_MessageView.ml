@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -40,6 +40,7 @@ class type message_view =
     (** Callback for the Ltac debugger *)
     method debug_prompt : Pp.t -> unit
 
+    method select_all : unit -> unit
     method has_selection : bool
     method get_selected_text : string
     method editable2 : bool
@@ -128,7 +129,6 @@ let message_view sid : message_view =
     buffer#move_mark `INSERT ~where:buffer#end_iter;
     let ins = buffer#get_iter_at_mark `INSERT in
     buffer#select_range ins ins;  (* avoid highlighting *)
-(*    Ideutils.push_info "Coq is stopped in the debugger"; needs work *)
     lines
   in
 
@@ -212,7 +212,8 @@ let message_view sid : message_view =
       end else if key_ev = return then begin
         let ins = buffer#get_iter_at_mark `INSERT in
         let cmd = buffer#get_text ~start:eoo ~stop:ins () in
-        add_msg (Fb (Feedback.Notice, Pp.str cmd));
+        (* save cmd but don't print a second time *)
+        msgs := (Fb (Feedback.Notice, Pp.str cmd), 0) :: !msgs;
         buffer#insert "\n";
         buffer#move_mark `INSERT ~where:buffer#end_iter;
         view#scroll_to_mark `INSERT; (* scroll to insertion point *)
@@ -256,6 +257,9 @@ let message_view sid : message_view =
 
     method set msg = self#clear; self#add msg
 
+    method select_all () =
+      if view#is_focus then
+        self#source_buffer#select_range self#source_buffer#start_iter self#source_buffer#end_iter;
     method has_selection = buffer#has_selection
     method get_selected_text =
       if buffer#has_selection then

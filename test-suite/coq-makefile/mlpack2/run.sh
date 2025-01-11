@@ -2,7 +2,7 @@
 
 . ../template/init.sh
 
-coq_makefile -f _CoqProject -o Makefile
+rocq makefile -f _CoqProject -o Makefile
 cat Makefile.conf
 make
 make html mlihtml
@@ -19,7 +19,6 @@ sort > desired <<EOT
 ./test/test.glob
 ./test/test.v
 ./test/test.vo
-./test/test_plugin.cmxs
 EOT
 (coqc -config | grep -q "NATIVE_COMPILER_DEFAULT=yes") || sed -i.bak '/\.coq-native/d' desired
 diff -u desired actual

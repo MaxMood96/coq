@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -53,6 +53,10 @@ val projection_nparams : Names.Constant.t -> int
 
 val is_projection : Names.Constant.t -> bool
 
+val projection_number : Environ.env -> Names.Constant.t -> int
+(** [projection_number env p] returns the position of the projection p in
+    the structure it corresponds to, counting from 0. *)
+
 end
 
 (** A canonical instance declares "canonical" conversion hints between
@@ -91,7 +95,7 @@ val compare : t -> t -> int
 val print : t -> Pp.t
 
 (** Return the form of the component of a canonical structure *)
-val of_constr : Environ.env -> Constr.t -> t * int option * Constr.t list
+val of_constr : Evd.evar_map -> EConstr.t -> t * int option * EConstr.t list
 
 end
 
@@ -127,7 +131,10 @@ val find :
     applied to term which is not a constructor. Used by evarconv not to
     unfold too much and lose a projection too early *)
 val is_open_canonical_projection :
+  ?metas:Reductionops.meta_handler ->
   Environ.env -> Evd.evar_map -> EConstr.t -> bool
+
+val print : Environ.env -> Evd.evar_map -> t -> Pp.t
 
 end
 
@@ -160,4 +167,8 @@ val mem : Names.Constant.t -> bool
 
 val find_opt : Names.Constant.t -> Names.Projection.Repr.t option
 
+val find_opt_with_relevance : Names.Constant.t * EConstr.EInstance.t
+  -> (Names.Projection.Repr.t * EConstr.ERelevance.t) option
+
+val is_transparent_constant : TransparentState.t -> Names.Constant.t -> bool
 end

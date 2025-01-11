@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -15,7 +15,7 @@
 
 (*i*)
 open Names
-open Univ
+open UVars
 open Util
 open Constr
 open Declarations
@@ -34,6 +34,7 @@ type namedobject =
   | Constant of constant_body
   | IndType of inductive * mutual_inductive_body
   | IndConstr of constructor * mutual_inductive_body
+  | Rules
 
 type namedmodule =
   | Module of module_body
@@ -76,6 +77,7 @@ let make_labmap mp list =
   let add_one (l,e) map =
    match e with
     | SFBconst cb -> { map with objs = Label.Map.add l (Constant cb) map.objs }
+    | SFBrules _ -> { map with objs = Label.Map.add l Rules map.objs }
     | SFBmind mib -> { map with objs = add_mib_nameobjects mp l mib map.objs }
     | SFBmodule mb -> { map with mods = Label.Map.add l (Module mb) map.mods }
     | SFBmodtype mtb -> { map with mods = Label.Map.add l (Modtype mtb) map.mods }
@@ -83,16 +85,13 @@ let make_labmap mp list =
   CList.fold_right add_one list empty_labmap
 
 let check_conv_error error why state poly pb env a1 a2 =
-  try
-    if poly then
-      try
-        let () = Conversion.default_conv pb env a1 a2 in
-        fst state
-      with NotConvertible -> error (IncompatiblePolymorphism (env, a1, a2))
-    else
-      Conversion.generic_conv pb ~l2r:false default_evar_handler TransparentState.full env state a1 a2
-  with NotConvertible -> error why
-     | UGraph.UniverseInconsistency e -> error (IncompatibleUniverses e)
+  if poly then match Conversion.default_conv pb env a1 a2 with
+  | Result.Ok () -> fst state
+  | Result.Error () ->  error (IncompatiblePolymorphism (env, a1, a2))
+  else match Conversion.generic_conv pb ~l2r:false TransparentState.full env state a1 a2 with
+  | Result.Ok state -> state
+  | Result.Error None -> error why
+  | Result.Error (Some e) -> error (IncompatibleUniverses e)
 
 let check_universes error env u1 u2 =
   match u1, u2 with
@@ -101,7 +100,7 @@ let check_universes error env u1 u2 =
     if not (UGraph.check_subtype (Environ.universes env) auctx2 auctx1) then
       error (IncompatibleConstraints { got = auctx1; expect = auctx2; } )
     else
-      Environ.push_context ~strict:false (Univ.AbstractContext.repr auctx2) env
+      Environ.push_context ~strict:false (UVars.AbstractContext.repr auctx2) env
   | Monomorphic, Polymorphic _ -> error (PolymorphicStatusExpected true)
   | Polymorphic _, Monomorphic -> error (PolymorphicStatusExpected false)
 
@@ -113,6 +112,11 @@ let check_variance error v1 v2 =
       error IncompatibleVariance
   | None, Some _ -> error (CumulativeStatusExpected true)
   | Some _, None -> error (CumulativeStatusExpected false)
+
+let squash_info_equal s1 s2 = match s1, s2 with
+  | AlwaysSquashed, AlwaysSquashed -> true
+  | SometimesSquashed s1, SometimesSquashed s2 -> Sorts.Quality.Set.equal s1 s2
+  | (AlwaysSquashed | SometimesSquashed _), _ -> false
 
 (* for now we do not allow reorderings *)
 
@@ -139,7 +143,8 @@ let check_inductive (cst, ustate) trace env mp1 l info1 mp2 mib2 subst1 subst2 r
     let check f test why = if not (test (f p1) (f p2)) then error why in
       check (fun p -> p.mind_consnames) (Array.equal Id.equal) NotSameConstructorNamesField;
       check (fun p -> p.mind_typename) Id.equal NotSameInductiveNameInBlockField;
-      check (fun p -> p.mind_kelim) Sorts.family_equal (NotConvertibleInductiveField p2.mind_typename);
+      check (fun p -> p.mind_squashed) (Option.equal squash_info_equal)
+        (NotConvertibleInductiveField p2.mind_typename);
       (* nf_lc later *)
       (* nf_arity later *)
       (* user_lc ignored *)
@@ -225,7 +230,7 @@ let check_constant (cst, ustate) trace env l info1 cb2 subst1 subst2 =
     check_conv err cst poly CUMUL env t1 t2
   in
   match info1 with
-    | IndType _ | IndConstr _ -> error DefinitionFieldExpected
+    | IndType _ | IndConstr _ | Rules -> error DefinitionFieldExpected
     | Constant cb1 ->
       let () = assert (List.is_empty cb1.const_hyps && List.is_empty cb2.const_hyps) in
       let cb1 = Declareops.subst_const_body subst1 cb1 in
@@ -240,18 +245,23 @@ let check_constant (cst, ustate) trace env l info1 cb2 subst1 subst2 =
       (* Now we check the bodies:
          - A transparent constant can only be implemented by a compatible
            transparent constant.
+         - A primitive cannot be implemented.
+           (We could try to allow implementing with the same primitive,
+            but for some reason we get cb1.const_body = Def,
+            without some use case there is no motivation to solve this.)
          - In the signature, an opaque is handled just as a parameter:
            anything of the right type can implement it, even if bodies differ.
       *)
       (match cb2.const_body with
-        | Primitive _ | Undef _ | OpaqueDef _ -> cst
-        | Def c2 ->
-          (match cb1.const_body with
-            | Primitive _ | Undef _ | OpaqueDef _ -> error NotConvertibleBodyField
-            | Def c1 ->
-              (* NB: cb1 might have been strengthened and appear as transparent.
-                 Anyway [check_conv] will handle that afterwards. *)
-              check_conv NotConvertibleBodyField cst poly CONV env c1 c2))
+       | Undef _ | OpaqueDef _ -> cst
+       | Primitive _ | Symbol _ -> error NotConvertibleBodyField
+       | Def c2 ->
+         (match cb1.const_body with
+          | Primitive _ | Undef _ | OpaqueDef _ | Symbol _ -> error NotConvertibleBodyField
+          | Def c1 ->
+            (* NB: cb1 might have been strengthened and appear as transparent.
+               Anyway [check_conv] will handle that afterwards. *)
+            check_conv NotConvertibleBodyField cst poly CONV env c1 c2))
 
 let rec check_modules state trace env msb1 msb2 subst1 subst2 =
   let mty1 = module_type_of_module msb1 in
@@ -268,6 +278,8 @@ and check_signatures (cst, ustate) trace env mp1 sig1 mp2 sig2 subst1 subst2 res
         | SFBmind mib2 ->
             check_inductive (cst, ustate) trace env mp1 l (get_obj mp1 map1 l)
               mp2 mib2 subst1 subst2 reso1 reso2
+        | SFBrules _ ->
+            error_signature_mismatch trace l NoRewriteRulesSubtyping
         | SFBmodule msb2 ->
             begin match get_mod mp1 map1 l with
               | Module msb -> check_modules (cst, ustate) (Submodule l :: trace) env msb msb2 subst1 subst2
@@ -319,10 +331,10 @@ and check_modtypes (cst, ustate) trace env mtb1 mtb2 subst1 subst2 equiv =
           if Modops.is_functor body_t1 then env
           else add_module
             {mod_mp = mtb1.mod_mp;
-             mod_expr = Abstract;
+             mod_expr = ModBodyVal Abstract;
              mod_type = subst_signature subst1 body_t1;
              mod_type_alg = None;
-             mod_retroknowledge = ModBodyRK [];
+             mod_retroknowledge = ModBodyVal [];
              mod_delta = mtb1.mod_delta} env
         in
         check_structure cst ~nargs:(nargs + 1) env body_t1 body_t2 equiv subst1 subst2

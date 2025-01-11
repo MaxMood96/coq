@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -19,7 +19,7 @@ open EConstr
    It doesn't handle predicative universes too. *)
 
 (** The "polyprop" optional argument is used by the extraction to
-    disable "Prop-polymorphism", cf comment in [inductive.ml] *)
+    disable "Prop-polymorphism" *)
 
 (** The "lax" optional argument provides a relaxed version of
     [get_type_of] that won't raise any anomaly but RetypeError instead *)
@@ -28,6 +28,7 @@ type retype_error
 exception RetypeError of retype_error
 
 val get_type_of :
+  ?metas:(Constr.metavariable -> types option) ->
   ?polyprop:bool -> ?lax:bool -> env -> evar_map -> constr -> types
 
 (** No-evar version of [get_type_of] *)
@@ -57,7 +58,20 @@ val reinterpret_get_type_of : src:Names.Id.t -> env -> evar_map -> constr -> typ
 
 val print_retype_error : retype_error -> Pp.t
 
-val relevance_of_term : env -> evar_map -> constr -> Sorts.relevance
-val relevance_of_type : env -> evar_map -> types -> Sorts.relevance
-val relevance_of_sort : evar_map -> ESorts.t -> Sorts.relevance
-val relevance_of_sort_family : evar_map -> Sorts.family -> Sorts.relevance
+val relevance_of_projection_repr : env -> Names.Projection.Repr.t EConstr.puniverses -> ERelevance.t
+
+val relevance_of_term : env -> evar_map -> constr -> ERelevance.t
+val relevance_of_type : env -> evar_map -> types -> ERelevance.t
+val relevance_of_sort : ESorts.t -> ERelevance.t
+val relevance_of_sort_family : evar_map -> Sorts.family -> ERelevance.t
+
+val is_term_irrelevant : env -> Evd.evar_map -> Evd.econstr -> bool
+
+(** The "polyprop" optional argument above controls
+    the "Prop-polymorphism". By default, it is allowed.
+    But when "polyprop=false", the following exception is raised
+    when a polymorphic singleton inductive type becomes Prop due to
+    parameter instantiation. This is used by the Ocaml extraction,
+    which cannot handle (yet?) Prop-polymorphism. *)
+
+exception SingletonInductiveBecomesProp of Names.inductive

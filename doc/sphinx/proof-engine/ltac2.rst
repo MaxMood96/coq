@@ -3,43 +3,6 @@
 Ltac2
 =====
 
-The |Ltac| tactic language is probably one of the ingredients of the success of
-Coq, yet it is at the same time its Achilles' heel. Indeed, |Ltac|:
-
-- has often unclear semantics
-- is very non-uniform due to organic growth
-- lacks expressivity (data structures, combinators, types, ...)
-- is slow
-- is error-prone and fragile
-- has an intricate implementation
-
-Following the need of users who are developing huge projects relying
-critically on Ltac, we believe that we should offer a proper modern language
-that features at least the following:
-
-- at least informal, predictable semantics
-- a type system
-- standard programming facilities (e.g., datatypes)
-
-This new language, called Ltac2, is described in this chapter. It is still
-experimental but we nonetheless encourage users to start testing it,
-especially wherever an advanced tactic language is needed. The previous
-implementation of Ltac, described in the previous chapter, will be referred to
-as Ltac1.
-
-Current limitations include:
-
-- There are a number of tactics that are not yet supported in Ltac2 because
-  the interface OCaml and/or Ltac2 notations haven't been written.  See
-  :ref:`defining_tactics`.
-
-- Missing usability features such as:
-
-  - Printing functions are limited and awkward to use.  Only a few data types are
-    printable.
-
-- Error messages may be cryptic.
-
 .. _ltac2_design:
 
 General design
@@ -47,8 +10,8 @@ General design
 
 There are various alternatives to Ltac1, such as Mtac or Rtac for instance.
 While those alternatives can be quite different from Ltac1, we designed
-Ltac2 to be as close as reasonably possible to Ltac1, while fixing the
-aforementioned defects.
+Ltac2 to be as close as reasonably possible to Ltac1, while fixing its
+:ref:`defects <ltac_defects>`.
 
 In particular, Ltac2 is:
 
@@ -59,7 +22,7 @@ In particular, Ltac2 is:
   * together with the Hindley-Milner type system
 
 - a language featuring meta-programming facilities for the manipulation of
-  Coq-side terms
+  Rocq-side terms
 - a language featuring notation facilities to help write palatable scripts
 
 We describe these in more detail in the remainder of this document.
@@ -77,14 +40,14 @@ that ML constitutes a sweet spot in PL design, as it is relatively expressive
 while not being either too lax (unlike dynamic typing) nor too strict
 (unlike, say, dependent types).
 
-The main goal of Ltac2 is to serve as a meta-language for Coq. As such, it
+The main goal of Ltac2 is to serve as a meta-language for Rocq. As such, it
 naturally fits in the ML lineage, just as the historical ML was designed as
 the tactic language for the LCF prover. It can also be seen as a general-purpose
-language, by simply forgetting about the Coq-specific features.
+language, by simply forgetting about the Rocq-specific features.
 
 Sticking to a standard ML type system can be considered somewhat weak for a
-meta-language designed to manipulate Coq terms. In particular, there is no
-way to statically guarantee that a Coq term resulting from an Ltac2
+meta-language designed to manipulate Rocq terms. In particular, there is no
+way to statically guarantee that a Rocq term resulting from an Ltac2
 computation will be well-typed. This is actually a design choice, motivated
 by backward compatibility with Ltac1. Instead, well-typedness is deferred to
 dynamic checks, allowing many primitive functions to fail whenever they are
@@ -99,7 +62,7 @@ by a value.
 
 Use the following command to import Ltac2:
 
-.. coqtop:: in
+.. rocqtop:: in
 
    From Ltac2 Require Import Ltac2.
 
@@ -154,12 +117,12 @@ One can define new types with the following commands.
       | [ {? {? %| } {+| @tac2alg_constructor } } ]
       | [ .. ]
       | %{ {? {+; @tac2rec_field } {? ; } } %}
-      tac2alg_constructor ::= @ident
-      | @ident ( {*, @ltac2_type } )
+      tac2alg_constructor ::= {* #[ {+, @attribute } ] } @ident
+      | {* #[ {+, @attribute } ] } @ident ( {*, @ltac2_type } )
       tac2rec_field ::= {? mutable } @ident : @ltac2_type
 
    :n:`:=`
-     Defines a type with with an explicit set of constructors
+     Defines a type with an explicit set of constructors
 
    :n:`::=`
      Extends an existing open variant type, a special kind of variant type whose constructors are not
@@ -174,6 +137,9 @@ One can define new types with the following commands.
 
    :n:`with @tac2typ_def`
      Permits definition of mutually recursive type definitions.
+
+   In :n:`@tac2alg_constructor`, :n:`attribute` supports :attr:`deprecated` (without `use`)
+   and :attr:`warn`.
 
    Each production of :token:`tac2typ_knd` defines one of four possible kinds
    of definitions, respectively: alias, variant, open variant and record types.
@@ -192,6 +158,28 @@ One can define new types with the following commands.
    Records are product types with named fields and eliminated by projection.
    Likewise they can be recursive if the `rec` flag is set.
 
+.. attr:: abstract
+   :name: abstract
+
+   Types declared with this attribute are made abstract at the end of
+   the current module. This makes it possible to enforce invariants.
+
+   .. example::
+
+      .. rocqtop:: in
+
+         Module PositiveInt.
+           #[abstract] Ltac2 Type t := int.
+
+           Ltac2 make (x:int) : t := if Int.le 0 x then x else Control.throw (Invalid_argument None).
+           Ltac2 get (x:t) : int := x.
+         End PositiveInt.
+
+      .. rocqtop:: all
+
+         Ltac2 Eval PositiveInt.get (PositiveInt.make 3).
+         Fail Ltac2 Eval PositiveInt.get (PositiveInt.make -1).
+
 .. cmd:: Ltac2 @ external @ident : @ltac2_type := @string__plugin @string__function
    :name: Ltac2 external
 
@@ -208,11 +196,11 @@ Ltac2 provides over 150 API functions that provide various capabilities.  These
 are declared with :cmd:`Ltac2 external` in :n:`lib/coq/user-contrib/Ltac2/*.v`.
 For example, `Message.print` defined in `Message.v` is used to print messages:
 
-.. coqtop:: none
+.. rocqtop:: none
 
    Goal True.
 
-.. coqtop:: all abort
+.. rocqtop:: all abort
 
    Message.print (Message.of_string "fully qualified calls").
    From Ltac2 Require Import Message.
@@ -230,7 +218,7 @@ user to bind a variable and match on it at the same time, in the usual ML style.
 
 There is dedicated syntax for list and array literals.
 
-.. insertprodn ltac2_expr ltac2_tactic_atom
+.. insertprodn ltac2_expr ltac2_atom
 
 .. prodn::
    ltac2_expr ::= @ltac2_expr5 ; @ltac2_expr
@@ -254,12 +242,12 @@ There is dedicated syntax for list and array literals.
    | [ {*; @ltac2_expr5 } ]
    | %{ @ltac2_expr0 with {? {+; @tac2rec_fieldexpr } {? ; } } %}
    | %{ {? {+; @tac2rec_fieldexpr } {? ; } } %}
-   | @ltac2_tactic_atom
+   | @ltac2_atom
    tac2rec_fieldpats ::= @tac2rec_fieldpat ; {? @tac2rec_fieldpats }
    | @tac2rec_fieldpat ;
    | @tac2rec_fieldpat
    tac2rec_fieldpat ::= @qualid {? := @tac2pat1 }
-   ltac2_tactic_atom ::= @integer
+   ltac2_atom ::= @integer
    | @string
    | @qualid
    | @ @ident
@@ -271,6 +259,10 @@ The non-terminal :production:`lident` designates identifiers starting with a
 lowercase letter.
 
 :n:`'@term` is equivalent to :n:`open_constr:(@term)`.
+
+Use :n:`@ltac2_expr0 .( @qualid )` to access record fields and
+:n:`@ltac2_expr0 .( @qualid ) := @ltac2_expr5` to modify
+mutable record fields.
 
 Record expressions and patterns support "punning": in
 :n:`@tac2rec_fieldexpr` and :n:`@tac2rec_fieldpat`, omitting the
@@ -315,19 +307,25 @@ Ltac2 Definitions
    The previous value of the binding can be optionally accessed using the `as`
    binding syntax.
 
+   The effect of this command is limited to the current section or module.
+   When not in a section, importing the module containing this command
+   applies the redefinition again.
+   In other words it acts according to :attr:`local` in sections and
+   :attr:`export` otherwise (but explicit locality is not supported).
+
    .. example:: Dynamic nature of mutable cells
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          Ltac2 mutable x := true.
-         Ltac2 y := x.
-         Ltac2 Eval y.
+         Ltac2 y () := x.
+         Ltac2 Eval y ().
          Ltac2 Set x := false.
-         Ltac2 Eval y.
+         Ltac2 Eval y ().
 
    .. example:: Interaction with recursive calls
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          Ltac2 mutable rec f b := if b then 0 else f true.
          Ltac2 Set f := fun b => if b then 1 else f true.
@@ -336,9 +334,11 @@ Ltac2 Definitions
          Ltac2 Eval (f false).
 
       In the definition, the `f` in the body is resolved statically
-      because the definition is marked recursive. In the first re-definition,
-      the `f` in the body is resolved dynamically. This is witnessed by
-      the second re-definition.
+      because the definition is marked recursive. It is equivalent to
+      `Ltac2 mutable f x := let rec g b := if b then 0 else g true in g x`
+      (alpha renaming the internal `f` to `g` to make the behavior clearer).
+      In the first re-definition, the `f` in the body is resolved dynamically.
+      This is witnessed by the second re-definition.
 
 Printing Ltac2 tactics
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -347,6 +347,18 @@ Printing Ltac2 tactics
 
    :cmd:`Print` can print defined Ltac2 tactics and can avoid printing
    other objects by using `Print Ltac2`.
+
+.. cmd:: Print Ltac2 Type @qualid
+
+   Prints the definitions of ltac2 types.
+
+.. cmd:: Ltac2 Globalize @ltac2_expr
+
+   Prints the result of resolving notations in the given expression.
+
+.. cmd:: Ltac2 Check @ltac2_expr
+
+   Typechecks the given expression and prints the result.
 
 .. cmd:: Print Ltac2 Signatures
 
@@ -424,9 +436,9 @@ Standard IO
 The Ltac2 language features non-backtracking IO, notably mutable data and
 printing operations.
 
-Mutable fields of records can be modified using the set syntax. Likewise,
-built-in types like `string` and `array` feature imperative assignment. See
-modules `String` and `Array` respectively.
+Mutable fields of records and built-in types like `string` and `array`
+feature imperative assignment. See modules `String` and `Array`
+respectively.
 
 A few printing primitives are provided in the `Message` module for
 displaying information to the user.
@@ -530,7 +542,7 @@ is a proper one or referring to something in the Ltac context.
 
 Likewise, in Ltac1, constr parsing is implicit, so that ``foo 0`` is
 not ``foo`` applied to the Ltac integer expression ``0`` (|Ltac| does have a
-notion of integers, though it is not first-class), but rather the Coq term
+notion of integers, though it is not first-class), but rather the Rocq term
 :g:`Datatypes.O`.
 
 The implicit parsing is confusing to users and often gives unexpected results.
@@ -563,13 +575,13 @@ Built-in quotations
 The current implementation recognizes the following built-in quotations:
 
 - ``ident``, which parses identifiers (type ``Init.ident``).
-- ``constr``, which parses Coq terms and produces an-evar free term at runtime
+- ``constr``, which parses Rocq terms and produces an-evar free term at runtime
   (type ``Init.constr``).
-- ``open_constr``, which parses Coq terms and produces a term potentially with
+- ``open_constr``, which parses Rocq terms and produces a term potentially with
   holes at runtime (type ``Init.constr`` as well).
-- ``preterm``, which parses Coq terms and produces a value which must
+- ``preterm``, which parses Rocq terms and produces a value which must
   be typechecked with ``Constr.pretype`` (type ``Init.preterm``).
-- ``pat``, which parses Coq patterns and produces a pattern used for term
+- ``pat``, which parses Rocq patterns and produces a pattern used for term
   matching (type ``Init.pattern``).
 - ``reference``  Qualified names
   are globalized at internalization into the corresponding global reference,
@@ -614,7 +626,7 @@ Term Antiquotations
 Syntax
 ++++++
 
-One can also insert Ltac2 code into Coq terms, similar to what is possible in
+One can also insert Ltac2 code into Rocq terms, similar to what is possible in
 Ltac1.
 
 .. prodn::
@@ -626,7 +638,7 @@ for their side-effects.
 Semantics
 +++++++++
 
-A quoted Coq term is interpreted in two phases, internalization and
+A quoted Rocq term is interpreted in two phases, internalization and
 evaluation.
 
 - Internalization is part of the static semantics, that is, it is done at Ltac2
@@ -634,23 +646,23 @@ evaluation.
 - Evaluation is part of the dynamic semantics, that is, it is done when
   a term gets effectively computed by Ltac2.
 
-Note that typing of Coq terms is a *dynamic* process occurring at Ltac2
+Note that typing of Rocq terms is a *dynamic* process occurring at Ltac2
 evaluation time, and not at Ltac2 typing time.
 
 Static semantics
 ****************
 
-During internalization, Coq variables are resolved and antiquotations are
-type checked as Ltac2 terms, effectively producing a ``glob_constr`` in Coq
+During internalization, Rocq variables are resolved and antiquotations are
+type checked as Ltac2 terms, effectively producing a ``glob_constr`` in Rocq
 implementation terminology. Note that although it went through the
 type checking of **Ltac2**, the resulting term has not been fully computed and
-is potentially ill-typed as a runtime **Coq** term.
+is potentially ill-typed as a runtime **Rocq** term.
 
 .. example::
 
    The following term is valid (with type `unit -> constr`), but will fail at runtime:
 
-   .. coqtop:: in
+   .. rocqtop:: in
 
       Ltac2 myconstr () := constr:(nat -> 0).
 
@@ -661,18 +673,18 @@ of the corresponding term expression.
 
    The following will type check, with type `constr`.
 
-   .. coqdoc::
+   .. rocqdoc::
 
-      let x := '0 in constr:(1 + ltac2:(exact x))
+      let x := '0 in constr:(1 + ltac2:(exact $x))
 
 Beware that the typing environment of antiquotations is **not**
-expanded by the Coq binders from the term.
+expanded by the Rocq binders from the term.
 
   .. example::
 
      The following Ltac2 expression will **not** type check::
 
-     `constr:(fun x : nat => ltac2:(exact x))`
+     `constr:(fun x : nat => ltac2:(exact $x))`
      `(* Error: Unbound variable 'x' *)`
 
 There is a simple reason for that, which is that the following expression would
@@ -689,24 +701,24 @@ as follows.
 
 `constr:(fun x : nat => ltac2:(exact (hyp @x)))`
 
-This pattern is so common that we provide dedicated Ltac2 and Coq term notations
+This pattern is so common that we provide dedicated Ltac2 and Rocq term notations
 for it.
 
 - `&x` as an Ltac2 expression expands to `hyp @x`.
-- `&x` as a Coq constr expression expands to
+- `&x` as a Rocq constr expression expands to
   `ltac2:(Control.refine (fun () => hyp @x))`.
 
-In the special case where Ltac2 antiquotations appear inside a Coq term
+In the special case where Ltac2 antiquotations appear inside a Rocq term
 notation, the notation variables are systematically bound in the body
 of the tactic expression with type `Ltac2.Init.preterm`. Such a type represents
-untyped syntactic Coq expressions, which can by typed in the
+untyped syntactic Rocq expressions, which can by typed in the
 current context using the `Ltac2.Constr.pretype` function.
 
 .. example::
 
    The following notation is essentially the identity.
 
-   .. coqtop:: in
+   .. rocqtop:: in
 
       Notation "[ x ]" := ltac2:(let x := Ltac2.Constr.pretype x in exact $x) (only parsing).
 
@@ -745,9 +757,28 @@ the notation section.
 
 .. prodn:: term += $@lident
 
-In a Coq term, writing :g:`$x` is semantically equivalent to
+or equivalently
+
+.. prodn:: term += $constr:@lident
+
+In a Rocq term, writing :g:`$x` is semantically equivalent to
 :g:`ltac2:(Control.refine (fun () => x))`, up to re-typechecking. It allows to
-insert in a concise way an Ltac2 variable of type :n:`constr` into a Coq term.
+insert in a concise way an Ltac2 variable of type :n:`constr` into a Rocq term.
+
+Similarly variables of type `preterm` have an antiquotation
+
+.. prodn:: term += $preterm:@lident
+
+It is equivalent to pretyping the preterm with the appropriate typing constraint.
+
+Variables of type `pattern` have an antiquotation
+
+.. prodn:: term += $pattern:@lident
+
+Its use is only allowed when producing a pattern, i.e.
+`pattern:($pattern:x -> True)` is allowed but
+`constr:($pattern:x -> True)` is not allowed. Conversely `constr` and `preterm`
+antiquotations are not allowed when producing a pattern.
 
 Match over terms
 ~~~~~~~~~~~~~~~~
@@ -780,7 +811,7 @@ in a less hard-wired way.
    In the :token:`ltac2_match_pattern`\s, metavariables have the form :n:`?@ident`, whereas
    in the :n:`@ltac2_expr`\s, the question mark is omitted.
 
-   .. todo how does this differ from the 1-2 other unification routines elsewhere in Coq?
+   .. todo how does this differ from the 1-2 other unification routines elsewhere in Rocq?
 
    Matching is non-linear: if a
    metavariable occurs more than once, each occurrence must match the same
@@ -878,12 +909,12 @@ one from Ltac1, except that it requires the goal to be focused.
    These lines define a `msg` tactic that's used in several examples as a more-succinct
    alternative to `print (to_string "...")`:
 
-   .. coqtop:: in
+   .. rocqtop:: in
 
       From Ltac2 Require Import Message.
       Ltac2 msg x := print (of_string x).
 
-   .. coqtop:: none
+   .. rocqtop:: none
 
       Goal True.
 
@@ -892,7 +923,7 @@ one from Ltac1, except that it requires the goal to be focused.
    in a matching branch, it will try to match on subsequent branches.  Note that
    :n:`'@term` below is equivalent to :n:`open_constr:(@term)`.
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       Fail lazy_match! 'True with
       | True => msg "branch 1"; fail
@@ -913,7 +944,7 @@ one from Ltac1, except that it requires the goal to be focused.
    :tacn:`match!` tactics are only evaluated once, whereas :tacn:`multi_match!`
    tactics may be evaluated more than once if the following constructs trigger backtracking:
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       Fail match! 'True with
       | True => msg "branch 1"
@@ -921,7 +952,7 @@ one from Ltac1, except that it requires the goal to be focused.
       end ;
       msg "branch A"; fail.
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       Fail multi_match! 'True with
       | True => msg "branch 1"
@@ -939,7 +970,7 @@ one from Ltac1, except that it requires the goal to be focused.
    Notice the :tacn:`idtac` prints ``(z + 1)`` while the :tacn:`pose` substitutes
    ``(x + 1)``.
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       match! constr:(fun x => (x + 1) * 3) with
       | fun z => ?y * 3 => print (of_constr y); pose (fun z: nat => $y * 5)
@@ -954,14 +985,14 @@ one from Ltac1, except that it requires the goal to be focused.
    Internally "x <> y" is represented as "(~ (x = y))", which produces the
    first match.
 
-   .. coqtop:: in
+   .. rocqtop:: in
 
       Ltac2 f2 t := match! t with
                     | context [ (~ ?t) ] => print (of_constr t); fail
                     | _ => ()
                     end.
 
-   .. coqtop:: all abort
+   .. rocqtop:: all abort
 
       f2 constr:((~ True) <> (~ False)).
 
@@ -1068,7 +1099,7 @@ Match over goals
    Hypotheses are matched from the last hypothesis (which is by default the newest
    hypothesis) to the first until the :tacn:`apply` succeeds.
 
-   .. coqtop:: all abort
+   .. rocqtop:: all abort
 
       Goal forall A B : Prop, A -> B -> (A->B).
       intros.
@@ -1084,7 +1115,7 @@ Match over goals
 
    Hypotheses are matched from the first hypothesis to the last until the :tacn:`apply` succeeds.
 
-   .. coqtop:: all abort
+   .. rocqtop:: all abort
 
       Goal forall A B : Prop, A -> B -> (A->B).
       intros.
@@ -1103,7 +1134,7 @@ Match over goals
    Observe that the number of permutations can grow as the factorial
    of the number of hypotheses and hypothesis patterns.
 
-   .. coqtop:: all abort
+   .. rocqtop:: all abort
 
       Goal forall A B : Prop, A -> B -> (A->B).
       intros A B H.
@@ -1183,20 +1214,32 @@ Notations
    side (before the `:=`) defines the syntax to recognize and gives formal parameter
    names for the syntactic values.  :n:`@integer` is the level of the notation.
    When the notation is used, the values are substituted
-   into the right-hand side.  The right-hand side is typechecked when the notation is used,
-   not when it is defined.  In the following example, `x` is the formal parameter name and
+   into the right-hand side.  In the following example, `x` is the formal parameter name and
    `constr` is its :ref:`syntactic class<syntactic_classes>`.  `print` and `of_constr` are
-   functions provided by Coq through `Message.v`.
+   functions provided by Rocq through `Message.v`.
+   (Also see :cmd:`Ltac2 Notation (abbreviation)`.)
+
+   .. flag:: Ltac2 Typed Notations
+
+      By default Ltac2 notations are typechecked at declaration time.
+      This assigns an expected type to notation arguments.
+
+      When a notation is declared with this flag unset, it is not
+      typechecked at declaration time and its expansion is typechecked
+      when it is used. This may allow slightly more flexible use of
+      the notation arguments at the cost of worse error messages when
+      incorrectly using the notation. It is not believed to be useful
+      in practice, please report any real use cases you find.
 
    .. todo "print" doesn't seem to pay attention to "Set Printing All"
 
    .. example:: Printing a :n:`@term`
 
-      .. coqtop:: none
+      .. rocqtop:: none
 
          Goal True.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          From Ltac2 Require Import Message.
          Ltac2 Notation "ex1" x(constr) := print (of_constr x).
@@ -1205,7 +1248,7 @@ Notations
       You can also print terms with a regular Ltac2 definition, but then the :n:`@term` must be in
       the quotation `constr:( … )`:
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          Ltac2 ex2 x := print (of_constr x).
          ex2 constr:(1+2).
@@ -1216,7 +1259,7 @@ Notations
 
    .. example:: Parsing a list of :n:`@term`\s
 
-      .. coqtop:: abort all
+      .. rocqtop:: abort all
 
          Ltac2 rec print_list x := match x with
          | a :: t => print (of_constr a); print_list t
@@ -1233,7 +1276,7 @@ Notations
 
       Assume we perform:
 
-      .. coqdoc::
+      .. rocqdoc::
 
          Ltac2 Notation "foo" c(thunk(constr)) ids(list0(ident)) := Bar.f c ids.
 
@@ -1259,15 +1302,16 @@ Notations
 Abbreviations
 ~~~~~~~~~~~~~
 
-.. cmd:: Ltac2 Notation {| @string | @ident } := @ltac2_expr
+.. cmd:: Ltac2 Notation @ident := @ltac2_expr
    :name: Ltac2 Notation (abbreviation)
 
    Introduces a special kind of notation, called an abbreviation,
    that does not add any parsing rules. It is similar in
-   spirit to Coq abbreviations (see :cmd:`Notation (abbreviation)`,
+   spirit to Rocq abbreviations (see :cmd:`Notation (abbreviation)`,
    insofar as its main purpose is to give an
    absolute name to a piece of pure syntax, which can be transparently referred to
    by this name as if it were a proper definition.
+   (See :cmd:`Ltac2 Notation` for the general description of notations.)
 
    The abbreviation can then be manipulated just like a normal Ltac2 definition,
    except that it is expanded at internalization time into the given expression.
@@ -1293,7 +1337,7 @@ Abbreviations
 Defining tactics
 ~~~~~~~~~~~~~~~~
 
-Built-in tactics (those defined in OCaml code in the Coq executable) and Ltac1 tactics,
+Built-in tactics (those defined in OCaml code in the Rocq executable) and Ltac1 tactics,
 which are defined in `.v` files, must be defined through notations.  (Ltac2 tactics can be
 defined with :cmd:`Ltac2`.
 
@@ -1301,7 +1345,7 @@ Notations for many but not all built-in tactics are defined in `Notations.v`, wh
 loaded with Ltac2.  The Ltac2 syntax for these tactics is often identical or very similar to the
 tactic syntax described in other chapters of this documentation.  These notations rely on tactic functions
 declared in `Std.v`.  Functions corresponding to some built-in tactics may not yet be defined in the
-Coq executable or declared in `Std.v`.  Adding them may require code changes to Coq or defining
+Rocq executable or declared in `Std.v`.  Adding them may require code changes to Rocq or defining
 workarounds through Ltac1 (described below).
 
 Two examples of syntax differences:
@@ -1316,11 +1360,12 @@ Two examples of syntax differences:
 
 Ltac1 tactics are not automatically available in Ltac2.  (Note that some of the tactics described
 in the documentation are defined with Ltac1.)
-You can make them accessible in Ltac2 with commands similar to the following:
+You can make them accessible in Ltac2 with commands similar to the following
+(the example requires the Stdlib library for the :tacn:`lia` tactic):
 
-.. coqtop:: in
+.. rocqtop:: in extra
 
-   From Coq Require Import Lia.
+   From Stdlib Require Import Lia.
    Local Ltac2 lia_ltac1 () := ltac1:(lia).
    Ltac2 Notation "lia" := lia_ltac1 ().
 
@@ -1333,7 +1378,7 @@ Syntactic classes
 ~~~~~~~~~~~~~~~~~
 
 The simplest syntactic classes in Ltac2 notations represent individual nonterminals
-from the Coq grammar.  Only a few selected nonterminals are available as syntactic classes.
+from the Rocq grammar.  Only a few selected nonterminals are available as syntactic classes.
 In addition, there are metasyntactic operations for describing
 more complex syntax, such as making an item optional or representing a list of items.
 When parsing, each syntactic class expression returns a value that's bound to a name in the
@@ -1504,6 +1549,10 @@ Other nonterminals that have syntactic classes are listed here.
         - :token:`ltac2_conversion`
         -
 
+      * - :n:`orient`
+        - :token:`q_orient`
+        - :n:`{? {| -> | <- } }`
+
       * - :n:`rewriting`
         - :token:`ltac2_oriented_rewriter`
         - :token:`oriented_rewriter`
@@ -1549,10 +1598,11 @@ Here is the syntax for the :n:`q_*` nonterminals:
 .. insertprodn ltac2_simple_intropattern ltac2_equality_intropattern
 
 .. prodn::
-   ltac2_simple_intropattern ::= @ltac2_naming_intropattern
-   | _
-   | @ltac2_or_and_intropattern
+   ltac2_simple_intropattern ::= @ltac2_simple_intropattern_closed {* % @term0 }
+   ltac2_simple_intropattern_closed ::= @ltac2_or_and_intropattern
    | @ltac2_equality_intropattern
+   | _
+   | @ltac2_naming_intropattern
    ltac2_naming_intropattern ::= ?@ident
    | ?$ @ident
    | ?
@@ -1602,6 +1652,7 @@ Here is the syntax for the :n:`q_*` nonterminals:
    | cofix
    | zeta
    | delta {? @ltac2_delta_reductions }
+   | head
    ltac2_delta_reductions ::= {? - } [ {+ @refglobal } ]
 
 .. insertprodn refglobal refglobal
@@ -1645,10 +1696,12 @@ Here is the syntax for the :n:`q_*` nonterminals:
    ltac2_conversion ::= @term
    | @term with @term
 
-.. insertprodn ltac2_oriented_rewriter ltac2_rewriter
+.. insertprodn q_rewriting ltac2_rewriter
 
 .. prodn::
-   ltac2_oriented_rewriter ::= {? {| -> | <- } } @ltac2_rewriter
+   q_rewriting ::= @ltac2_oriented_rewriter
+   ltac2_oriented_rewriter ::= {? @q_orient } @ltac2_rewriter
+   q_orient ::= {? {| -> | <- } }
    ltac2_rewriter ::= {? @natural } {? {| ? | ! } } @ltac2_constr_with_bindings
 
 .. insertprodn ltac2_for_each_goal ltac2_goal_tactics
@@ -1707,6 +1760,14 @@ Debug
 
    When this :term:`flag` is set, toplevel failures will be printed with a backtrace.
 
+Profiling
+---------
+
+.. flag:: Ltac2 In Ltac1 Profiling
+
+   When this :term:`flag` and :flag:`Ltac Profiling` are set, profiling data is gathered for Ltac2 via the
+   Ltac profiler. It is unset by default.
+
 Compatibility layer with Ltac1
 ------------------------------
 
@@ -1730,7 +1791,7 @@ Ltac1 **cannot** implicitly access variables from the Ltac2 scope, but this can
 be done with an explicit annotation on the :n:`ltac1:({* @ident } |- @ltac_expr)`
 quotation.  See :ref:`ltac2_built-in-quotations`.  For example:
 
-.. coqtop:: in
+.. rocqtop:: in
 
    Local Ltac2 replace_with (lhs: constr) (rhs: constr) :=
      ltac1:(lhs rhs |- replace lhs with rhs) (Ltac1.of_constr lhs) (Ltac1.of_constr rhs).
@@ -1783,12 +1844,12 @@ eagerly, if one wants to use it as an argument to a Ltac1 function, one has to
 resort to the good old :n:`idtac; ltac2:(foo)` trick. For instance, the code
 below will fail immediately and won't print anything.
 
-.. coqtop:: in
+.. rocqtop:: in
 
    From Ltac2 Require Import Ltac2.
    Set Default Proof Mode "Classic".
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Ltac mytac tac := idtac "I am being evaluated"; tac.
 
@@ -1811,7 +1872,7 @@ Use the `ltac2val` quotation to return values to Ltac1 from Ltac2.
 
 It has the same typing rules as `ltac2:()` except the expression must have type `Ltac2.Ltac1.t`.
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Import Constr.Unsafe.
 
@@ -1843,7 +1904,7 @@ Transition from Ltac1
 Owing to the use of a lot of notations, the transition should not be too
 difficult. In particular, it should be possible to do it incrementally. That
 said, we do *not* guarantee it will be a blissful walk either.
-Hopefully, owing to the fact Ltac2 is typed, the interactive dialogue with Coq
+Hopefully, owing to the fact Ltac2 is typed, the interactive dialogue with the Rocq Prover
 will help you.
 
 We list the major changes and the transition strategies hereafter.

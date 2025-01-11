@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,34 +12,37 @@ Require Export Notations.
 Require Export Logic.
 Require Export Datatypes.
 Require Export Specif.
-Require Coq.Init.Byte.
-Require Coq.Init.Decimal.
-Require Coq.Init.Hexadecimal.
-Require Coq.Init.Number.
-Require Coq.Init.Nat.
+Require Corelib.Init.Byte.
+Require Corelib.Init.Decimal.
+Require Corelib.Init.Hexadecimal.
+Require Corelib.Init.Number.
+Require Corelib.Init.Nat.
 Require Export Peano.
-Require Export Coq.Init.Wf.
-Require Export Coq.Init.Ltac.
-Require Export Coq.Init.Tactics.
-Require Export Coq.Init.Tauto.
+Require Export Corelib.Init.Wf.
+Require Export Corelib.Init.Ltac.
+Require Export Corelib.Init.Tactics.
+Require Export Corelib.Init.Tauto.
+Require Export Corelib.Init.Sumbool.
 (* Some initially available plugins. See also:
    - ltac_plugin (in Ltac)
    - tauto_plugin (in Tauto).
 *)
-Declare ML Module "cc_plugin:coq-core.plugins.cc".
-Declare ML Module "firstorder_plugin:coq-core.plugins.firstorder".
+Declare ML Module "rocq-runtime.plugins.cc_core".
+Declare ML Module "rocq-runtime.plugins.cc".
+Declare ML Module "rocq-runtime.plugins.firstorder_core".
+Declare ML Module "rocq-runtime.plugins.firstorder".
 
 (* Parsing / printing of hexadecimal numbers *)
-Arguments Nat.of_hex_uint d%hex_uint_scope.
-Arguments Nat.of_hex_int d%hex_int_scope.
+Arguments Nat.of_hex_uint d%_hex_uint_scope.
+Arguments Nat.of_hex_int d%_hex_int_scope.
 Number Notation Number.uint Number.uint_of_uint Number.uint_of_uint
   : hex_uint_scope.
 Number Notation Number.int Number.int_of_int Number.int_of_int
   : hex_int_scope.
 
 (* Parsing / printing of decimal numbers *)
-Arguments Nat.of_uint d%dec_uint_scope.
-Arguments Nat.of_int d%dec_int_scope.
+Arguments Nat.of_uint d%_dec_uint_scope.
+Arguments Nat.of_int d%_dec_int_scope.
 Number Notation Number.uint Number.uint_of_uint Number.uint_of_uint
   : dec_uint_scope.
 Number Notation Number.int Number.int_of_int Number.int_of_int
@@ -54,3 +57,14 @@ Export Byte.ByteSyntaxNotations.
 
 (* Default substrings not considered by queries like Search *)
 Add Search Blacklist "_subproof" "_subterm" "Private_".
+
+(* Dummy coercion used by the elaborator to leave a trace in its
+   result. When [x] is (reversible) coerced to [x'], the result
+   [reverse_coercion x' x], convertible to [x'] will still be displayed [x]
+   thanks to the reverse_coercion coercion. *)
+#[universes(polymorphic=yes)] Definition ReverseCoercionSource (T : Type) := T.
+#[universes(polymorphic=yes)] Definition ReverseCoercionTarget (T : Type) := T.
+#[warning="-uniform-inheritance", reversible=no, universes(polymorphic=yes)]
+Coercion reverse_coercion {T' T} (x' : T') (x : ReverseCoercionSource T)
+  : ReverseCoercionTarget T' := x'.
+Register reverse_coercion as core.coercion.reverse_coercion.

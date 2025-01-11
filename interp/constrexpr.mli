@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -20,16 +20,32 @@ type sort_name_expr =
   | CRawType of Univ.Level.t (** Universes like "foo.1" have no qualid form *)
 
 type univ_level_expr  = sort_name_expr Glob_term.glob_sort_gen
-type sort_expr = (Sorts.QVar.t option * (sort_name_expr * int) list) Glob_term.glob_sort_gen
 
-type instance_expr = univ_level_expr list
+type qvar_expr =
+  | CQVar of qualid
+  | CQAnon of Loc.t option
+  | CRawQVar of Sorts.QVar.t
+
+type quality_expr =
+  | CQConstant of Sorts.Quality.constant
+  | CQualVar of qvar_expr
+
+type relevance_expr =
+  | CRelevant | CIrrelevant
+  | CRelevanceVar of qvar_expr
+
+type relevance_info_expr = relevance_expr option
+
+type sort_expr = (qvar_expr option * (sort_name_expr * int) list Glob_term.glob_sort_gen)
+
+type instance_expr = quality_expr list * univ_level_expr list
 
 (** Constraints don't have anonymous universes *)
 type univ_constraint_expr = sort_name_expr * Univ.constraint_type * sort_name_expr
 
-type universe_decl_expr = (lident list, univ_constraint_expr list) UState.gen_universe_decl
+type universe_decl_expr = (lident list, lident list, univ_constraint_expr list) UState.gen_universe_decl
 type cumul_univ_decl_expr =
-  ((lident * Univ.Variance.t option) list, univ_constraint_expr list) UState.gen_universe_decl
+  (lident list, (lident * UVars.Variance.t option) list, univ_constraint_expr list) UState.gen_universe_decl
 
 type ident_decl = lident * universe_decl_expr option
 type cumul_ident_decl = lident * cumul_univ_decl_expr option
@@ -45,10 +61,17 @@ type entry_relative_level = LevelLt of entry_level | LevelLe of entry_level | Le
 type notation_entry = InConstrEntry | InCustomEntry of string
 
 (* A notation entry with the level where the notation lives *)
-type notation_entry_level = notation_entry * entry_level
+type notation_entry_level = {
+  notation_entry : notation_entry;
+  notation_level : entry_level;
+}
 
 (* Notation subentries, to be associated to the variables of the notation *)
-type notation_entry_relative_level = notation_entry * (entry_relative_level * side option)
+type notation_entry_relative_level = {
+  notation_subentry : notation_entry;
+  notation_relative_level : entry_relative_level;
+  notation_position : side option;
+}
 
 type notation_key = string
 
@@ -79,6 +102,9 @@ type binder_kind =
 
 type explicit_flag = bool (** true = with "@" *)
 
+type delimiter_depth = DelimOnlyTmpScope | DelimUnboundedScope
+(** shallow (%_) vs. deep (%) scope opening *)
+
 type prim_token =
   | Number of NumTok.Signed.t
   | String of string
@@ -97,15 +123,16 @@ type cases_pattern_expr_r =
                                   applied to arguments l2 *)
   | CPatPrim   of prim_token
   | CPatRecord of (qualid * cases_pattern_expr) list
-  | CPatDelimiters of string * cases_pattern_expr
+  | CPatDelimiters of delimiter_depth * string * cases_pattern_expr
   | CPatCast   of cases_pattern_expr * constr_expr
 and cases_pattern_expr = cases_pattern_expr_r CAst.t
 
 and kinded_cases_pattern_expr = cases_pattern_expr * Glob_term.binding_kind
 
 and cases_pattern_notation_substitution =
-    cases_pattern_expr list *     (* for constr subterms *)
-    cases_pattern_expr list list  (* for recursive notations *)
+    cases_pattern_expr list *      (* for cases_pattern subterms parsed as terms *)
+    cases_pattern_expr list list * (* for recursive notations parsed as terms*)
+    kinded_cases_pattern_expr list (* for cases_pattern subterms parsed as binders *)
 
 and constr_expr_r =
   | CRef     of qualid * instance_expr option
@@ -130,7 +157,7 @@ and constr_expr_r =
                  constr_expr * constr_expr
   | CIf of constr_expr * (lname option * constr_expr option)
          * constr_expr * constr_expr
-  | CHole   of Evar_kinds.t option * Namegen.intro_pattern_naming_expr
+  | CHole   of Evar_kinds.glob_evar_kind option
   | CGenarg of Genarg.raw_generic_argument
 
   (* because print for genargs wants to print directly the glob without an extern phase (??) *)
@@ -143,7 +170,7 @@ and constr_expr_r =
   | CNotation of notation_with_optional_scope option * notation * constr_notation_substitution
   | CGeneralization of Glob_term.binding_kind * constr_expr
   | CPrim of prim_token
-  | CDelimiters of string * constr_expr
+  | CDelimiters of delimiter_depth * string * constr_expr
   | CArray of instance_expr option * constr_expr array * constr_expr * constr_expr
 and constr_expr = constr_expr_r CAst.t
 
@@ -155,22 +182,23 @@ and branch_expr =
   (cases_pattern_expr list list * constr_expr) CAst.t
 
 and fix_expr =
-    lident * recursion_order_expr option *
-      local_binder_expr list * constr_expr * constr_expr
+  lident * relevance_info_expr
+  * fixpoint_order_expr option *
+  local_binder_expr list * constr_expr * constr_expr
 
 and cofix_expr =
-    lident * local_binder_expr list * constr_expr * constr_expr
+    lident * relevance_info_expr * local_binder_expr list * constr_expr * constr_expr
 
-and recursion_order_expr_r =
+and fixpoint_order_expr_r =
   | CStructRec of lident
   | CWfRec of lident * constr_expr
   | CMeasureRec of lident option * constr_expr * constr_expr option (** argument, measure, relation *)
-and recursion_order_expr = recursion_order_expr_r CAst.t
+and fixpoint_order_expr = fixpoint_order_expr_r CAst.t
 
 (* Anonymous defs allowed ?? *)
 and local_binder_expr =
-  | CLocalAssum   of lname list * binder_kind * constr_expr
-  | CLocalDef     of lname * constr_expr * constr_expr option
+  | CLocalAssum   of lname list * relevance_info_expr * binder_kind * constr_expr
+  | CLocalDef     of lname * relevance_info_expr * constr_expr * constr_expr option
   | CLocalPattern of cases_pattern_expr
 
 and constr_notation_substitution =

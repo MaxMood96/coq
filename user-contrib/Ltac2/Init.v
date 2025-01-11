@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,7 +8,9 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-Declare ML Module "ltac2_plugin:coq-core.plugins.ltac2".
+(* EJGA: Seems that Coq's findlib loader is not loading this correctly? *)
+Declare ML Module "rocq-runtime.plugins.ltac2".
+Declare ML Module "rocq-runtime.plugins.ltac2_ltac1".
 
 #[export] Set Default Proof Mode "Ltac2".
 
@@ -20,6 +22,7 @@ Ltac2 Type char.
 Ltac2 Type ident.
 Ltac2 Type uint63.
 Ltac2 Type float.
+Ltac2 Type pstring.
 
 (** Constr-specific built-in types *)
 Ltac2 Type meta.
@@ -40,6 +43,11 @@ Ltac2 Type message.
 Ltac2 Type ('a, 'b, 'c, 'd) format.
 Ltac2 Type exn := [ .. ].
 Ltac2 Type 'a array.
+
+(** Tuples *)
+
+Ltac2 fst (p:'a * 'b) : 'a := let (x,_) := p in x.
+Ltac2 snd (p:'a * 'b) : 'b := let (_,y) := p in y.
 
 (** Pervasive types *)
 
@@ -88,3 +96,6 @@ Ltac2 Type exn ::= [ Assertion_failure ].
 
 Ltac2 Type exn ::= [ Division_by_zero ].
 (** Int division by zero or modulus by zero *)
+
+Ltac2 Type exninfo.
+(** Information attached to an exception (e.g., backtrace). *)

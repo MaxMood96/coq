@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,7 +11,6 @@
 open CErrors
 open Util
 open Constr
-open Tactics
 
 open Utile
 
@@ -125,7 +124,7 @@ let mul = function
   | (Const n,q) when Q.(equal one) n -> q
   | (p,q) -> Mul(p,q)
 
-let gen_constant n = lazy (UnivGen.constr_of_monomorphic_global (Global.env ()) (Coqlib.lib_ref n))
+let gen_constant n = lazy (UnivGen.constr_of_monomorphic_global (Global.env ()) (Rocqlib.lib_ref n))
 
 let tpexpr  = gen_constant "plugins.ring.pexpr"
 let ttconst = gen_constant "plugins.ring.const"
@@ -533,9 +532,9 @@ let nsatz lpol =
 
 let return_term t =
   let a =
-    mkApp (UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Coqlib.lib_ref "core.eq.refl",[|tllp ();t|]) in
+    mkApp (UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Rocqlib.lib_ref "core.eq.refl",[|tllp ();t|]) in
   let a = EConstr.of_constr a in
-  generalize [a]
+  Generalize.generalize [a]
 
 let nsatz_compute t =
   let lpol =

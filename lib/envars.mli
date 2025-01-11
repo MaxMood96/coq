@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,6 +12,11 @@
     needed by Coq to run (such as coqlib). The values of these variables
     may come from different sources (shell environment variables,
     command line options, options set at the time Coq was build). *)
+
+val getenv_rocq : string -> string option
+(** [getenv_rocq name] returns the value of "ROCQ$name" if it exists,
+    otherwise the value of "COQ$name" if it exists and warns that it
+    is deprecated, otherwise [None]. *)
 
 (** [expand_path_macros warn s] substitutes environment variables
     in a string by their values. This function also takes care of

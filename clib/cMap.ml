@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -23,20 +23,22 @@ end
 
 module type S = Map.S
 
-module type ExtS =
+module type UExtS =
 sig
-  include CSig.MapS
-  module Set : CSig.SetS with type elt = key
+  include CSig.UMapS
+  module Set : CSig.USetS with type elt = key
   val get : key -> 'a t -> 'a
   val set : key -> 'a -> 'a t -> 'a t
   val modify : key -> (key -> 'a -> 'a) -> 'a t -> 'a t
   val domain : 'a t -> Set.t
   val bind : (key -> 'a) -> Set.t -> 'a t
-  val fold_left : (key -> 'a -> 'b -> 'b) -> 'a t -> 'b -> 'b
-  val fold_right : (key -> 'a -> 'b -> 'b) -> 'a t -> 'b -> 'b
   val height : 'a t -> int
   val filter_range : (key -> int) -> 'a t -> 'a t
+  val filter_map: (key -> 'a -> 'b option) -> 'a t -> 'b t (* in OCaml 4.11 *)
   val of_list : (key * 'a) list -> 'a t
+  val symmetric_diff_fold :
+    (key -> 'a option -> 'a option -> 'b -> 'b) ->
+    'a t -> 'a t -> 'b -> 'b
   module Smart :
   sig
     val map : ('a -> 'a) -> 'a t -> 'a t
@@ -45,10 +47,26 @@ sig
   module Monad(M : MonadS) :
   sig
     val fold : (key -> 'a -> 'b -> 'b M.t) -> 'a t -> 'b -> 'b M.t
-    val fold_left : (key -> 'a -> 'b -> 'b M.t) -> 'a t -> 'b -> 'b M.t
-    val fold_right : (key -> 'a -> 'b -> 'b M.t) -> 'a t -> 'b -> 'b M.t
     val mapi : (key -> 'a -> 'b M.t) -> 'a t -> 'b t M.t
   end
+end
+module type ExtS = sig
+  include CSig.MapS
+
+  module Set : CSig.SetS with type elt = key
+
+  include UExtS with type key := key and type 'a t := 'a t and module Set := Set
+
+  module Monad(M:MonadS) : sig
+    include module type of Monad(M)
+    val fold_left : (key -> 'a -> 'b -> 'b M.t) -> 'a t -> 'b -> 'b M.t
+    val fold_right : (key -> 'a -> 'b -> 'b M.t) -> 'a t -> 'b -> 'b M.t
+  end
+
+  val fold_left : (key -> 'a -> 'b -> 'b) -> 'a t -> 'b -> 'b
+  val fold_right : (key -> 'a -> 'b -> 'b) -> 'a t -> 'b -> 'b
+  val fold_left_map : (key -> 'a -> 'b -> 'b * 'c) -> 'a t -> 'b -> 'b * 'c t
+  val fold_right_map : (key -> 'a -> 'b -> 'b * 'c) -> 'a t -> 'b -> 'b * 'c t
 end
 
 module MapExt (M : Map.OrderedType) :
@@ -61,8 +79,14 @@ sig
   val bind : (M.t -> 'a) -> Set.Make(M).t -> 'a map
   val fold_left : (M.t -> 'a -> 'b -> 'b) -> 'a map -> 'b -> 'b
   val fold_right : (M.t -> 'a -> 'b -> 'b) -> 'a map -> 'b -> 'b
+  val fold_left_map : (M.t -> 'a -> 'b -> 'b * 'c) -> 'a map -> 'b -> 'b * 'c map
+  val fold_right_map : (M.t -> 'a -> 'b -> 'b * 'c) -> 'a map -> 'b -> 'b * 'c map
   val height : 'a map -> int
   val filter_range : (M.t -> int) -> 'a map -> 'a map
+  val filter_map: (M.t -> 'a -> 'b option) -> 'a map -> 'b map (* in OCaml 4.11 *)
+  val symmetric_diff_fold :
+    (M.t -> 'a option -> 'a option -> 'b -> 'b) ->
+    'a map -> 'a map -> 'b -> 'b
   val of_list : (M.t * 'a) list -> 'a map
   module Smart :
   sig
@@ -170,6 +194,22 @@ struct
     let accu = f k v (fold_right f r accu) in
     fold_right f l accu
 
+  let rec fold_left_map f (s : 'a map) accu = match map_prj s with
+  | MEmpty -> accu, map_inj MEmpty
+  | MNode {l; v=k; d=v; r; h} ->
+    let accu, l = fold_left_map f l accu in
+    let accu, v = f k v accu in
+    let accu, r = fold_left_map f r accu in
+    accu, map_inj (MNode {l; v=k; d=v; r; h})
+
+  let rec fold_right_map f (s : 'a map) accu = match map_prj s with
+  | MEmpty -> accu, map_inj MEmpty
+  | MNode {l; v=k; d=v; r; h} ->
+    let accu, r = fold_right_map f r accu in
+    let accu, v = f k v accu in
+    let accu, l = fold_right_map f l accu in
+    accu, map_inj (MNode {l; v=k; d=v; r; h})
+
   let height s = match map_prj s with
   | MEmpty -> 0
   | MNode {h;_} -> h
@@ -191,9 +231,62 @@ struct
           F.add v d m
     in aux F.empty (map_prj m)
 
+  let filter_map f m = (* Waiting for the optimized version in OCaml >= 4.11 *)
+    F.fold (fun k v accu ->
+        match f k v with
+        | None -> accu
+        | Some v' -> F.add k v' accu)
+      m F.empty
+
   let of_list l =
     let fold accu (x, v) = F.add x v accu in
     List.fold_left fold F.empty l
+
+  type 'a sequenced =
+    | End
+    | More of M.t * 'a * 'a F.t * 'a sequenced
+
+  let rec seq_cons m rest =
+    match map_prj m with
+    | MEmpty -> rest
+    | MNode {l; v; d; r; _ } -> seq_cons l (More (v, d, r, rest))
+
+  let rec fold_seq f acc = function
+    | End -> acc
+    | More (k, v, m, r) -> f k v @@ fold_seq f (F.fold f m acc) r
+
+  let move_to_acc (m, acc) = match map_prj m with
+    | MEmpty -> assert false
+    | MNode {l; v; d; r; _ } -> l, More (v, d, r, acc)
+
+  let rec symmetric_cons ((lm, la) as l) ((rm, ra) as r) =
+    if lm == rm then la, ra
+    else
+      let lh = height lm in
+      let rh = height rm in
+      if lh == rh then
+        symmetric_cons (move_to_acc l) (move_to_acc r)
+      else if lh < rh then
+        symmetric_cons l (move_to_acc r)
+      else
+        symmetric_cons (move_to_acc l) r
+
+  let symmetric_diff_fold f lm rm acc =
+    let rec aux s acc =
+      match s with
+      | End, rs -> fold_seq (fun k v -> f k None (Some v)) acc rs
+      | ls, End -> fold_seq (fun k v -> f k (Some v) None) acc ls
+      | (More (kl, vl, tl, rl) as ls), (More (kr, vr, tr, rr) as rs) ->
+        let cmp = M.compare kl kr in
+        if cmp == 0 then
+          let rem = aux (symmetric_cons (tl, rl) (tr, rr)) acc in
+          if vl == vr then rem
+          else f kl (Some vl) (Some vr) rem
+        else if cmp < 0 then
+          f kl (Some vl) None @@ aux (seq_cons tl rl, rs) acc
+        else
+          f kr None (Some vr) @@ aux (ls, seq_cons tr rr) acc
+    in aux (symmetric_cons (lm, End) (rm, End)) acc
 
   module Smart =
   struct

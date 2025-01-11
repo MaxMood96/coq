@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,7 +8,7 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-val revert_timer : Ideutils.timer
+val reload_timer : Ideutils.timer
 val autosave_timer : Ideutils.timer
 
 class type ops =
@@ -16,7 +16,7 @@ object
   method filename : string option
   method update_stats : unit
   method changed_on_disk : bool
-  method revert : ?parent:GWindow.window -> unit -> unit
+  method reload : ?parent:GWindow.window -> unit -> unit
   method auto_save : unit
   method save : string -> bool
   method saveas : ?parent:GWindow.window -> string -> bool

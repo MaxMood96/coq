@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -58,7 +58,7 @@ struct
      applications can be significantly slower.
 
      Documentation of this behaviour can be found at:
-     https://ocaml.janestreet.com/?q=node/30 *)
+     https://blog.janestreet.com/the-dangers-of-being-too-partial/ *)
 
   include Monad.Make(struct
     type 'a t = unit -> 'a
@@ -69,7 +69,7 @@ struct
     let map f a = (); fun () -> f (a ())
   end)
 
-  type 'a ref = 'a Util.pervasives_ref
+  type 'a ref = 'a Stdlib.ref
 
   let ignore a = (); fun () -> ignore (a ())
 

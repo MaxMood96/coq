@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -28,7 +28,7 @@ let cb = GData.clipboard Gdk.Atom.primary
 let status = GMisc.statusbar ()
 
 (* These functions seem confused:
-1. They should be per-session rather than global (e.g. for "Coq is computing")
+1. They should be per-session rather than global (e.g. for "Rocq is computing")
 2. I don't see how pushing and popping is particularly useful
    and there's no explanation of when to push/pop *)
 let push_info,pop_info,clear_info =
@@ -174,7 +174,20 @@ let ulen uni_ch =
   else if uni_ch < 0x10000 then 3
   else 4
 
-(** convert UTF-8 byte offset (used by Coq) to unicode offset (used by GTK buffer) *)
+(* workaround for lablgtk bug up to version 3.1.4 *)
+(* replaces: buffer#get_iter_at_byte ~line index *)
+(* see https://github.com/garrigue/lablgtk/pull/181 *)
+let get_iter_at_byte buffer ~line index =
+  let iter = buffer#get_iter_at_byte ~line 0 in
+  let rec adjust iter cnt =
+    if cnt <= 0 then
+      iter
+    else
+      adjust (iter#forward_char) (cnt - (ulen iter#char))
+  in
+  adjust iter index
+
+(** convert UTF-8 byte offset (used by Rocq) to unicode offset (used by GTK buffer) *)
 let byte_off_to_buffer_off buffer byte_off =
   let rec cvt iter cnt =
     if cnt <= 0 then
@@ -184,7 +197,7 @@ let byte_off_to_buffer_off buffer byte_off =
   in
   cvt (buffer#get_iter `START) byte_off
 
-(** convert unicode offset (used by GTK buffer) to UTF-8 byte offset (used by Coq) *)
+(** convert unicode offset (used by GTK buffer) to UTF-8 byte offset (used by Rocq) *)
 let buffer_off_to_byte_off (buffer : GText.buffer) uni_off =
   let rec cvt iter rv =
     if iter#offset <= 0 then
@@ -283,7 +296,7 @@ let filter_all_files () = GFile.filter
   ~name:"All"
   ~patterns:["*"] ()
 
-let filter_coq_files () =  GFile.filter
+let filter_rocq_files () =  GFile.filter
   ~name:"Coq source code"
   ~patterns:[ "*.v"] ()
 
@@ -299,7 +312,7 @@ let select_file_for_open ~title ?(filter=true) ?(multiple=false) ?parent ?filena
   file_chooser#add_select_button_stock `OPEN `OPEN ;
   if filter then
     begin
-      file_chooser#add_filter (filter_coq_files ());
+      file_chooser#add_filter (filter_rocq_files ());
       file_chooser#add_filter (filter_all_files ())
     end;
   file_chooser#set_default_response `OPEN;
@@ -328,7 +341,7 @@ let select_file_for_save ~title ?parent ?filename () =
   in
   file_chooser#add_button_stock `CANCEL `CANCEL ;
   file_chooser#add_select_button_stock `SAVE `SAVE ;
-  file_chooser#add_filter (filter_coq_files ());
+  file_chooser#add_filter (filter_rocq_files ());
   file_chooser#add_filter (filter_all_files ());
   file_chooser#set_do_overwrite_confirmation true;
   file_chooser#set_default_response `SAVE;
@@ -383,13 +396,13 @@ let stock_to_widget ?(size=`BUTTON) s =
          img#set_icon_size icon_size);
   img#coerce
 
-let custom_coqtop = ref None
+let custom_rocqtop = ref None
 
-let coqtop_path () =
-  let file = match !custom_coqtop with
+let rocqtop_path () =
+  let file = match !custom_rocqtop with
     | Some s -> s
     | None ->
-      match cmd_coqtop#get with
+      match cmd_rocqtop#get with
       | Some s -> s
       | None ->
         try
@@ -532,7 +545,7 @@ let url_for_keyword =
         let cin =
           try let index_urls = Filename.concat (List.find
             (fun x -> Sys.file_exists (Filename.concat x "index_urls.txt"))
-            (Minilib.coqide_data_dirs ())) "index_urls.txt" in
+            (Minilib.rocqide_data_dirs ())) "index_urls.txt" in
             open_in index_urls
           with Not_found -> raise_notrace Exit
         in

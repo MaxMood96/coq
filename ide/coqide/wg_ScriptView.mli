@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,7 +12,7 @@
 
 type source_view = [ Gtk.text_view | `sourceview ] Gtk.obj
 
-class script_view : source_view -> Coq.coqtop ->
+class script_view : source_view -> RocqDriver.rocqtop ->
 object
   inherit GSourceView3.source_view
   method undo : unit -> unit
@@ -24,6 +24,7 @@ object
   method set_right_margin_position : int -> unit
   method show_right_margin : bool
   method set_show_right_margin : bool -> unit
+  method select_all : unit -> unit
   method comment : unit -> unit
   method uncomment : unit -> unit
   method apply_unicode_binding : unit -> unit
@@ -33,7 +34,7 @@ object
   method clear_debugging_highlight : int -> int -> unit
 end
 
-val script_view : Coq.coqtop ->
+val script_view : RocqDriver.rocqtop ->
   ?source_buffer:GSourceView3.source_buffer ->
   ?draw_spaces:SourceView3Enums.source_draw_spaces_flags list ->
   ?auto_indent:bool ->

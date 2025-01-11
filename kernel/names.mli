@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -62,7 +62,7 @@ sig
   val print : t -> Pp.t
   (** Pretty-printer. *)
 
-  module Set : Set.S with type elt = t
+  module Set : Set.ExtS with type elt = t
   (** Finite sets of identifiers. *)
 
   module Map : Map.ExtS with type key = t and module Set := Set
@@ -115,12 +115,12 @@ end
 (** {6 Type aliases} *)
 
 type name = Name.t = Anonymous | Name of Id.t
-[@@ocaml.deprecated "Use Name.t"]
+[@@ocaml.deprecated "(8.8) Use Name.t"]
 
 type variable = Id.t
 type module_ident = Id.t
 
-module ModIdset : Set.S with type elt = module_ident
+module ModIdset : Set.ExtS with type elt = module_ident
 module ModIdmap : Map.ExtS with type key = module_ident and module Set := ModIdset
 
 (** {6 Directory paths = section names paths } *)
@@ -159,12 +159,12 @@ sig
   (** Hashconsing of directory paths. *)
 
   val to_string : t -> string
-  (** Print non-empty directory paths as ["coq_root.module.submodule"] *)
+  (** Print non-empty directory paths as ["root.module.submodule"] *)
 
   val print : t -> Pp.t
 end
 
-module DPset : Set.S with type elt = DirPath.t
+module DPset : Set.ExtS with type elt = DirPath.t
 module DPmap : Map.ExtS with type key = DirPath.t and module Set := DPset
 
 (** {6 Names of structure elements } *)
@@ -198,7 +198,7 @@ sig
   val print : t -> Pp.t
   (** Pretty-printer. *)
 
-  module Set : Set.S with type elt = t
+  module Set : Set.ExtS with type elt = t
   module Map : Map.ExtS with type key = t and module Set := Set
 
   val hcons : t -> t
@@ -240,7 +240,7 @@ sig
 
 end
 
-module MBIset : Set.S with type elt = MBId.t
+module MBIset : Set.ExtS with type elt = MBId.t
 module MBImap : Map.ExtS with type key = MBId.t and module Set := MBIset
 
 (** {6 The module part of the kernel name } *)
@@ -264,14 +264,17 @@ sig
   val dp : t -> DirPath.t
 
   val to_string : t -> string
-  (** Encode as a string (not to be used for user-facing messages). *)
+  (** Converts a identifier into an string. *)
+
+  val print : t -> Pp.t
+  (** Pretty-printer. *)
 
   val debug_to_string : t -> string
   (** Same as [to_string], but outputs extra information related to debug. *)
 
 end
 
-module MPset : Set.S with type elt = ModPath.t
+module MPset : Set.ExtS with type elt = ModPath.t
 module MPmap : Map.ExtS with type key = ModPath.t and module Set := MPset
 
 (** {6 The absolute names of objects seen by kernel } *)
@@ -306,9 +309,9 @@ sig
   val hash : t -> int
 end
 
-module KNset  : CSig.SetS with type elt = KerName.t
+module KNset  : CSig.USetS with type elt = KerName.t
 module KNpred : Predicate.S with type elt = KerName.t
-module KNmap  : Map.ExtS with type key = KerName.t and module Set := KNset
+module KNmap  : Map.UExtS with type key = KerName.t and module Set := KNset
 
 (** {6 Signature for quotiented names} *)
 
@@ -362,6 +365,9 @@ sig
 
   module SyntacticOrd : EqType with type t = t
   (** Equality functions using both names, for low-level uses. *)
+
+  val canonize : t -> t
+  (** Returns the canonical version of the name *)
 end
 
 (** {6 Constant Names } *)
@@ -379,7 +385,7 @@ sig
   (** Special case of [make] where the user name is canonical.  *)
 
   val make2 : ModPath.t -> Label.t -> t
-  (** Shortcut for [(make1 (KerName.make2 ...))] *)
+  (** Shortcut for [(make1 (KerName.make ...))] *)
 
   (** Projections *)
 
@@ -396,10 +402,10 @@ sig
 
   include QNameS with type t := t
 
-  val equal : t -> t -> bool [@@ocaml.deprecated "Use QConstant.equal"]
+  val equal : t -> t -> bool [@@ocaml.deprecated "(8.13) Use QConstant.equal"]
   (** Default comparison, alias for [CanOrd.equal] *)
 
-  val hash : t -> int [@@ocaml.deprecated "Use QConstant.hash"]
+  val hash : t -> int [@@ocaml.deprecated "(8.13) Use QConstant.hash"]
   (** Hashing function *)
 
   val change_label : t -> Label.t -> t
@@ -424,14 +430,14 @@ end
 (** The [*_env] modules consider an order on user part of names
    the others consider an order on canonical part of names*)
 module Cpred : Predicate.S with type elt = Constant.t
-module Cset : CSig.SetS with type elt = Constant.t
-module Cset_env  : CSig.SetS with type elt = Constant.t
+module Cset : CSig.USetS with type elt = Constant.t
+module Cset_env  : CSig.USetS with type elt = Constant.t
 
-module Cmap : Map.ExtS with type key = Constant.t and module Set := Cset
+module Cmap : Map.UExtS with type key = Constant.t and module Set := Cset
 (** A map whose keys are constants (values of the {!Constant.t} type).
     Keys are ordered wrt. "canonical form" of the constant. *)
 
-module Cmap_env : Map.ExtS with type key = Constant.t and module Set := Cset_env
+module Cmap_env : Map.UExtS with type key = Constant.t and module Set := Cset_env
 (** A map whose keys are constants (values of the {!Constant.t} type).
     Keys are ordered wrt. "user form" of the constant. *)
 
@@ -450,7 +456,7 @@ sig
   (** Special case of [make] where the user name is canonical.  *)
 
   val make2 : ModPath.t -> Label.t -> t
-  (** Shortcut for [(make1 (KerName.make2 ...))] *)
+  (** Shortcut for [(make1 (KerName.make ...))] *)
 
   (** Projections *)
 
@@ -467,10 +473,10 @@ sig
 
   include QNameS with type t := t
 
-  val equal : t -> t -> bool [@@ocaml.deprecated "Use QMutInd.equal"]
+  val equal : t -> t -> bool [@@ocaml.deprecated "(8.13) Use QMutInd.equal"]
  (** Default comparison, alias for [CanOrd.equal] *)
 
-  val hash : t -> int [@@ocaml.deprecated "Use QMutInd.hash"]
+  val hash : t -> int [@@ocaml.deprecated "(8.13) Use QMutInd.hash"]
 
   (** Displaying *)
 
@@ -488,9 +494,9 @@ sig
 
 end
 
-module Mindset : CSig.SetS with type elt = MutInd.t
-module Mindmap : Map.ExtS with type key = MutInd.t and module Set := Mindset
-module Mindmap_env : CMap.ExtS with type key = MutInd.t
+module Mindset : CSig.USetS with type elt = MutInd.t
+module Mindmap : Map.UExtS with type key = MutInd.t and module Set := Mindset
+module Mindmap_env : CMap.UExtS with type key = MutInd.t
 
 module Ind :
 sig
@@ -522,61 +528,19 @@ end
 
 type constructor = Construct.t
 
-module Indset : CSet.S with type elt = inductive
-module Constrset : CSet.S with type elt = constructor
-module Indset_env : CSet.S with type elt = inductive
-module Constrset_env : CSet.S with type elt = constructor
+module Indset : CSet.ExtS with type elt = inductive
+module Constrset : CSet.ExtS with type elt = constructor
+module Indset_env : CSet.ExtS with type elt = inductive
+module Constrset_env : CSet.ExtS with type elt = constructor
 module Indmap : CMap.ExtS with type key = inductive and module Set := Indset
 module Constrmap : CMap.ExtS with type key = constructor and module Set := Constrset
 module Indmap_env : CMap.ExtS with type key = inductive and module Set := Indset_env
 module Constrmap_env : CMap.ExtS with type key = constructor and module Set := Constrset_env
 
-val ind_modpath : inductive -> ModPath.t
-[@@ocaml.deprecated "Use the Ind module"]
-
-val constr_modpath : constructor -> ModPath.t
-[@@ocaml.deprecated "Use the Construct module"]
-
 val ith_mutual_inductive : inductive -> int -> inductive
 val ith_constructor_of_inductive : inductive -> int -> constructor
 val inductive_of_constructor : constructor -> inductive
 val index_of_constructor : constructor -> int
-val eq_ind : inductive -> inductive -> bool
-[@@ocaml.deprecated "Use the Ind module"]
-val eq_user_ind : inductive -> inductive -> bool
-[@@ocaml.deprecated "Use the Ind module"]
-val eq_syntactic_ind : inductive -> inductive -> bool
-[@@ocaml.deprecated "Use the Ind module"]
-val ind_ord : inductive -> inductive -> int
-[@@ocaml.deprecated "Use the Ind module"]
-val ind_hash : inductive -> int
-[@@ocaml.deprecated "Use the Ind module"]
-val ind_user_ord : inductive -> inductive -> int
-[@@ocaml.deprecated "Use the Ind module"]
-val ind_user_hash : inductive -> int
-[@@ocaml.deprecated "Use the Ind module"]
-val ind_syntactic_ord : inductive -> inductive -> int
-[@@ocaml.deprecated "Use the Ind module"]
-val ind_syntactic_hash : inductive -> int
-[@@ocaml.deprecated "Use the Ind module"]
-val eq_constructor : constructor -> constructor -> bool
-[@@ocaml.deprecated "Use the Construct module"]
-val eq_user_constructor : constructor -> constructor -> bool
-[@@ocaml.deprecated "Use the Construct module"]
-val eq_syntactic_constructor : constructor -> constructor -> bool
-[@@ocaml.deprecated "Use the Construct module"]
-val constructor_ord : constructor -> constructor -> int
-[@@ocaml.deprecated "Use the Construct module"]
-val constructor_hash : constructor -> int
-[@@ocaml.deprecated "Use the Construct module"]
-val constructor_user_ord : constructor -> constructor -> int
-[@@ocaml.deprecated "Use the Construct module"]
-val constructor_user_hash : constructor -> int
-[@@ocaml.deprecated "Use the Construct module"]
-val constructor_syntactic_ord : constructor -> constructor -> int
-[@@ocaml.deprecated "Use the Construct module"]
-val constructor_syntactic_hash : constructor -> int
-[@@ocaml.deprecated "Use the Construct module"]
 
 (** {6 Hash-consing } *)
 
@@ -597,6 +561,7 @@ type inv_rel_key = int (** index in the [rel_context] part of environment
                           of de Bruijn indice *)
 
 val eq_table_key : ('a -> 'a -> bool) -> 'a tableKey -> 'a tableKey -> bool
+val hash_table_key : ('a -> int) -> 'a tableKey -> int
 val eq_constant_key : Constant.t -> Constant.t -> bool
 
 (** equalities on constant and inductive names (for the checker) *)
@@ -609,13 +574,13 @@ type module_path = ModPath.t =
   | MPfile of DirPath.t
   | MPbound of MBId.t
   | MPdot of ModPath.t * Label.t
-[@@ocaml.deprecated "Alias type"]
+[@@ocaml.deprecated "(8.8) Alias type"]
 
 module Projection : sig
   module Repr : sig
     type t
 
-    val make : inductive -> proj_npars:int -> proj_arg:int -> proj_relevant:bool -> Label.t -> t
+    val make : inductive -> proj_npars:int -> proj_arg:int -> Label.t -> t
 
     include QNameS with type t := t
 
@@ -627,11 +592,10 @@ module Projection : sig
     val npars : t -> int
     val arg : t -> int
     val label : t -> Label.t
-    val relevant : t -> bool
 
-    val equal : t -> t -> bool [@@ocaml.deprecated "Use QProjection.equal"]
-    val hash : t -> int [@@ocaml.deprecated "Use QProjection.hash"]
-    val compare : t -> t -> int [@@ocaml.deprecated "Use QProjection.compare"]
+    val equal : t -> t -> bool [@@ocaml.deprecated "(8.13) Use QProjection.equal"]
+    val hash : t -> int [@@ocaml.deprecated "(8.13) Use QProjection.hash"]
+    val compare : t -> t -> int [@@ocaml.deprecated "(8.13) Use QProjection.compare"]
 
     val map : (MutInd.t -> MutInd.t) -> t -> t
     val map_npars : (int -> int) -> t -> t
@@ -660,18 +624,18 @@ module Projection : sig
   val unfold : t -> t
 
   val equal : t -> t -> bool
-  [@@ocaml.deprecated "Use QProjection.equal"]
+  [@@ocaml.deprecated "(8.13) Use QProjection.equal"]
   val hash : t -> int
-  [@@ocaml.deprecated "Use QProjection.hash"]
+  [@@ocaml.deprecated "(8.13) Use QProjection.hash"]
   val hcons : t -> t
   (** Hashconsing of projections. *)
 
   val repr_equal : t -> t -> bool
-  [@@ocaml.deprecated "Use an explicit projection of Repr"]
+  [@@ocaml.deprecated "(8.13) Use an explicit projection of Repr"]
   (** Ignoring the unfolding boolean. *)
 
   val compare : t -> t -> int
-  [@@ocaml.deprecated "Use QProjection.compare"]
+  [@@ocaml.deprecated "(8.13) Use QProjection.compare"]
 
   val map : (MutInd.t -> MutInd.t) -> t -> t
   val map_npars : (int -> int) -> t -> t
@@ -682,7 +646,19 @@ module Projection : sig
   val print : t -> Pp.t
   (** Print internal representation (not to be used for user-facing messages). *)
 
+  val debug_to_string : t -> string
+  (** Same as [to_string], but outputs extra information related to debug. *)
+
+  val debug_print : t -> Pp.t
+  (** Same as [print], but outputs extra information related to debug. *)
+
 end
+
+module PRset : CSig.USetS with type elt = Projection.Repr.t
+module PRmap : Map.UExtS with type key = Projection.Repr.t and module Set := PRset
+
+(** Predicate on projection representation (ignoring unfolding state) *)
+module PRpred : Predicate.S with type elt = Projection.Repr.t
 
 (** {6 Global reference is a kernel side type for all references together } *)
 
@@ -695,18 +671,18 @@ module GlobRef : sig
     | ConstructRef of constructor  (** A reference to a constructor of an inductive type. *)
 
   val equal : t -> t -> bool
-  [@@ocaml.deprecated "Use QGlobRef.equal"]
+  [@@ocaml.deprecated "(8.18) Use QGlobRef.equal"]
 
   val is_bound : t -> bool
 
   include QNameS with type t := t
 
-  module Set_env : CSig.SetS with type elt = t
-  module Map_env : Map.ExtS
+  module Set_env : CSig.USetS with type elt = t
+  module Map_env : Map.UExtS
     with type key = t and module Set := Set_env
 
-  module Set : CSig.SetS with type elt = t
-  module Map : Map.ExtS
+  module Set : CSig.USetS with type elt = t
+  module Map : Map.UExtS
     with type key = t and module Set := Set
 
   val print : t -> Pp.t

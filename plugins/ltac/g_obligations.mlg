@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,15 +12,12 @@
   Syntax for the subtac terms and types.
   Elaborated from correctness/psyntax.ml4 by Jean-Christophe Filliâtre *)
 
-DECLARE PLUGIN "coq-core.plugins.ltac"
+DECLARE PLUGIN "rocq-runtime.plugins.ltac"
 
 {
 
-open Constrexpr
-open Constrexpr_ops
 open Stdarg
 open Tacarg
-open Extraargs
 
 let (set_default_tactic, get_default_tactic, print_default_tactic) =
   Tactic_option.declare_tactic_option "Program tactic"
@@ -48,34 +45,18 @@ let with_tac f tac =
  * Subtac. These entries are named Subtac.<foo>
  *)
 
-module Tactic = Pltac
+let pr_withtac env sigma = function
+  | None -> Pp.mt ()
+  | Some tac -> Pp.(str "with" ++ spc () ++ Pptactic.pr_raw_tactic env sigma tac)
 
-open Pcoq
-
-let sigref loc = mkRefC (Libnames.qualid_of_string ~loc "Coq.Init.Specif.sig")
-
-let wit_withtac : Tacexpr.raw_tactic_expr option Genarg.uniform_genarg_type =
-  Genarg.create_arg "withtac"
-
-let withtac = Pcoq.create_generic_entry2 "withtac" (Genarg.rawwit wit_withtac)
+let tactic = Pltac.tactic
 
 }
 
-GRAMMAR EXTEND Gram
-  GLOBAL: withtac;
-
-  withtac:
-    [ [ "with"; t = Tactic.tactic -> { Some t }
-      | -> { None } ] ]
-  ;
-
-  Constr.closed_binder: TOP
-    [[ "("; id=Prim.name; ":"; t=Constr.lconstr; "|"; c=Constr.lconstr; ")" -> {
-          let typ = mkAppC (sigref loc, [mkLambdaC ([id], default_binder_kind, t, c)]) in
-          [CLocalAssum ([id], default_binder_kind, typ)] }
-    ] ];
-
-  END
+VERNAC ARGUMENT EXTEND withtac PRINTED BY { pr_withtac env sigma }
+| [ ] -> { None }
+| [ "with" tactic(tac) ] -> { Some tac }
+END
 
 {
 
@@ -89,14 +70,10 @@ let classify_obbl _ = Vernacextend.(VtStartProof (Doesn'tGuaranteeOpacity,[]))
 }
 
 VERNAC COMMAND EXTEND Obligations CLASSIFIED BY { classify_obbl } STATE declare_program
-| [ "Obligation" natural(num) "of" identref(name) ":" lglob(t) withtac(tac) ] ->
-    { obligation (num, Some name.CAst.v, Some t) tac }
 | [ "Obligation" natural(num) "of" identref(name) withtac(tac) ] ->
-    { obligation (num, Some name.CAst.v, None) tac }
-| [ "Obligation" natural(num) ":" lglob(t) withtac(tac) ] ->
-    { obligation (num, None, Some t) tac }
+    { obligation (num, Some name.CAst.v) tac }
 | [ "Obligation" natural(num) withtac(tac) ] ->
-    { obligation (num, None, None) tac }
+    { obligation (num, None) tac }
 | [ "Next" "Obligation" "of" identref(name) withtac(tac) ] ->
     { next_obligation (Some name.CAst.v) tac }
 | [ "Next" "Obligation" withtac(tac) ] -> { next_obligation None tac }
@@ -156,15 +133,3 @@ VERNAC COMMAND EXTEND Show_Preterm CLASSIFIED AS QUERY STATE read_program
 | [ "Preterm" "of" identref(name) ] -> { fun ~pm -> Feedback.msg_notice (show_term ~pm (Some name.CAst.v)) }
 | [ "Preterm" ] -> { fun ~pm -> Feedback.msg_notice (show_term ~pm None) }
 END
-
-{
-
-(* Declare a printer for the content of Program tactics *)
-let () =
-  let printer env sigma _ _ _ = function
-  | None -> mt ()
-  | Some tac -> str "with" ++ spc () ++ Pptactic.pr_raw_tactic env sigma tac
-  in
-  Pptactic.declare_extra_vernac_genarg_pprule wit_withtac printer
-
-}

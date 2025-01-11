@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,10 +8,12 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-(** Printers for the ocaml toplevel. *)
+(** Printers for the OCaml toplevel. *)
 
 val pp : Pp.t -> unit
 val pP : Pp.t -> unit (* with surrounding box *)
+
+val pp_as_format : Pp.t -> unit
 
 val ppfuture : 'a Future.computation -> unit
 
@@ -34,7 +36,7 @@ val ppqualid : Libnames.qualid -> unit
 
 val ppscheme : 'a Ind_tables.scheme_kind -> unit
 
-val prrecarg : Declarations.recarg -> Pp.t
+val pprecarg : Declarations.recarg -> unit
 val ppwf_paths : Declarations.recarg Rtree.t -> unit
 
 val pr_evar : Evar.t -> Pp.t
@@ -122,7 +124,8 @@ val pp_transparent_state : TransparentState.t -> unit
 val pp_estack_t : Reductionops.Stack.t -> unit
 val pp_state_t : Reductionops.state -> unit
 
-val ppmetas : Evd.Metaset.t -> unit
+val ppmetas : Unification.Metaset.t -> unit
+val ppmetamap : Unification.Meta.t -> unit
 val ppevm : Evd.evar_map -> unit
 val ppevmall : Evd.evar_map -> unit
 
@@ -134,6 +137,7 @@ val ppexistentialfilter : Evd.Filter.t -> unit
 val ppclenv : Clenv.clausenv -> unit
 
 val ppgoal : Proofview.Goal.t -> unit
+val ppgoal_with_state : Proofview_monad.goal_with_state -> unit
 
 val pphintdb : Hints.Hint_db.t -> unit
 val ppproofview : Proofview.proofview -> unit
@@ -147,19 +151,24 @@ val ppuni_level : Univ.Level.t -> unit (* raw *)
 val ppqvar : Sorts.QVar.t -> unit
 val ppesorts : EConstr.ESorts.t -> unit
 val prlev : Univ.Level.t -> Pp.t (* with global names (does this work?) *)
+val ppqvarset : Sorts.QVar.Set.t -> unit
 val ppuniverse_set : Univ.Level.Set.t -> unit
-val ppuniverse_instance : Univ.Instance.t -> unit
-val ppuniverse_context : Univ.UContext.t -> unit
-val ppaucontext : Univ.AbstractContext.t -> unit
+val ppuniverse_instance : UVars.Instance.t -> unit
+val ppuniverse_context : UVars.UContext.t -> unit
+val ppaucontext : UVars.AbstractContext.t -> unit
 val ppuniverse_context_set : Univ.ContextSet.t -> unit
 val ppuniverse_subst : UnivSubst.universe_subst -> unit
 val ppuniverse_opt_subst : UState.universe_opt_subst -> unit
+val ppqvar_subst : Sorts.Quality.t Sorts.QVar.Map.t -> unit
 val ppuniverse_level_subst : Univ.universe_level_subst -> unit
-val ppevar_universe_context : UState.t -> unit
+val ppustate : UState.t -> unit
 val ppconstraints : Univ.Constraints.t -> unit
 val ppuniverseconstraints : UnivProblem.Set.t -> unit
-val ppuniverse_context_future : Univ.UContext.t Future.computation -> unit
+val ppuniverse_context_future : UVars.UContext.t Future.computation -> unit
 val ppuniverses : UGraph.t -> unit
+
+val pp_partialfsubst : (CClosure.fconstr, Sorts.Quality.t, Univ.Universe.t) Partial_subst.t -> unit
+val pp_partialsubst : (EConstr.constr, Sorts.Quality.t, Univ.Universe.t) Partial_subst.t -> unit
 
 val ppnamedcontextval : Environ.named_context_val -> unit
 val ppenv : Environ.env -> unit
@@ -188,3 +197,6 @@ val ppgenarginfo : Geninterp.Val.t -> unit
 val ppgenargargt : ('a, 'b, 'c) Genarg.ArgT.tag -> unit
 
 val ppist : Geninterp.interp_sign -> unit
+
+val raw_string_of_ref : ?loc:Loc.t -> Names.Id.Set.t -> Names.GlobRef.t -> Libnames.qualid
+val short_string_of_ref : ?loc:Loc.t -> Names.Id.Set.t -> Names.GlobRef.t -> Libnames.qualid

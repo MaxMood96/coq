@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -25,18 +25,22 @@ end
 
 type 'a summary_declaration = {
   stage : Stage.t;
-  freeze_function : marshallable:bool -> 'a;
+  freeze_function : unit -> 'a;
   unfreeze_function : 'a -> unit;
   init_function : unit -> unit }
 
 module Decl = struct type 'a t = 'a summary_declaration end
 module DynMap = Dyn.Map(Decl)
 
-type ml_modules = (string option * string) list
+module MarshMap = Dyn.Map(struct type 'a t = 'a -> 'a end)
+
+type ml_modules = string list
 
 let sum_mod : ml_modules summary_declaration option ref = ref None
 let sum_map_synterp = ref DynMap.empty
 let sum_map_interp = ref DynMap.empty
+let sum_marsh_synterp = ref MarshMap.empty
+let sum_marsh_interp = ref MarshMap.empty
 
 let mangle id = id ^ "-SUMMARY"
 
@@ -50,19 +54,26 @@ let check_name sumname = match Dyn.name sumname with
     Pp.(str "Colliding summary names: " ++ str sumname
       ++ str " vs. " ++ str (Dyn.repr t) ++ str ".")
 
-let declare_summary_tag sumname decl =
+let declare_summary_tag sumname ?make_marshallable decl =
   let () = check_name (mangle sumname) in
   let tag = Dyn.create (mangle sumname) in
-  let sum_map = match decl.stage with Synterp -> sum_map_synterp | Interp -> sum_map_interp in
+  let sum_map, marsh_map = match decl.stage with
+    | Synterp -> sum_map_synterp, sum_marsh_synterp
+    | Interp -> sum_map_interp, sum_marsh_interp
+  in
   let () = sum_map := DynMap.add tag decl !sum_map in
+  let () = make_marshallable |> Option.iter (fun f ->
+      marsh_map := MarshMap.add tag f !marsh_map)
+  in
   tag
 
-let declare_summary sumname decl =
-  ignore(declare_summary_tag sumname decl)
+let declare_summary sumname ?make_marshallable decl =
+  ignore(declare_summary_tag sumname ?make_marshallable decl)
 
 module ID = struct type 'a t = 'a end
 module Frozen = Dyn.Map(ID)
 module HMap = Dyn.HMap(Decl)(ID)
+
 
 module type FrozenStage = sig
 
@@ -72,15 +83,24 @@ module type FrozenStage = sig
   type frozen
 
   val empty_frozen : frozen
-  val freeze_summaries : marshallable:bool -> frozen
+  val freeze_summaries : unit -> frozen
+  val make_marshallable : frozen -> frozen
   val unfreeze_summaries : ?partial:bool -> frozen -> unit
   val init_summaries : unit -> unit
+  val project_from_summary : frozen -> 'a Dyn.tag -> 'a
 
 end
 
-let freeze_summaries ~marshallable sum_map =
-  let map = { HMap.map = fun tag decl -> decl.freeze_function ~marshallable } in
+let freeze_summaries sum_map =
+  let map = { HMap.map = fun tag decl -> decl.freeze_function () } in
   HMap.map map sum_map
+
+let make_marshallable marsh_map summaries =
+  let map = { Frozen.map = fun tag v -> match MarshMap.find tag marsh_map with
+      | exception Not_found -> v
+      | f -> f v }
+  in
+  Frozen.map map summaries
 
 let warn_summary_out_of_scope =
   CWarnings.create ~name:"summary-out-of-scope" ~default:Disabled Pp.(fun name ->
@@ -115,9 +135,13 @@ module Synterp = struct
 
   let empty_frozen = { summaries = Frozen.empty; ml_module = None }
 
-  let freeze_summaries ~marshallable =
-    let summaries = freeze_summaries ~marshallable !sum_map_synterp in
-    { summaries; ml_module = Option.map (fun decl -> decl.freeze_function ~marshallable) !sum_mod }
+  let freeze_summaries () =
+    let summaries = freeze_summaries !sum_map_synterp in
+    { summaries; ml_module = Option.map (fun decl -> decl.freeze_function ()) !sum_mod }
+
+  let make_marshallable { summaries; ml_module } =
+    { summaries = make_marshallable !sum_marsh_synterp summaries;
+      ml_module }
 
   let unfreeze_summaries ?(partial=false) { summaries; ml_module } =
     (* The unfreezing of [ml_modules_summary] has to be anticipated since it
@@ -131,6 +155,10 @@ module Synterp = struct
   let init_summaries () =
     init_summaries !sum_map_synterp
 
+  (** Summary projection *)
+  let project_from_summary { summaries; _ } tag =
+    Frozen.find tag summaries
+
 end
 
 module Interp = struct
@@ -139,8 +167,10 @@ type frozen = Frozen.t
 
 let empty_frozen = Frozen.empty
 
-  let freeze_summaries ~marshallable =
-    freeze_summaries ~marshallable !sum_map_interp
+  let freeze_summaries () =
+    freeze_summaries !sum_map_interp
+
+  let make_marshallable summaries = make_marshallable !sum_marsh_interp summaries
 
   let unfreeze_summaries ?(partial=false) summaries =
     unfreeze_summaries ~partial !sum_map_interp summaries
@@ -173,7 +203,7 @@ let ref_tag ?(stage=Stage.Interp) ~name x =
   let r = ref x in
   let tag = declare_summary_tag name
     { stage;
-      freeze_function = (fun ~marshallable:_ -> !r);
+      freeze_function = (fun () -> !r);
       unfreeze_function = ((:=) r);
       init_function = (fun () -> r := x) } in
   r, tag
@@ -183,21 +213,12 @@ let ref ?(stage=Stage.Interp) ?(local=false) ~name x =
   else
     let r = ref x in
     let () = declare_summary name
+        ~make_marshallable:(fun _ -> None)
         { stage;
-          freeze_function = (fun ~marshallable -> if marshallable then Some !r else None);
+          freeze_function = (fun () -> Some !r);
           unfreeze_function = (function Some v -> r := v | None -> r := x);
           init_function = (fun () -> r := x); }
     in
     r
-
-module Local = struct
-
-type 'a local_ref = 'a ref
-
-let ref ?stage ~name x = ref ?stage ~name ~local:true x
-let (!) = (!)
-let (:=) = (:=)
-
-end
 
 let dump = Dyn.dump

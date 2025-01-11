@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,16 +8,15 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-DECLARE PLUGIN "coq-core.plugins.number_string_notation"
+DECLARE PLUGIN "rocq-runtime.plugins.number_string_notation"
 
 {
 
 open Notation
-open Number
-open String_notation
+open Number_string
 open Pp
 open Stdarg
-open Pcoq.Prim
+open Procq.Prim
 
 let pr_number_after = function
   | Nop -> mt ()

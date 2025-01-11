@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,7 +8,7 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-class command_window : string -> Coq.coqtop -> CoqOps.coqops ->
+class command_window : string -> RocqDriver.rocqtop -> RocqOps.rocqops ->
     Wg_RoutedMessageViews.message_views_router -> int ->
   object
     method new_query : ?command:string -> ?term:string -> unit -> unit

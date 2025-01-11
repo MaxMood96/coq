@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -47,21 +47,21 @@ val factorize_eqns : 'a cases_clauses_g -> 'a disjunctive_cases_clauses_g
    [isgoal] tells if naming must avoid global-level synonyms as intro does
    [ctx] gives the names of the free variables *)
 
-val detype : 'a delay -> ?isgoal:bool -> Id.Set.t -> env -> evar_map -> constr -> 'a glob_constr_g
+val detype : 'a delay -> ?isgoal:bool -> ?avoid:'g Namegen.Generator.input -> env -> evar_map -> constr -> 'a glob_constr_g
 
 val detype_sort : evar_map -> Sorts.t -> glob_sort
 
-val detype_rel_context : 'a delay -> constr option -> Id.Set.t -> (names_context * env) ->
+val detype_rel_context : 'a delay -> constr option -> ?avoid:'g Namegen.Generator.input -> (names_context * env) ->
   evar_map -> rel_context -> 'a glob_decl_g list
 
 val share_pattern_names :
-  (Id.Set.t -> names_context -> 'c -> Pattern.constr_pattern -> 'a) -> int ->
-  (Name.t * binding_kind * 'b option * 'a) list ->
-  Id.Set.t -> names_context -> 'c -> Pattern.constr_pattern ->
-  Pattern.constr_pattern ->
-  (Name.t * binding_kind * 'b option * 'a) list * 'a * 'a
+  ('g Namegen.Generator.input -> names_context -> 'c -> 'd Pattern.constr_pattern_r -> 'a) -> int ->
+  (Name.t * 'e option * binding_kind * 'b option * 'a) list ->
+  'g Namegen.Generator.input -> names_context -> 'c -> 'd Pattern.constr_pattern_r ->
+  'd Pattern.constr_pattern_r ->
+  (Name.t * 'e option * binding_kind * 'b option * 'a) list * 'a * 'a
 
-val detype_closed_glob :  ?isgoal:bool -> Id.Set.t -> env -> evar_map -> closed_glob_constr -> glob_constr
+val detype_closed_glob : ?isgoal:bool -> ?avoid:'g Namegen.Generator.input -> env -> evar_map -> closed_glob_constr -> glob_constr
 
 (** look for the index of a named var or a nondep var as it is renamed *)
 val lookup_name_as_displayed  : env -> evar_map -> constr -> Id.t -> int option
@@ -70,24 +70,10 @@ val lookup_index_as_renamed : env -> evar_map -> constr -> int -> int option
 val force_wildcard : unit -> bool
 val synthetize_type : unit -> bool
 
-val subst_genarg_hook :
-  (substitution -> Genarg.glob_generic_argument -> Genarg.glob_generic_argument) Hook.t
-
 module PrintingInductiveMake :
-  functor (Test : sig
+  functor (_ : sig
     val encode : Environ.env -> Libnames.qualid -> Names.inductive
     val member_message : Pp.t -> bool -> Pp.t
     val field : string
     val title : string
-  end) ->
-    sig
-      type t = Names.inductive
-      module Set = Indset
-      val encode : Environ.env -> Libnames.qualid -> Names.inductive
-      val subst : substitution -> t -> t
-      val printer : t -> Pp.t
-      val key : Goptions.option_name
-      val title : string
-      val member_message : t -> bool -> Pp.t
-      val synchronous : bool
-    end
+  end) -> Goptions.RefConvertArg with type t = inductive and module Set = Indset

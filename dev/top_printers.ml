@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -16,18 +16,13 @@ open Pp
 open Names
 open Libnames
 open Univ
+open UVars
 open Environ
 open Printer
 open Constr
 open Context
 open Genarg
 open Clenv
-
-let () = Flags.in_debugger := true
-let () = Goptions.set_bool_option_value ["Printing";"Existential";"Instances"] true
-let () = Detyping.print_universes := true
-let () = Goptions.set_bool_option_value ["Printing";"Matching"] false
-let () = Goptions.set_bool_option_value ["Printing";"Sort";"Qualities"] true
 
 let with_env_evm f x =
   let env = Global.env() in
@@ -49,7 +44,7 @@ let ppdir dir = pp (DirPath.print dir)
 let ppmp mp = pp(str (ModPath.debug_to_string mp))
 let ppcon con = pp(Constant.debug_print con)
 let ppprojrepr con = pp(Constant.debug_print (Projection.Repr.constant con))
-let ppproj con = pp(Constant.debug_print (Projection.constant con))
+let ppproj p = pp(Projection.debug_print p)
 let ppkn kn = pp(str (KerName.to_string kn))
 let ppmind kn = pp(MutInd.debug_print kn)
 let ppind (kn,i) = pp(MutInd.debug_print kn ++ str"," ++int i)
@@ -57,8 +52,8 @@ let ppsp sp = pp(pr_path sp)
 let ppqualid qid = pp(pr_qualid qid)
 let ppscheme k = pp (Ind_tables.pr_scheme_kind k)
 
-let prrecarg = Declareops.pp_recarg
-let ppwf_paths x = pp (Declareops.pp_wf_paths x)
+let pprecarg r = pp (Declareops.pr_recarg r)
+let ppwf_paths x = pp (Declareops.pr_wf_paths x)
 
 let get_current_context () =
   try Vernacstate.Declare.get_current_context ()
@@ -69,7 +64,6 @@ let get_current_context () =
 
 (* term printers *)
 let envpp pp = let sigma,env = get_current_context () in pp env sigma
-let rawdebug = ref false
 let ppevar evk = pp (Evar.print evk)
 let pr_constr t =
   let sigma, env = get_current_context () in
@@ -185,6 +179,14 @@ let ppclosedglobconstridmap x = pp (pr_closed_glob_constr_idmap x)
 
 let pP s = pp (hov 0 s)
 
+let pp_as_format s =
+  let fmt, args = pp_as_format s in
+  let pr_escaped s = str ("\"" ^ String.escaped s ^ "\"") in
+  pp
+    (hov 0
+       (str "printf" ++ spc() ++ str "\"" ++ str fmt ++ str "\"" ++
+        pr_non_empty_arg (prlist_with_sep spc pr_escaped) args))
+
 let safe_pr_global = let open GlobRef in function
   | ConstRef kn -> pp (str "CONSTREF(" ++ Constant.debug_print kn ++ str ")")
   | IndRef (kn,i) -> pp (str "INDREF(" ++ MutInd.debug_print kn ++ str "," ++
@@ -216,7 +218,11 @@ let pp_state_t n = pp (Reductionops.pr_state Global.(env()) Evd.empty n)
 
 (* proof printers *)
 let pr_evar ev = Pp.int (Evar.repr ev)
-let ppmetas metas = pp(Termops.pr_metaset metas)
+let ppmetas metas = pp (Unification.Meta.pr_metaset metas)
+let ppmetamap metas =
+  let env = Global.env () in
+  let sigma = Evd.from_env env in
+  pp (Unification.Meta.pr_metamap env sigma metas)
 let ppevm evd = pp(Termops.pr_evar_map ~with_univs:!Detyping.print_universes (Some 2) (Global.env ()) evd)
 let ppevmall evd = pp(Termops.pr_evar_map ~with_univs:!Detyping.print_universes None (Global.env ()) evd)
 let pr_existentialset evars =
@@ -229,6 +235,7 @@ let ppexistentialfilter filter = match Evd.Filter.repr filter with
 let pr_goal e = Pp.(str "GOAL:" ++ int (Evar.repr e))
 let ppclenv clenv = pp(pr_clenv clenv)
 let ppgoal g = pp(Printer.Debug.pr_goal g)
+let ppgoal_with_state g = ppevar (Proofview_monad.drop_state g)
 let pphintdb db = pp(envpp Hints.pr_hint_db_env db)
 let ppproofview p =
   let gls,sigma = Proofview.proofview p in
@@ -256,19 +263,22 @@ let pproof p = pp(Proof.pr_proof p)
 
 let ppuni u = pp(Universe.raw_pr u)
 let ppuni_level u = pp (Level.raw_pr u)
-let ppqvar q = pp (QVar.pr q)
+let ppqvar q = pp (QVar.raw_pr q)
 let ppesorts s = pp (Sorts.debug_print (Evd.MiniEConstr.ESorts.unsafe_to_sorts s))
 
-let prlev l = UnivNames.pr_with_global_universes l
+let prlev l = UnivNames.pr_level_with_global_universes l
+let prqvar q = Sorts.QVar.raw_pr q
+let ppqvarset l = pp (hov 1 (str "{" ++ prlist_with_sep spc QVar.raw_pr (QVar.Set.elements l) ++ str "}"))
 let ppuniverse_set l = pp (Level.Set.pr prlev l)
-let ppuniverse_instance l = pp (Instance.pr prlev l)
-let ppuniverse_context l = pp (pr_universe_context prlev l)
+let ppuniverse_instance l = pp (Instance.pr prqvar prlev l)
+let ppuniverse_context l = pp (pr_universe_context prqvar prlev l)
 let ppuniverse_context_set l = pp (pr_universe_context_set prlev l)
 let ppuniverse_subst l = pp (UnivSubst.pr_universe_subst Level.raw_pr l)
-let ppuniverse_opt_subst l = pp (UState.pr_universe_opt_subst Level.raw_pr l)
+let ppuniverse_opt_subst l = pp (UnivFlex.pr Level.raw_pr l)
+let ppqvar_subst l = pp (UVars.pr_quality_level_subst QVar.raw_pr l)
 let ppuniverse_level_subst l = pp (Univ.pr_universe_level_subst Level.raw_pr l)
-let ppevar_universe_context l = pp (Termops.pr_evar_universe_context l)
-let ppconstraints c = pp (pr_constraints Level.raw_pr c)
+let ppustate l = pp (UState.pr l)
+let ppconstraints c = pp (Constraints.pr Level.raw_pr c)
 let ppuniverseconstraints c = pp (UnivProblem.Set.pr c)
 let ppuniverse_context_future c =
   let ctx = Future.force c in
@@ -280,15 +290,22 @@ let ppnamedcontextval e =
   pp (pr_named_context env sigma (named_context_of_val e))
 
 let ppaucontext auctx =
-  let nas = AbstractContext.names auctx in
-  let prlev l = match Level.var_index l with
+  let qnas, unas = AbstractContext.names auctx in
+  let prgen pr var_index nas l = match var_index l with
     | Some n -> (match nas.(n) with
-        | Anonymous -> prlev l
+        | Anonymous -> pr l
         | Name id -> Id.print id)
-    | None -> prlev l
+    | None -> pr l
   in
-  pp (pr_universe_context prlev (AbstractContext.repr auctx))
+  let prqvar l = prgen prqvar Sorts.QVar.var_index qnas l in
+  let prlev l = prgen prlev Level.var_index unas l in
+  pp (pr_universe_context prqvar prlev (AbstractContext.repr auctx))
 
+let pp_partialfsubst psubst =
+  pp (Partial_subst.pr (fun f -> pr_constr (CClosure.term_of_fconstr f)) (Quality.pr prqvar) (Universe.pr prlev) psubst)
+
+let pp_partialsubst psubst =
+  pp (Partial_subst.pr pr_econstr (Quality.pr prqvar) (Universe.pr prlev) psubst)
 
 let ppenv e = pp
   (str "[" ++ pr_named_context_of e Evd.empty ++ str "]" ++ spc() ++
@@ -342,8 +359,8 @@ let constr_display csr =
   | Construct (((sp,i),j),u) ->
       "MutConstruct(("^(MutInd.to_string sp)^","^(string_of_int i)^"),"
       ^","^(universes_display u)^(string_of_int j)^")"
-  | Proj (p, c) -> "Proj("^(Constant.to_string (Projection.constant p))^","^term_display c ^")"
-  | Case (ci,u,pms,(_,p),iv,c,bl) ->
+  | Proj (p, r, c) -> "Proj("^(Projection.to_string p)^","^term_display c ^")"
+  | Case (ci,u,pms,((_,p),_),iv,c,bl) ->
       "MutCase(<abs>,"^(term_display p)^","^(term_display c)^","
       ^(array_display (Array.map snd bl))^")"
   | Fix ((t,i),(lna,tl,bl)) ->
@@ -363,6 +380,8 @@ let constr_display csr =
       "Int("^(Uint63.to_string i)^")"
   | Float f ->
       "Float("^(Float64.to_string f)^")"
+  | String s ->
+      Printf.sprintf "String(%S)" (Pstring.to_string s)
   | Array (u,t,def,ty) -> "Array("^(array_display t)^","^(term_display def)^","^(term_display ty)^")@{" ^universes_display u^"\n"
 
   and array_display v =
@@ -373,6 +392,9 @@ let constr_display csr =
 
   and univ_display u =
     incr cnt; pp (str "with " ++ int !cnt ++ str" " ++ Universe.raw_pr u ++ fnl ())
+
+  and quality_display q =
+    incr cnt; pp (str "with " ++ int !cnt ++ str" " ++ Sorts.Quality.raw_pr q ++ fnl ())
 
   and level_display u =
     incr cnt; pp (str "with " ++ int !cnt ++ str" " ++ Level.raw_pr u ++ fnl ())
@@ -386,8 +408,15 @@ let constr_display csr =
     | QSort (q, u) -> univ_display u; Printf.sprintf "QSort(%s, %i)" (Sorts.QVar.to_string q) !cnt
 
   and universes_display l =
+    let qs, us = Instance.to_array l in
+    let qs = Array.fold_right (fun x i ->
+        quality_display x;
+        (string_of_int !cnt)^
+        (if not(i="") then (" "^i) else ""))
+        qs ""
+    in
     Array.fold_right (fun x i -> level_display x; (string_of_int !cnt)^(if not(i="")
-        then (" "^i) else "")) (Instance.to_array l) ""
+        then (" "^i) else "")) us (if qs = "" then "" else (qs^" | "))
 
   and name_display x = match x.binder_name with
     | Name id -> "Name("^(Id.to_string id)^")"
@@ -440,8 +469,8 @@ let print_pure_constr csr =
       sp_con_display c;
       print_string ","; universes_display u;
       print_string ")"
-  | Proj (p,c') -> print_string "Proj(";
-      sp_con_display (Projection.constant p);
+  | Proj (p,_,c') -> print_string "Proj(";
+      sp_prj_display p;
       print_string ",";
       box_display c';
       print_string ")"
@@ -458,7 +487,7 @@ let print_pure_constr csr =
       print_int i; print_string ","; print_int j;
       print_string ","; universes_display u;
       print_string ")"
-  | Case (ci,u,pms,p,iv,c,bl) ->
+  | Case (ci,u,pms,(p,_),iv,c,bl) ->
       let pr_ctx (nas, c) =
         Array.iter (fun na -> print_cut (); name_display na) nas;
         print_string " |- ";
@@ -512,6 +541,8 @@ let print_pure_constr csr =
      print_string ("Int("^(Uint63.to_string i)^")")
   | Float f ->
       print_string ("Float("^(Float64.to_string f)^")")
+  | String s ->
+      print_string (Printf.sprintf "String(%S)" (Pstring.to_string s))
   | Array (u,t,def,ty) ->
       print_string "Array(";
       Array.iter (fun x -> box_display x; print_space()) t;
@@ -526,7 +557,9 @@ let print_pure_constr csr =
   and box_display c = open_hovbox 1; term_display c; close_box()
 
   and universes_display u =
-    Array.iter (fun u -> print_space (); pp (Level.raw_pr u)) (Instance.to_array u)
+    let qs, us = Instance.to_array u in
+    Array.iter (fun u -> print_space (); pp (Sorts.Quality.raw_pr u)) qs;
+    Array.iter (fun u -> print_space (); pp (Level.raw_pr u)) us
 
   and sort_display = function
     | SProp -> print_string "SProp"
@@ -535,7 +568,7 @@ let print_pure_constr csr =
     | Type u -> open_hbox();
         print_string "Type("; pp (Universe.raw_pr u); print_string ")"; close_box()
     | QSort (q, u) -> open_hbox();
-        print_string "QSort("; pp (QVar.pr q); print_string ", "; pp (Universe.raw_pr u); print_string ")"; close_box()
+        print_string "QSort("; pp (QVar.raw_pr q); print_string ", "; pp (Universe.raw_pr u); print_string ")"; close_box()
 
   and name_display x = match x.binder_name with
     | Name id -> print_string (Id.to_string id)
@@ -546,7 +579,7 @@ let print_pure_constr csr =
     let ls =
       match List.rev_map Id.to_string (DirPath.repr dir) with
           ("Top"::l)-> l
-        | ("Coq"::_::l) -> l
+        | ("Stdlib"::_::l) -> l
         | l             -> l
     in  List.iter (fun x -> print_string x; print_string ".") ls;*)
       print_string (MutInd.debug_to_string sp)
@@ -555,11 +588,12 @@ let print_pure_constr csr =
     let ls =
       match List.rev_map Id.to_string (DirPath.repr dir) with
           ("Top"::l)-> l
-        | ("Coq"::_::l) -> l
+        | ("Stdlib"::_::l) -> l
         | l             -> l
     in  List.iter (fun x -> print_string x; print_string ".") ls;*)
       print_string (Constant.debug_to_string sp)
-
+  and sp_prj_display sp =
+      print_string (Projection.debug_to_string sp)
   in
     try
      box_display csr; print_flush()
@@ -614,21 +648,23 @@ END
 
 let () =
   let open Vernacextend in
+  let open Vernactypes in
   let ty_constr = Extend.TUentry (get_arg_tag Stdarg.wit_constr) in
   let cmd_sig = TyTerminal("PrintConstr", TyNonTerminal(ty_constr, TyNil)) in
   let cmd_fn c ?loc:_ ~atts () = vtdefault (fun () -> in_current_context econstr_display c) in
   let cmd_class _ = VtQuery in
   let cmd : ty_ml = TyML (false, cmd_sig, cmd_fn, Some cmd_class) in
-  vernac_extend ~command:"PrintConstr" [cmd]
+  static_vernac_extend ~plugin:None ~command:"PrintConstr" [cmd]
 
 let () =
   let open Vernacextend in
+  let open Vernactypes in
   let ty_constr = Extend.TUentry (get_arg_tag Stdarg.wit_constr) in
   let cmd_sig = TyTerminal("PrintPureConstr", TyNonTerminal(ty_constr, TyNil)) in
   let cmd_fn c ?loc:_ ~atts () = vtdefault (fun () -> in_current_context print_pure_econstr c) in
   let cmd_class _ = VtQuery in
   let cmd : ty_ml = TyML (false, cmd_sig, cmd_fn, Some cmd_class) in
-  vernac_extend ~command:"PrintPureConstr" [cmd]
+  static_vernac_extend ~plugin:None ~command:"PrintPureConstr" [cmd]
 
 (* Setting printer of unbound global reference *)
 open Names
@@ -669,9 +705,3 @@ let short_string_of_ref ?loc _ = let open GlobRef in function
       encode_path ?loc "CSTR" None
         [Label.to_id (MutInd.label kn);Id.of_string ("_"^string_of_int i)]
         (Id.of_string ("_"^string_of_int j))
-
-(* Anticipate that printers can be used from ocamldebug and that
-   pretty-printer should not make calls to the global env since ocamldebug
-   runs in a different process and does not have the proper env at hand *)
-let () = Constrextern.set_extern_reference
-  (if !rawdebug then raw_string_of_ref else short_string_of_ref)

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,4 +11,4 @@
 open Declarations
 open Environ
 
-val check_subtypes : 'a Conversion.universe_state -> env -> module_type_body -> module_type_body -> 'a
+val check_subtypes : ('a, UGraph.univ_inconsistency) Conversion.universe_state -> env -> module_type_body -> module_type_body -> 'a

@@ -1,32 +1,27 @@
 .. _thecoqlibrary:
 
-The Coq library
+The Coq libraries
 =================
 
 .. index::
    single: Theories
 
+The :gdef:`prelude` contains definitions and theorems for
+the most commonly used elementary logical notions and
+data types. Coq loads many of these files automatically when it starts.
+The content of the prelude can be browsed at https://coq.inria.fr/prelude/.
 
-The Coq library has two parts:
-
-  * The :gdef:`prelude`: definitions and theorems for
-    the most commonly used elementary logical notions and
-    data types. Coq normally loads these files automatically when it starts.
-
-  * The :gdef:`standard library`: general-purpose libraries with
-    definitions and theorems for sets, lists, sorting,
-    arithmetic, etc. To use these files, users must load them explicitly
-    with the ``Require`` command (see :ref:`compiled-files`)
+Other libraries like the :gdef:`standard library` are general-purpose
+libraries with definitions and theorems for sets, lists, sorting,
+arithmetic, etc. To use these files, users must load them explicitly
+with the ``Require`` command (see :ref:`compiled-files`)
+The content of the standard library can be browsed at https://coq.inria.fr/stdlib/.
 
 There are also many libraries provided by Coq users' community.
 These libraries and developments are available
 for download at https://coq.inria.fr/ (see :ref:`userscontributions`).
 
-This chapter briefly reviews the Coq libraries whose contents can
-also be browsed at https://coq.inria.fr/stdlib/.
-
-
-
+This chapter briefly reviews the Coq prelude
 
 The prelude
 -----------
@@ -42,7 +37,6 @@ in the Coq root directory; this includes the modules
 ``Peano``,
 ``Wf`` and
 ``Tactics``.
-Module ``Logic_Type`` also makes it in the initial state.
 
 .. _init-notations:
 
@@ -138,12 +132,11 @@ Propositional Connectives
   single: or_introl (term)
   single: or_intror (term)
   single: iff (term)
-  single: IF_then_else (term)
 
 First, we find propositional calculus connectives.
 At times, it's helpful to know exactly what these notations represent.
 
-.. coqdoc::
+.. rocqdoc::
 
   Inductive True : Prop := I.
   Inductive False :  Prop := .
@@ -158,7 +151,15 @@ At times, it's helpful to know exactly what these notations represent.
   | or_introl (_:A)
   | or_intror (_:B).
   Definition iff (P Q:Prop) := (P -> Q) /\ (Q -> P).
-  Definition IF_then_else (P Q R:Prop) := P /\ Q \/ ~ P /\ R.
+
+We also have the `Type` level negation:
+
+.. index::
+  single: notT (term)
+
+.. rocqtop:: in
+
+  Definition notT (A:Type) := A -> False.
 
 Quantifiers
 +++++++++++
@@ -175,7 +176,7 @@ Quantifiers
 
 Then we find first-order quantifiers:
 
-.. coqtop:: in
+.. rocqtop:: in
 
    Definition all (A:Set) (P:A -> Prop) := forall x:A, P x.
    Inductive ex (A: Set) (P:A -> Prop) : Prop :=
@@ -212,7 +213,7 @@ This definition, due to Christine Paulin-Mohring, is equivalent to
 define ``eq`` as the smallest reflexive relation, and it is also
 equivalent to Leibniz' equality.
 
-.. coqtop:: in
+.. rocqtop:: in
 
   Inductive eq (A:Type) (x:A) : A -> Prop :=
     eq_refl : eq A x x.
@@ -233,7 +234,7 @@ Finally, a few easy lemmas are provided.
   single: eq_rect (term)
   single: eq_rect_r (term)
 
-.. coqdoc::
+.. rocqdoc::
 
   Theorem absurd : forall A C:Prop, A -> ~ A -> C.
   Section equality.
@@ -261,7 +262,7 @@ arguments. The theorem are names ``f_equal2``, ``f_equal3``,
 ``f_equal4`` and ``f_equal5``.
 For instance ``f_equal3`` is defined the following way.
 
-.. coqtop:: in abort
+.. rocqtop:: in abort
 
   Theorem f_equal3 :
    forall (A1 A2 A3 B:Type) (f:A1 -> A2 -> A3 -> B)
@@ -314,20 +315,14 @@ Programming
   single: identity (term)
   single: refl_identity (term)
 
-.. coqtop:: in
+.. rocqtop:: in
 
   Inductive unit : Set := tt.
   Inductive bool : Set := true | false.
   Inductive nat : Set := O | S (n:nat).
   Inductive option (A:Set) : Set := Some (_:A) | None.
-  Inductive identity (A:Type) (a:A) : A -> Type :=
-    refl_identity : identity A a a.
 
 Note that zero is the letter ``O``, and *not* the numeral ``0``.
-
-The predicate ``identity`` is logically
-equivalent to equality but it lives in sort ``Type``.
-It is mainly maintained for compatibility.
 
 We then define the disjoint sum of ``A+B`` of two sets ``A`` and
 ``B``, and their product ``A*B``.
@@ -345,7 +340,7 @@ We then define the disjoint sum of ``A+B`` of two sets ``A`` and
   single: fst (term)
   single: snd (term)
 
-.. coqtop:: in
+.. rocqtop:: in
 
   Inductive sum (A B:Set) : Set := inl (_:A) | inr (_:B).
   Inductive prod (A B:Set) : Set := pair (_:A) (_:B).
@@ -391,7 +386,7 @@ provided.
    single: sig2 (term)
    single: exist2 (term)
 
-.. coqtop:: in
+.. rocqtop:: in
 
   Inductive sig (A:Set) (P:A -> Prop) : Set := exist (x:A) (_:P x).
   Inductive sig2 (A:Set) (P Q:A -> Prop) : Set :=
@@ -410,7 +405,7 @@ constructor of types in ``Type``.
    single: projT1 (term)
    single: projT2 (term)
 
-.. coqtop:: in
+.. rocqtop:: in
 
   Inductive sigT (A:Type) (P:A -> Type) : Type := existT (x:A) (_:P x).
   Section Projections2.
@@ -434,7 +429,7 @@ A related non-dependent construct is the constructive sum
   single: right (term)
   single: {A}+{B} (term)
 
-.. coqtop:: in
+.. rocqtop:: in
 
   Inductive sumbool (A B:Prop) : Set := left (_:A) | right (_:B).
 
@@ -449,7 +444,7 @@ in the construction :g:`A+{B}` in ``Set``.
   single: inright (term)
   single: A+{B} (term)
 
-.. coqtop:: in
+.. rocqtop:: in
 
   Inductive sumor (A:Set) (B:Prop) : Set :=
   | inleft (_:A)
@@ -463,7 +458,7 @@ Intuitionistic Type Theory.
   single: Choice2 (term)
   single: bool_choice (term)
 
-.. coqdoc::
+.. rocqdoc::
 
   Lemma Choice :
    forall (S S':Set) (R:S -> S' -> Prop),
@@ -487,7 +482,7 @@ an exceptional value encoding errors:
   single: value (term)
   single: error (term)
 
-.. coqtop:: in
+.. rocqtop:: in
 
   Definition Exc := option.
   Definition value := Some.
@@ -504,7 +499,7 @@ realizability interpretation.
   single: absurd_set (term)
   single: and_rect (term)
 
-.. coqdoc::
+.. rocqdoc::
 
   Definition except := False_rec.
   Theorem absurd_set : forall (A:Prop) (C:Set), A -> ~ A -> C.
@@ -530,7 +525,7 @@ section :tacn:`refine`). This scope is opened by default.
   The following example is not part of the standard library, but it
   shows the usage of the notations:
 
-  .. coqtop:: in reset
+  .. rocqtop:: in reset
 
     Fixpoint even (n:nat) : bool :=
      match n with
@@ -557,7 +552,7 @@ section :tacn:`refine`). This scope is opened by default.
 
 Now comes the content of module ``Peano``:
 
-.. coqdoc::
+.. rocqdoc::
 
   Theorem eq_S : forall x y:nat, x = y -> S x = S y.
   Definition pred (n:nat) : nat :=
@@ -608,7 +603,7 @@ Finally, it gives the definition of the usual orderings ``le``,
 .. This emits a notation already used warning but it won't be shown to
    the user.
 
-.. coqtop:: in warn
+.. rocqtop:: in warn
 
   Inductive le (n:nat) : nat -> Prop :=
   | le_n : le n n
@@ -627,7 +622,7 @@ induction principle.
   single: nat_case (term)
   single: nat_double_ind (term)
 
-.. coqdoc::
+.. rocqdoc::
 
   Theorem nat_case :
    forall (n:nat) (P:nat -> Prop),
@@ -654,7 +649,7 @@ well-founded induction, in module ``Wf.v``.
    single: Acc_rect (term)
    single: well_founded (term)
 
-.. coqdoc::
+.. rocqdoc::
 
   Section Well_founded.
   Variable A : Type.
@@ -683,7 +678,7 @@ fixpoint equation can be proved.
   single: Fix_F_inv (term)
   single: Fix_F_eq (term)
 
-.. coqdoc::
+.. rocqdoc::
 
   Section FixPoint.
   Variable P : A -> Type.
@@ -702,398 +697,12 @@ fixpoint equation can be proved.
   End FixPoint.
   End Well_founded.
 
-Accessing the Type level
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-The standard library includes ``Type`` level definitions of counterparts of some
-logic concepts and basic lemmas about them.
-
-The module ``Datatypes`` defines ``identity``, which is the ``Type`` level counterpart
-of equality:
-
-.. index::
-   single: identity (term)
-
-.. coqtop:: in
-
-   Inductive identity (A:Type) (a:A) : A -> Type :=
-     identity_refl : identity A a a.
-
-Some properties of ``identity`` are proved in the module ``Logic_Type``, which also
-provides the definition of ``Type`` level negation:
-
-.. index::
-  single: notT (term)
-
-.. coqtop:: in
-
-  Definition notT (A:Type) := A -> False.
-
 Tactics
 ~~~~~~~
 
 A few tactics defined at the user level are provided in the initial
 state, in module ``Tactics.v``. They are listed at
-https://coq.inria.fr/stdlib/, in paragraph ``Init``, link ``Tactics``.
-
-
-The standard library
---------------------
-
-Survey
-~~~~~~
-
-The rest of the standard library is structured into the following
-subdirectories:
-
-  * **Logic** : Classical logic and dependent equality
-  * **Arith** : Basic Peano arithmetic
-  * **PArith** : Basic positive integer arithmetic
-  * **NArith** : Basic binary natural number arithmetic
-  * **ZArith** : Basic relative integer arithmetic
-  * **Numbers** : Various approaches to natural, integer and cyclic numbers (currently axiomatically and on top of 2^31 binary words)
-  * **Bool** : Booleans (basic functions and results)
-  * **Lists** : Monomorphic and polymorphic lists (basic functions and results), Streams (infinite sequences defined with coinductive types)
-  * **Sets** : Sets (classical, constructive, finite, infinite, power set, etc.)
-  * **FSets** : Specification and implementations of finite sets and finite maps (by lists and by AVL trees)
-  * **Reals** : Axiomatization of real numbers (classical, basic functions, integer part, fractional part, limit, derivative, Cauchy series, power series and results,...)
-  * **Floats** : Machine implementation of floating-point arithmetic (for the binary64 format)
-  * **Relations** : Relations (definitions and basic results)
-  * **Sorting** : Sorted list (basic definitions and heapsort correctness)
-  * **Strings** : 8-bits characters and strings
-  * **Wellfounded** : Well-founded relations (basic results)
-
-
-These directories belong to the initial :term:`load path` of the system, and
-the modules they provide are compiled at installation time. So they
-are directly accessible with the command ``Require`` (see
-Section :ref:`compiled-files`).
-
-The different modules of the Coq standard library are documented
-online at https://coq.inria.fr/stdlib/.
-
-Peano’s arithmetic (nat)
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. index::
-   single: Peano's arithmetic
-   single: nat_scope
-
-While in the initial state, many operations and predicates of Peano's
-arithmetic are defined, further operations and results belong to other
-modules. For instance, the decidability of the basic predicates are
-defined here. This is provided by requiring the module ``Arith``.
-
-The following table describes the notations available in scope
-``nat_scope`` :
-
-===============   ===================
-Notation          Interpretation
-===============   ===================
-``_ < _``         ``lt``
-``_ <= _``        ``le``
-``_ > _``         ``gt``
-``_ >= _``        ``ge``
-``x < y < z``     ``x < y /\ y < z``
-``x < y <= z``    ``x < y /\ y <= z``
-``x <= y < z``    ``x <= y /\ y < z``
-``x <= y <= z``   ``x <= y /\ y <= z``
-``_ + _``         ``plus``
-``_ - _``         ``minus``
-``_ * _``         ``mult``
-===============   ===================
-
-
-Notations for integer arithmetic
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. index::
-  single: Arithmetical notations
-  single: + (term)
-  single: * (term)
-  single: - (term)
-  singel: / (term)
-  single: <= (term)
-  single: >= (term)
-  single: < (term)
-  single: > (term)
-  single: ?= (term)
-  single: mod (term)
-
-
-The following table describes the syntax of expressions
-for integer arithmetic. It is provided by requiring and opening the module ``ZArith`` and opening scope ``Z_scope``.
-It specifies how notations are interpreted and, when not
-already reserved, the precedence and associativity.
-
-===============   ====================  ==========  =============
-Notation          Interpretation        Precedence  Associativity
-===============   ====================  ==========  =============
-``_ < _``         ``Z.lt``
-``_ <= _``        ``Z.le``
-``_ > _``         ``Z.gt``
-``_ >= _``        ``Z.ge``
-``x < y < z``     ``x < y /\ y < z``
-``x < y <= z``    ``x < y /\ y <= z``
-``x <= y < z``    ``x <= y /\ y < z``
-``x <= y <= z``   ``x <= y /\ y <= z``
-``_ ?= _``        ``Z.compare``         70          no
-``_ + _``         ``Z.add``
-``_ - _``         ``Z.sub``
-``_ * _``         ``Z.mul``
-``_ / _``         ``Z.div``
-``_ mod _``       ``Z.modulo``          40          no
-``- _``           ``Z.opp``
-``_ ^ _``         ``Z.pow``
-===============   ====================  ==========  =============
-
-
-.. example::
-
-  .. coqtop:: all reset
-
-    Require Import ZArith.
-    Check (2 + 3)%Z.
-    Open Scope Z_scope.
-    Check 2 + 3.
-
-
-Real numbers library
-~~~~~~~~~~~~~~~~~~~~
-
-Notations for real numbers
-++++++++++++++++++++++++++
-
-This is provided by requiring and opening the module ``Reals`` and
-opening scope ``R_scope``. This set of notations is very similar to
-the notation for integer arithmetic. The inverse function was added.
-
-===============   ===================
-Notation          Interpretation
-===============   ===================
-``_ < _``         ``Rlt``
-``_ <= _``        ``Rle``
-``_ > _``         ``Rgt``
-``_ >= _``        ``Rge``
-``x < y < z``     ``x < y /\ y < z``
-``x < y <= z``    ``x < y /\ y <= z``
-``x <= y < z``    ``x <= y /\ y < z``
-``x <= y <= z``   ``x <= y /\ y <= z``
-``_ + _``         ``Rplus``
-``_ - _``         ``Rminus``
-``_ * _``         ``Rmult``
-``_ / _``         ``Rdiv``
-``- _``           ``Ropp``
-``/ _``           ``Rinv``
-``_ ^ _``         ``pow``
-===============   ===================
-
-.. example::
-
-  .. coqtop:: all reset
-
-    Require Import Reals.
-    Check  (2 + 3)%R.
-    Open Scope R_scope.
-    Check 2 + 3.
-
-Some tactics for real numbers
-+++++++++++++++++++++++++++++
-
-In addition to the powerful ``ring``, ``field`` and ``lra``
-tactics (see Chapter :ref:`tactics`), there are also:
-
-.. tacn:: discrR
-
-  Proves that two real integer constants are different.
-
-.. example::
-
-  .. coqtop:: all reset
-
-    Require Import DiscrR.
-    Open Scope R_scope.
-    Goal 5 <> 0.
-    discrR.
-
-.. tacn:: split_Rabs
-
-  Allows unfolding the ``Rabs`` constant and splits corresponding conjunctions.
-
-.. example::
-
-  .. coqtop:: all reset
-
-    Require Import Reals.
-    Open Scope R_scope.
-    Goal forall x:R, x <= Rabs x.
-    intro; split_Rabs.
-
-.. tacn:: split_Rmult
-
-  Splits a condition that a product is non-null into subgoals
-  corresponding to the condition on each operand of the product.
-
-.. example::
-
-  .. coqtop:: all reset
-
-    Require Import Reals.
-    Open Scope R_scope.
-    Goal forall x y z:R, x * y * z <> 0.
-    intros; split_Rmult.
-
-List library
-~~~~~~~~~~~~
-
-.. index::
-  single: Notations for lists
-  single: length (term)
-  single: head (term)
-  single: tail (term)
-  single: app (term)
-  single: rev (term)
-  single: nth (term)
-  single: map (term)
-  single: flat_map (term)
-  single: fold_left (term)
-  single: fold_right (term)
-
-Some elementary operations on polymorphic lists are defined here.
-They can be accessed by requiring module ``List``.
-
-It defines the following notions:
-
-  * ``length``
-  * ``head`` : first element (with default)
-  * ``tail`` : all but first element
-  * ``app`` : concatenation
-  * ``rev`` : reverse
-  * ``nth`` : accessing n-th element (with default)
-  * ``map`` : applying a function
-  * ``flat_map`` : applying a function returning lists
-  * ``fold_left`` : iterator (from head to tail)
-  * ``fold_right`` : iterator (from tail to head)
-
-The following table shows notations available when opening scope ``list_scope``.
-
-==========  ==============  ==========  =============
-Notation    Interpretation  Precedence  Associativity
-==========  ==============  ==========  =============
-``_ ++ _``  ``app``         60          right
-``_ :: _``  ``cons``        60          right
-==========  ==============  ==========  =============
-
-.. _floats_library:
-
-Floats library
-~~~~~~~~~~~~~~
-
-The library of primitive floating-point arithmetic can be loaded by
-requiring module ``Floats``:
-
-.. coqtop:: in
-
-  Require Import Floats.
-
-It exports the module ``PrimFloat`` that provides a primitive type
-named ``float``, defined in the kernel (see section :ref:`primitive-floats`),
-as well as two variant types ``float_comparison`` and ``float_class``:
-
-
-.. coqtop:: all
-
-  Print float.
-  Print float_comparison.
-  Print float_class.
-
-It then defines the primitive operators below, using the processor
-floating-point operators for binary64 in rounding-to-nearest even:
-
-* ``abs``
-* ``opp``
-* ``sub``
-* ``add``
-* ``mul``
-* ``div``
-* ``sqrt``
-* ``compare`` : compare two floats and return a ``float_comparison``
-* ``classify`` : analyze a float and return a ``float_class``
-* ``of_int63`` : round a primitive integer and convert it into a float
-* ``normfr_mantissa`` : take a float in ``[0.5; 1.0)`` and return its mantissa
-* ``frshiftexp`` : convert a float to fractional part in ``[0.5; 1.0)`` and integer part
-* ``ldshiftexp`` : multiply a float by an integral power of ``2``
-* ``next_up`` : return the next float towards positive infinity
-* ``next_down`` : return the next float towards negative infinity
-
-For special floating-point values, the following constants are also
-defined:
-
-* ``zero``
-* ``neg_zero``
-* ``one``
-* ``two``
-* ``infinity``
-* ``neg_infinity``
-* ``nan`` : Not a Number (assumed to be unique: the "payload" of NaNs is ignored)
-
-The following table shows the notations available when opening scope
-``float_scope``.
-
-===========  ==============
-Notation     Interpretation
-===========  ==============
-``- _``      ``opp``
-``_ - _``    ``sub``
-``_ + _``    ``add``
-``_ * _``    ``mul``
-``_ / _``    ``div``
-``_ =? _``   ``eqb``
-``_ <? _``    ``ltb``
-``_ <=? _``   ``leb``
-``_ ?= _``   ``compare``
-===========  ==============
-
-Floating-point constants are parsed and pretty-printed as (17-digit)
-decimal constants. This ensures that the composition
-:math:`\text{parse} \circ \text{print}` amounts to the identity.
-
-.. warn:: The constant @number is not a binary64 floating-point value.  A closest value @number will be used and unambiguously printed @number. [inexact-float,parsing]
-
-   Not all decimal constants are floating-point values. This warning
-   is generated when parsing such a constant (for instance ``0.1``).
-
-.. flag:: Printing Float
-
-   Turn this :term:`flag` off (it is on by default) to deactivate decimal
-   printing of floating-point constants. They will then be printed
-   with an hexadecimal representation.
-
-.. example::
-
-  .. coqtop:: all
-
-    Open Scope float_scope.
-    Eval compute in 1 + 0.5.
-    Eval compute in 1 / 0.
-    Eval compute in 1 / -0.
-    Eval compute in 0 / 0.
-    Eval compute in 0 ?= -0.
-    Eval compute in nan ?= nan.
-    Eval compute in next_down (-1).
-
-The primitive operators are specified with respect to their Gallina
-counterpart, using the variant type ``spec_float``, and the injection
-``Prim2SF``:
-
-.. coqtop:: all
-
-  Print spec_float.
-  Check Prim2SF.
-  Check mul_spec.
-
-For more details on the available definitions and lemmas, see the
-online documentation of the ``Floats`` library.
+https://coq.inria.fr/prelude/, in paragraph ``Init``, link ``Tactics``.
 
 .. _userscontributions:
 

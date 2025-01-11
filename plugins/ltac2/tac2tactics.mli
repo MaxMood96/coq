@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -15,7 +15,7 @@ open Genredexpr
 open Tac2types
 open Proofview
 
-(** Local reimplementations of tactics variants from Coq *)
+(** Local reimplementations of tactics variants from Rocq *)
 
 val intros_patterns : evars_flag -> intro_pattern list -> unit tactic
 
@@ -45,6 +45,9 @@ val change : Pattern.constr_pattern option -> (constr array, constr) Tac2ffi.fun
 
 val rewrite :
   evars_flag -> rewriting list -> clause -> unit thunk option -> unit tactic
+
+val setoid_rewrite :
+  orientation -> constr_with_bindings tactic -> occurrences -> Id.t option -> unit tactic
 
 val symmetry : clause -> unit tactic
 
@@ -104,13 +107,13 @@ val injection : evars_flag -> intro_pattern list option -> destruction_arg optio
 
 val autorewrite : all:bool -> unit thunk option -> Id.t list -> clause -> unit tactic
 
-val trivial : Hints.debug -> constr thunk list -> Id.t list option ->
+val trivial : Hints.debug -> GlobRef.t list -> Id.t list option ->
   unit Proofview.tactic
 
-val auto : Hints.debug -> int option -> constr thunk list ->
+val auto : Hints.debug -> int option -> GlobRef.t list ->
   Id.t list option -> unit Proofview.tactic
 
-val eauto : Hints.debug -> int option -> constr thunk list ->
+val eauto : Hints.debug -> int option -> GlobRef.t list ->
   Id.t list option -> unit Proofview.tactic
 
 val typeclasses_eauto : Class_tactics.search_strategy option -> int option ->
@@ -121,3 +124,15 @@ val unify : constr -> constr -> unit tactic
 val inversion : Inv.inversion_kind -> destruction_arg -> intro_pattern option -> Id.t list option -> unit tactic
 
 val contradiction : constr_with_bindings option -> unit tactic
+
+val current_transparent_state : unit -> TransparentState.t tactic
+
+val evarconv_unify : TransparentState.t -> constr -> constr -> unit tactic
+
+(** Internal *)
+
+val mk_intro_pattern : intro_pattern -> Tactypes.intro_pattern
+
+val congruence : int option -> constr list option -> unit Proofview.tactic
+
+val simple_congruence : int option -> constr list option -> unit Proofview.tactic

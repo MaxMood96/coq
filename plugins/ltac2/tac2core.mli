@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -16,6 +16,9 @@ open Tac2expr
 module Core :
 sig
 
+val t_unit : type_constant
+val v_unit : Tac2val.valexpr
+
 val t_list : type_constant
 val c_nil : ltac_constructor
 val c_cons : ltac_constructor
@@ -30,14 +33,16 @@ val c_false : ltac_constructor
 
 end
 
+val throw : ?info:Exninfo.info -> exn -> 'a Proofview.tactic
+
 val pf_apply : ?catch_exceptions:bool -> (Environ.env -> Evd.evar_map -> 'a Proofview.tactic) -> 'a Proofview.tactic
 
 module type MapType = sig
   (** to have less boilerplate we use S.elt rather than declaring a toplevel type t *)
-  module S : CSig.SetS
-  module M : CMap.ExtS with type key = S.elt and module Set := S
+  module S : CSig.USetS
+  module M : CMap.UExtS with type key = S.elt and module Set := S
   type valmap
-  val valmap_eq : (valmap, Tac2ffi.valexpr M.t) Util.eq
+  val valmap_eq : (valmap, Tac2val.valexpr M.t) Util.eq
   val repr : S.elt Tac2ffi.repr
 end
 
@@ -59,9 +64,9 @@ val register_map : ?plugin:string -> tag_name:string
 
 (** Default registered maps *)
 
-val ident_map_tag : (Id.t, Id.Set.t, Tac2ffi.valexpr Id.Map.t) map_tag
-val int_map_tag : (int, Int.Set.t, Tac2ffi.valexpr Int.Map.t) map_tag
-val string_map_tag : (string, CString.Set.t, Tac2ffi.valexpr CString.Map.t) map_tag
-val inductive_map_tag : (inductive, Indset_env.t, Tac2ffi.valexpr Indmap_env.t) map_tag
-val constructor_map_tag : (constructor, Constrset_env.t, Tac2ffi.valexpr Constrmap_env.t) map_tag
-val constant_map_tag : (Constant.t, Cset_env.t, Tac2ffi.valexpr Cmap_env.t) map_tag
+val ident_map_tag : (Id.t, Id.Set.t, Tac2val.valexpr Id.Map.t) map_tag
+val int_map_tag : (int, Int.Set.t, Tac2val.valexpr Int.Map.t) map_tag
+val string_map_tag : (string, CString.Set.t, Tac2val.valexpr CString.Map.t) map_tag
+val inductive_map_tag : (inductive, Indset_env.t, Tac2val.valexpr Indmap_env.t) map_tag
+val constructor_map_tag : (constructor, Constrset_env.t, Tac2val.valexpr Constrmap_env.t) map_tag
+val constant_map_tag : (Constant.t, Cset_env.t, Tac2val.valexpr Cmap_env.t) map_tag

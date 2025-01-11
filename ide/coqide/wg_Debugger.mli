@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -23,6 +23,7 @@ class type debugger_view =
     method set_forward_db_vars : (int -> unit) -> unit
     method set_forward_paned_pos : (int -> unit) -> unit
     method set_forward_get_basename : (unit -> string) -> unit
+    method select_all : unit -> unit
   end
 
 val debugger : string -> int -> debugger_view

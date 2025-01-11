@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -32,160 +32,10 @@ open Context
 open Environ
 open Vars
 open Esubst
-
-module RelDecl = Context.Rel.Declaration
-
-let all_opaque = TransparentState.empty
-
-module type RedFlagsSig = sig
-  type reds
-  type red_kind
-  val fBETA : red_kind
-  val fDELTA : red_kind
-  val fMATCH : red_kind
-  val fFIX : red_kind
-  val fCOFIX : red_kind
-  val fZETA : red_kind
-  val fCONST : Constant.t -> red_kind
-  val fVAR : Id.t -> red_kind
-  val no_red : reds
-  val red_add : reds -> red_kind -> reds
-  val red_sub : reds -> red_kind -> reds
-  val red_add_transparent : reds -> TransparentState.t -> reds
-  val red_transparent : reds -> TransparentState.t
-  val mkflags : red_kind list -> reds
-  val mkfullflags : red_kind list -> reds
-  val red_set : reds -> red_kind -> bool
-  val red_projection : reds -> Projection.t -> bool
-end
-
-module RedFlags : RedFlagsSig = struct
-
-  (* [r_const=(true,cl)] means all constants but those in [cl] *)
-  (* [r_const=(false,cl)] means only those in [cl] *)
-  (* [r_delta=true] just mean [r_const=(true,[])] *)
-
-  open TransparentState
-
-  type reds = {
-    r_beta : bool;
-    r_delta : bool;
-    r_const : TransparentState.t;
-    r_zeta : bool;
-    r_match : bool;
-    r_fix : bool;
-    r_cofix : bool }
-
-  type red_kind = BETA | DELTA | MATCH | FIX
-              | COFIX | ZETA
-              | CONST of Constant.t | VAR of Id.t
-  let fBETA = BETA
-  let fDELTA = DELTA
-  let fMATCH = MATCH
-  let fFIX = FIX
-  let fCOFIX = COFIX
-  let fZETA = ZETA
-  let fCONST kn  = CONST kn
-  let fVAR id  = VAR id
-  let no_red = {
-    r_beta = false;
-    r_delta = false;
-    r_const = all_opaque;
-    r_zeta = false;
-    r_match = false;
-    r_fix = false;
-    r_cofix = false }
-
-  let red_add red = function
-    | BETA -> { red with r_beta = true }
-    | DELTA -> { red with r_delta = true }
-    | CONST kn ->
-      let r = red.r_const in
-      { red with r_const = { r with tr_cst = Cpred.add kn r.tr_cst } }
-    | MATCH -> { red with r_match = true }
-    | FIX -> { red with r_fix = true }
-    | COFIX -> { red with r_cofix = true }
-    | ZETA -> { red with r_zeta = true }
-    | VAR id ->
-      let r = red.r_const in
-      { red with r_const = { r with tr_var = Id.Pred.add id r.tr_var } }
-
-  let red_sub red = function
-    | BETA -> { red with r_beta = false }
-    | DELTA -> { red with r_delta = false }
-    | CONST kn ->
-      let r = red.r_const in
-      { red with r_const = { r with tr_cst = Cpred.remove kn r.tr_cst } }
-    | MATCH -> { red with r_match = false }
-    | FIX -> { red with r_fix = false }
-    | COFIX -> { red with r_cofix = false }
-    | ZETA -> { red with r_zeta = false }
-    | VAR id ->
-      let r = red.r_const in
-      { red with r_const = { r with tr_var = Id.Pred.remove id r.tr_var } }
-
-  let red_transparent red = red.r_const
-
-  let red_add_transparent red tr =
-    { red with r_const = tr }
-
-  let mkflags = List.fold_left red_add no_red
-
-  let mkfullflags = List.fold_left red_add { no_red with r_const = TransparentState.full }
-
-  let red_set red = function
-    | BETA -> red.r_beta
-    | CONST kn ->
-      is_transparent_constant red.r_const kn
-    | VAR id -> (* En attendant d'avoir des kn pour les Var *)
-      is_transparent_variable red.r_const id
-    | ZETA -> red.r_zeta
-    | MATCH -> red.r_match
-    | FIX -> red.r_fix
-    | COFIX -> red.r_cofix
-    | DELTA -> (* Used for Rel/Var defined in context *)
-      red.r_delta
-
-  let red_projection red p =
-    if Projection.unfolded p then true
-    else red_set red (fCONST (Projection.constant p))
-
-end
-
 open RedFlags
 
-let all = mkfullflags [fBETA;fDELTA;fZETA;fMATCH;fFIX;fCOFIX]
-let allnolet = mkfullflags [fBETA;fDELTA;fMATCH;fFIX;fCOFIX]
-let beta = mkflags [fBETA]
-let betadeltazeta = mkfullflags [fBETA;fDELTA;fZETA]
-let betaiota = mkflags [fBETA;fMATCH;fFIX;fCOFIX]
-let betaiotazeta = mkflags [fBETA;fMATCH;fFIX;fCOFIX;fZETA]
-let betazeta = mkflags [fBETA;fZETA]
-let delta = mkfullflags [fDELTA]
-let zeta = mkflags [fZETA]
-let nored = no_red
-
-type table_key = Constant.t Univ.puniverses tableKey
-
-let eq_pconstant_key (c,u) (c',u') =
-  eq_constant_key c c' && Univ.Instance.equal u u'
-
-module IdKeyHash =
-struct
-  open Hashset.Combine
-  type t = table_key
-  let equal = Names.eq_table_key eq_pconstant_key
-  let hash = function
-  | ConstKey (c, _) -> combinesmall 1 (Constant.UserOrd.hash c)
-  | VarKey id -> combinesmall 2 (Id.hash id)
-  | RelKey i -> combinesmall 3 (Int.hash i)
-end
-
-module KeyTable = Hashtbl.Make(IdKeyHash)
-
-open Context.Named.Declaration
-
-exception Irrelevant
+module RelDecl = Context.Rel.Declaration
+module NamedDecl = Context.Named.Declaration
 
 type mode = Conversion | Reduction
 (* In conversion mode we can introduce FIrrelevant terms.
@@ -218,11 +68,10 @@ type mode = Conversion | Reduction
 *)
 type red_state = Ntrl | Cstr | Red
 
-let neutr = function
-| Ntrl -> Ntrl
-| Red | Cstr -> Red
+let neutr = function Ntrl -> Ntrl | Red | Cstr -> Red
+let is_red = function Red -> true | Ntrl | Cstr -> false
 
-type 'a usubs = 'a subs Univ.puniverses
+type table_key = Constant.t UVars.puniverses tableKey
 
 type evar_repack = Evar.t * constr list -> constr
 
@@ -238,40 +87,62 @@ and fterm =
   | FInd of pinductive
   | FConstruct of pconstructor
   | FApp of fconstr * fconstr array
-  | FProj of Projection.t * fconstr
-  | FFix of fixpoint * fconstr usubs
-  | FCoFix of cofixpoint * fconstr usubs
-  | FCaseT of case_info * Univ.Instance.t * constr array * case_return * fconstr * case_branch array * fconstr usubs (* predicate and branches are closures *)
-  | FCaseInvert of case_info * Univ.Instance.t * constr array * case_return * finvert * fconstr * case_branch array * fconstr usubs
-  | FLambda of int * (Name.t Context.binder_annot * constr) list * constr * fconstr usubs
-  | FProd of Name.t Context.binder_annot * fconstr * constr * fconstr usubs
-  | FLetIn of Name.t Context.binder_annot * fconstr * fconstr * constr * fconstr usubs
-  | FEvar of Evar.t * constr list * fconstr usubs * evar_repack
+  | FProj of Projection.t * Sorts.relevance * fconstr
+  | FFix of fixpoint * usubs
+  | FCoFix of cofixpoint * usubs
+  | FCaseT of case_info * UVars.Instance.t * constr array * case_return * fconstr * case_branch array * usubs (* predicate and branches are closures *)
+  | FCaseInvert of case_info * UVars.Instance.t * constr array * case_return * finvert * fconstr * case_branch array * usubs
+  | FLambda of int * (Name.t binder_annot * constr) list * constr * usubs
+  | FProd of Name.t binder_annot * fconstr * constr * usubs
+  | FLetIn of Name.t binder_annot * fconstr * fconstr * constr * usubs
+  | FEvar of Evar.t * constr list * usubs * evar_repack
   | FInt of Uint63.t
   | FFloat of Float64.t
-  | FArray of Univ.Instance.t * fconstr Parray.t * fconstr
+  | FString of Pstring.t
+  | FArray of UVars.Instance.t * fconstr Parray.t * fconstr
   | FLIFT of int * fconstr
-  | FCLOS of constr * fconstr usubs
+  | FCLOS of constr * usubs
   | FIrrelevant
   | FLOCKED
 
+and usubs = fconstr subs UVars.puniverses
+
 and finvert = fconstr array
+
+let get_invert fiv = fiv
 
 let fterm_of v = v.term
 let set_ntrl v = v.mark <- Ntrl
-
-let mk_atom c = {mark=Ntrl;term=FAtom c}
-let mk_red f = {mark=Red;term=f}
 
 (* Could issue a warning if no is still Red, pointing out that we loose
    sharing. *)
 let update v1 mark t =
   v1.mark <- mark; v1.term <- t
 
+type 'a evar_expansion =
+| EvarDefined of 'a
+| EvarUndefined of Evar.t * 'a list
+
+type evar_handler = {
+  evar_expand : constr pexistential -> constr evar_expansion;
+  evar_repack : Evar.t * constr list -> constr;
+  evar_irrelevant : constr pexistential -> bool;
+  qvar_irrelevant : Sorts.QVar.t -> bool;
+}
+
+let default_evar_handler env = {
+  evar_expand = (fun _ -> assert false);
+  evar_repack = (fun _ -> assert false);
+  evar_irrelevant = (fun _ -> assert false);
+  qvar_irrelevant = (fun q ->
+      assert (Sorts.QVar.Set.mem q env.env_qualities);
+      false);
+}
+
 (** Reduction cache *)
 type infos_cache = {
   i_env : env;
-  i_sigma : constr evar_handler;
+  i_sigma : evar_handler;
   i_share : bool;
   i_univs : UGraph.t;
   i_mode : mode;
@@ -282,18 +153,18 @@ type clos_infos = {
   i_relevances : Sorts.relevance Range.t;
   i_cache : infos_cache }
 
-type clos_tab = (fconstr, Empty.t) constant_def KeyTable.t
-
 let info_flags info = info.i_flags
 let info_env info = info.i_cache.i_env
 let info_univs info = info.i_cache.i_univs
 
-let push_relevance infos r =
-  { infos with i_relevances = Range.cons r.Context.binder_relevance infos.i_relevances }
+let push_relevance infos x =
+  { infos with i_relevances = Range.cons x.binder_relevance infos.i_relevances }
 
 let push_relevances infos nas =
-  { infos with i_relevances = Array.fold_left (fun l x -> Range.cons x.Context.binder_relevance l)
-                   infos.i_relevances nas }
+  { infos with
+    i_relevances =
+      Array.fold_left (fun l x -> Range.cons x.binder_relevance l)
+        infos.i_relevances nas }
 
 let set_info_relevances info r = { info with i_relevances = r }
 
@@ -305,8 +176,8 @@ type 'a next_native_args = (CPrimitives.arg_kind * 'a) list
 
 type stack_member =
   | Zapp of fconstr array
-  | ZcaseT of case_info * Univ.Instance.t * constr array * case_return * case_branch array * fconstr usubs
-  | Zproj of Projection.Repr.t
+  | ZcaseT of case_info * UVars.Instance.t * constr array * case_return * case_branch array * usubs
+  | Zproj of Projection.Repr.t * Sorts.relevance
   | Zfix of fconstr * stack
   | Zprimitive of CPrimitives.t * pconstant * fconstr list * fconstr next_native_args
        (* operator, constr def, arguments already seen (in rev order), next arguments *)
@@ -343,7 +214,7 @@ let usubs_shft (n,(e,u)) = subs_shft (n, e), u
    when the lift is 0. *)
 let rec lft_fconstr n ft =
   match ft.term with
-    | (FInd _|FConstruct _|FFlex(ConstKey _|VarKey _)|FInt _|FFloat _|FIrrelevant) -> ft
+    | (FInd _|FConstruct _|FFlex(ConstKey _|VarKey _)|FInt _|FFloat _|FString _|FIrrelevant) -> ft
     | FRel i -> {mark=ft.mark;term=FRel(i+n)}
     | FLambda(k,tys,f,e) -> {mark=Cstr; term=FLambda(k,tys,f,usubs_shft(n,e))}
     | FFix(fx,e) ->
@@ -384,12 +255,34 @@ let compact_stack head stk =
 (* Put an update mark in the stack, only if needed *)
 let zupdate info m s =
   let share = info.i_cache.i_share in
-  if share && begin match m.mark with Red -> true  | Ntrl | Cstr -> false end
-  then
+  if share && is_red m.mark then
     let s' = compact_stack m s in
     let _ = m.term <- FLOCKED in
     Zupdate(m)::s'
   else s
+
+(* We use empty as a special identity value, if we don't check
+   subst_instance_instance will raise array out of bounds. *)
+let usubst_instance (_,u) u' =
+  if UVars.Instance.is_empty u then u'
+  else UVars.subst_instance_instance u u'
+
+let usubst_punivs (_,u) (v,u' as orig) =
+  if UVars.Instance.is_empty u then orig
+  else v, UVars.subst_instance_instance u u'
+
+let usubst_sort (_,u) s =
+  if UVars.Instance.is_empty u then s
+  else UVars.subst_instance_sort u s
+
+let usubst_relevance (_,u) r =
+  if UVars.Instance.is_empty u then r
+  else UVars.subst_instance_relevance u r
+
+let usubst_binder e x =
+  let r = x.binder_relevance in
+  let r' = usubst_relevance e r in
+  if r == r' then x else { x with binder_relevance = r' }
 
 let mk_lambda env t =
   let (rvars,t') = Term.decompose_lambda t in
@@ -399,36 +292,18 @@ let usubs_lift (e,u) = subs_lift e, u
 
 let usubs_liftn n (e,u) = subs_liftn n e, u
 
+(* t must be a FLambda and binding list cannot be empty *)
 let destFLambda clos_fun t =
   match [@ocaml.warning "-4"] t.term with
-      FLambda(_,[(na,ty)],b,e) -> (na,clos_fun e ty,clos_fun (usubs_lift e) b)
-    | FLambda(n,(na,ty)::tys,b,e) ->
-        (na,clos_fun e ty,{mark=t.mark;term=FLambda(n-1,tys,b,usubs_lift e)})
-    | _ -> assert false
-        (* t must be a FLambda and binding list cannot be empty *)
-
-(* We use empty as a special identity value, if we don't check
-   subst_instance_instance will raise array out of bounds. *)
-let usubst_instance (_,u) u' =
-  if Univ.Instance.is_empty u then u'
-  else Univ.subst_instance_instance u u'
-
-let usubst_punivs (_,u) (v,u' as orig) =
-  if Univ.Instance.is_empty u then orig
-  else v, Univ.subst_instance_instance u u'
-
-let usubst_sort (_,u) s = match s with
-  | Sorts.Type su ->
-    if Univ.Instance.is_empty u then s
-    else Sorts.(sort_of_univ (Univ.subst_instance_universe u su))
-  | Sorts.QSort (q, v) ->
-    if Univ.Instance.is_empty u then s
-    else Sorts.qsort q (Univ.subst_instance_universe u v)
-  | Sorts.(SProp | Prop | Set) -> s
+  | FLambda(_,[(na,ty)],b,e) ->
+    (usubst_binder e na,clos_fun e ty,clos_fun (usubs_lift e) b)
+  | FLambda(n,(na,ty)::tys,b,e) ->
+    (usubst_binder e na,clos_fun e ty,{mark=t.mark;term=FLambda(n-1,tys,b,usubs_lift e)})
+  | _ -> assert false
 
 (* Optimization: do not enclose variables in a closure.
    Makes variable access much faster *)
-let mk_clos (e:_ usubs) t =
+let mk_clos (e:usubs) t =
   match kind t with
     | Rel i -> clos_rel (fst e) i
     | Var x -> {mark = Red; term = FFlex (VarKey x) }
@@ -441,14 +316,121 @@ let mk_clos (e:_ usubs) t =
     | Construct kn -> {mark = Cstr; term = FConstruct (usubst_punivs e kn) }
     | Int i -> {mark = Cstr; term = FInt i}
     | Float f -> {mark = Cstr; term = FFloat f}
+    | String s -> {mark = Cstr; term = FString s}
     | (CoFix _|Lambda _|Fix _|Prod _|Evar _|App _|Case _|Cast _|LetIn _|Proj _|Array _) ->
         {mark = Red; term = FCLOS(t,e)}
 
 let injectu c u = mk_clos (subs_id 0, u) c
 
-let inject c = injectu c Univ.Instance.empty
+let inject c = injectu c UVars.Instance.empty
 
 let mk_irrelevant = { mark = Cstr; term = FIrrelevant }
+
+let is_irrelevant info r = match info.i_cache.i_mode with
+| Reduction -> false
+| Conversion -> match r with
+  | Sorts.Irrelevant -> true
+  | Sorts.RelevanceVar q -> info.i_cache.i_sigma.qvar_irrelevant q
+  | Sorts.Relevant -> false
+
+(************************************************************************)
+
+type table_val = (fconstr * bool array, Empty.t, UVars.Instance.t * bool * rewrite_rule list) constant_def
+
+module Table : sig
+  type t
+  val create : unit -> t
+  val lookup : clos_infos -> t -> table_key -> table_val
+end = struct
+  module Table = Hashtbl.Make(struct
+    type t = table_key
+    let equal = eq_table_key (eq_pair eq_constant_key UVars.Instance.equal)
+    let hash = hash_table_key (fun (c, _) -> Constant.UserOrd.hash c)
+  end)
+
+  type t = table_val Table.t
+
+  let create () = Table.create 17
+
+  exception Irrelevant
+
+  let shortcut_irrelevant info r =
+    if is_irrelevant info r then raise Irrelevant
+
+  let assoc_defined d =
+    match d with
+    | NamedDecl.LocalDef (_, c, _) -> inject c
+    | NamedDecl.LocalAssum (_, _) -> raise Not_found
+
+  let constant_value_in u = function
+    | Def b -> injectu b u
+    | OpaqueDef _ -> raise (NotEvaluableConst Opaque)
+    | Undef _ -> raise (NotEvaluableConst NoBody)
+    | Primitive p -> raise (NotEvaluableConst (IsPrimitive (u,p)))
+    | Symbol _ -> assert false
+    (*  Should already be dealt with *)
+
+  let value_of info ref =
+    try
+      let env = info.i_cache.i_env in
+      match ref with
+      | RelKey n ->
+        let i = n - 1 in
+        let d =
+          try Range.get env.env_rel_context.env_rel_map i
+          with Invalid_argument _ -> raise Not_found
+        in
+        shortcut_irrelevant info (RelDecl.get_relevance d);
+        let body =
+          match d with
+          | RelDecl.LocalAssum _ -> raise Not_found
+          | RelDecl.LocalDef (_, t, _) -> lift n t
+        in
+        Def (inject body, [||])
+      | VarKey id ->
+        let def = Environ.lookup_named id env in
+        shortcut_irrelevant info
+          (binder_relevance (NamedDecl.get_annot def));
+        let ts = RedFlags.red_transparent info.i_flags in
+        if TransparentState.is_transparent_variable ts id then
+          Def (assoc_defined def, [||])
+        else
+          raise Not_found
+      | ConstKey (cst,u) ->
+        let cb = lookup_constant cst env in
+        shortcut_irrelevant info (UVars.subst_instance_relevance u cb.const_relevance);
+        let ts = RedFlags.red_transparent info.i_flags in
+        if TransparentState.is_transparent_constant ts cst then match cb.const_body with
+        | Undef _ | Def _ | OpaqueDef _ | Primitive _ ->
+          let mask = match cb.const_body_code with
+          | None | Some (Vmemitcodes.BCalias _ | Vmemitcodes.BCconstant) -> [||]
+          | Some (Vmemitcodes.BCdefined (mask, _, _)) -> mask
+          in
+          Def (constant_value_in u cb.const_body, mask)
+        | Symbol b ->
+          let r = match Cmap_env.find_opt cst env.symb_pats with
+          | None -> assert false
+          | Some r -> r
+          in
+          raise (NotEvaluableConst (HasRules (u, b, r)))
+        else
+          raise Not_found
+    with
+    | Irrelevant -> Def (mk_irrelevant, [||])
+    | NotEvaluableConst (IsPrimitive (_u,op)) (* Const *) -> Primitive op
+    | NotEvaluableConst (HasRules (u, b, r)) -> Symbol (u, b, r)
+    | Not_found (* List.assoc *)
+    | NotEvaluableConst _ (* Const *) -> Undef None
+
+  let lookup info tab ref =
+    try Table.find tab ref with Not_found ->
+    let v = value_of info ref in
+    Table.add tab ref v; v
+end
+
+type clos_tab = Table.t
+
+let create_tab = Table.create
 
 (************************************************************************)
 
@@ -463,72 +445,12 @@ let mk_clos_vect env v = match v with
   [|mk_clos env v0; mk_clos env v1; mk_clos env v2; mk_clos env v3|]
 | v -> Array.Fun1.map mk_clos env v
 
-let is_irrelevant info r = match info.i_cache.i_mode, r with
-| Conversion, Sorts.Irrelevant -> true
-| Conversion, Sorts.RelevanceVar q -> not (info.i_cache.i_sigma.qvar_relevant q)
-| (Conversion | Reduction), (Sorts.Relevant | Sorts.Irrelevant | Sorts.RelevanceVar _) -> false
-
-let shortcut_irrelevant info r =
-  if is_irrelevant info r then raise Irrelevant
-
-let assoc_defined = function
-| LocalDef (_, c, _) -> inject c
-| LocalAssum (_, _) -> raise Not_found
-
-let constant_value_in u = function
-| Def b -> injectu b u
-| OpaqueDef _ -> raise (NotEvaluableConst Opaque)
-| Undef _ -> raise (NotEvaluableConst NoBody)
-| Primitive p -> raise (NotEvaluableConst (IsPrimitive (u,p)))
-
-let ref_value_cache info flags tab ref =
-  let env = info.i_cache.i_env in
-  try
-    KeyTable.find tab ref
-  with Not_found ->
-    let v =
-      try
-        let body =
-          match ref with
-          | RelKey n ->
-            let open! Context.Rel.Declaration in
-            let i = n - 1 in
-            let d =
-              try Range.get env.env_rel_context.env_rel_map i
-              with Invalid_argument _ -> raise Not_found
-            in
-            (* First check for irrelevance *)
-            let () = shortcut_irrelevant info (get_relevance d) in
-            let body = match d with
-              | LocalAssum _ -> raise Not_found
-              | LocalDef (_, t, _) -> lift n t
-            in
-            inject body
-          | VarKey id ->
-            let def = Environ.lookup_named id env in
-            let () = shortcut_irrelevant info (binder_relevance (get_annot def)) in
-            if TransparentState.is_transparent_variable flags id then assoc_defined def
-            else raise Not_found
-          | ConstKey (cst,u) ->
-            let cb = lookup_constant cst env in
-            let () = shortcut_irrelevant info (cb.const_relevance) in
-            if TransparentState.is_transparent_constant flags cst then constant_value_in u cb.const_body
-            else raise Not_found
-        in
-        Def body
-      with
-      | Irrelevant -> Def mk_irrelevant
-      | NotEvaluableConst (IsPrimitive (_u,op)) (* Const *) -> Primitive op
-      | Not_found (* List.assoc *)
-      | NotEvaluableConst _ (* Const *)
-        -> Undef None
-    in
-    KeyTable.add tab ref v; v
-
-let rec subst_constr (subst,usubst as e) c = match [@ocaml.warning "-4"] Constr.kind c with
+let rec subst_constr (subst,usubst as e) c =
+  let c = Vars.map_constr_relevance (usubst_relevance e) c in
+  match [@ocaml.warning "-4"] Constr.kind c with
 | Rel i ->
   begin match expand_rel i subst with
-  | Inl (k, lazy v) -> Vars.lift k v
+  | Inl (k, lazy v) -> Vars.lift_substituend k v
   | Inr (m, _) -> mkRel m
   end
 | Const _ | Ind _ | Construct _ | Sort _ -> subst_instance_constr usubst c
@@ -543,120 +465,165 @@ let rec subst_constr (subst,usubst as e) c = match [@ocaml.warning "-4"] Constr.
 | _ ->
   Constr.map_with_binders usubs_lift subst_constr e c
 
+let subst_context e ctx =
+  let open Context.Rel.Declaration in
+  let rec subst_context ctx = match ctx with
+  | [] -> e, []
+  | LocalAssum (na, ty) :: ctx ->
+    let e, ctx = subst_context ctx in
+    let ty = subst_constr e ty in
+    usubs_lift e, LocalAssum (na, ty) :: ctx
+  | LocalDef (na, ty, bdy) :: ctx ->
+    let e, ctx = subst_context ctx in
+    let ty = subst_constr e ty in
+    let bdy = subst_constr e bdy in
+    usubs_lift e, LocalDef (na, ty, bdy) :: ctx
+  in
+  snd @@ subst_context ctx
+
 (* The inverse of mk_clos: move back to constr *)
-(* XXX should there be universes in lfts???? *)
-let rec to_constr (lfts, usubst as ulfts) v =
-  let subst_us c = subst_instance_constr usubst c in
+let rec to_constr lfts v =
   match v.term with
     | FRel i -> mkRel (reloc_rel i lfts)
     | FFlex (RelKey p) -> mkRel (reloc_rel p lfts)
     | FFlex (VarKey x) -> mkVar x
-    | FAtom c -> subst_us (exliftn lfts c)
-    | FFlex (ConstKey op) -> subst_us (mkConstU op)
-    | FInd op -> subst_us (mkIndU op)
-    | FConstruct op -> subst_us (mkConstructU op)
+    | FAtom c -> exliftn lfts c
+    | FFlex (ConstKey op) -> mkConstU op
+    | FInd op -> mkIndU op
+    | FConstruct op -> mkConstructU op
     | FCaseT (ci, u, pms, p, c, ve, env) ->
-      to_constr_case ulfts ci u pms p NoInvert c ve env
+      to_constr_case lfts ci u pms p NoInvert c ve env
     | FCaseInvert (ci, u, pms, p, indices, c, ve, env) ->
-      let iv = CaseInvert {indices=Array.Fun1.map to_constr ulfts indices} in
-      to_constr_case ulfts ci u pms p iv c ve env
+      let iv = CaseInvert {indices=Array.Fun1.map to_constr lfts indices} in
+      to_constr_case lfts ci u pms p iv c ve env
     | FFix ((op,(lna,tys,bds)) as fx, e) ->
       if is_subs_id (fst e) && is_lift_id lfts then
-        subst_instance_constr (usubst_instance ulfts (snd e)) (mkFix fx)
+        subst_instance_constr (snd e) (mkFix fx)
       else
         let n = Array.length bds in
-        let subs_ty = comp_subs ulfts e in
-        let subs_bd = comp_subs (on_fst (el_liftn n) ulfts) (on_fst (subs_liftn n) e) in
+        let subs_ty = comp_subs lfts e in
+        let subs_bd = comp_subs (el_liftn n lfts) (on_fst (subs_liftn n) e) in
+        let lna = Array.Fun1.map usubst_binder subs_ty lna in
         let tys = Array.Fun1.map subst_constr subs_ty tys in
         let bds = Array.Fun1.map subst_constr subs_bd bds in
         mkFix (op, (lna, tys, bds))
     | FCoFix ((op,(lna,tys,bds)) as cfx, e) ->
       if is_subs_id (fst e) && is_lift_id lfts then
-        subst_instance_constr (usubst_instance ulfts (snd e)) (mkCoFix cfx)
+        subst_instance_constr (snd e) (mkCoFix cfx)
       else
         let n = Array.length bds in
-        let subs_ty = comp_subs ulfts e in
-        let subs_bd = comp_subs (on_fst (el_liftn n) ulfts) (on_fst (subs_liftn n) e) in
+        let subs_ty = comp_subs lfts e in
+        let subs_bd = comp_subs (el_liftn n lfts) (on_fst (subs_liftn n) e) in
+        let lna = Array.Fun1.map usubst_binder subs_ty lna in
         let tys = Array.Fun1.map subst_constr subs_ty tys in
         let bds = Array.Fun1.map subst_constr subs_bd bds in
         mkCoFix (op, (lna, tys, bds))
     | FApp (f,ve) ->
-        mkApp (to_constr ulfts f,
-               Array.Fun1.map to_constr ulfts ve)
-    | FProj (p,c) ->
-        mkProj (p,to_constr ulfts c)
+        mkApp (to_constr lfts f,
+               Array.Fun1.map to_constr lfts ve)
+    | FProj (p,r,c) ->
+        mkProj (p,r,to_constr lfts c)
 
     | FLambda (len, tys, f, e) ->
       if is_subs_id (fst e) && is_lift_id lfts then
-        subst_instance_constr (usubst_instance ulfts (snd e)) (Term.compose_lam (List.rev tys) f)
+        subst_instance_constr (snd e) (Term.compose_lam (List.rev tys) f)
       else
-        let subs = comp_subs ulfts e in
-        let tys = List.mapi (fun i (na, c) -> na, subst_constr (usubs_liftn i subs) c) tys in
+        let subs = comp_subs lfts e in
+        let tys = List.mapi (fun i (na, c) ->
+            usubst_binder subs na, subst_constr (usubs_liftn i subs) c)
+            tys
+        in
         let f = subst_constr (usubs_liftn len subs) f in
         Term.compose_lam (List.rev tys) f
     | FProd (n, t, c, e) ->
       if is_subs_id (fst e) && is_lift_id lfts then
-        mkProd (n, to_constr ulfts t, subst_instance_constr (usubst_instance ulfts (snd e)) c)
+        mkProd (n, to_constr lfts t, subst_instance_constr (snd e) c)
       else
-        let subs' = comp_subs ulfts e in
-        mkProd (n, to_constr ulfts t, subst_constr (usubs_lift subs') c)
+        let subs' = comp_subs lfts e in
+        mkProd (usubst_binder subs' n,
+                to_constr lfts t,
+                subst_constr (usubs_lift subs') c)
     | FLetIn (n,b,t,f,e) ->
-      let subs = comp_subs (on_fst el_lift ulfts) (usubs_lift e) in
-        mkLetIn (n, to_constr ulfts b,
-                    to_constr ulfts t,
-                    subst_constr subs f)
+      let subs = comp_subs (el_lift lfts) (usubs_lift e) in
+      mkLetIn (usubst_binder subs n,
+               to_constr lfts b,
+               to_constr lfts t,
+               subst_constr subs f)
     | FEvar (ev, args, env, repack) ->
-      let subs = comp_subs ulfts env in
+      let subs = comp_subs lfts env in
       repack (ev, List.map (fun a -> subst_constr subs a) args)
-    | FLIFT (k,a) -> to_constr (el_shft k lfts, usubst) a
+    | FLIFT (k,a) -> to_constr (el_shft k lfts) a
 
     | FInt i ->
        Constr.mkInt i
     | FFloat f ->
         Constr.mkFloat f
+    | FString s ->
+        Constr.mkString s
 
     | FArray (u,t,ty) ->
-      let u = usubst_instance ((),usubst) u in
-      let def = to_constr ulfts (Parray.default t) in
+      let def = to_constr lfts (Parray.default t) in
       let t = Array.init (Parray.length_int t) (fun i ->
-          to_constr ulfts (Parray.get t (Uint63.of_int i)))
+          to_constr lfts (Parray.get t (Uint63.of_int i)))
       in
-      let ty = to_constr ulfts ty in
+      let ty = to_constr lfts ty in
       mkArray(u, t, def,ty)
 
     | FCLOS (t,env) ->
       if is_subs_id (fst env) && is_lift_id lfts then
-        subst_instance_constr (usubst_instance ulfts (snd env)) t
+        subst_instance_constr (snd env) t
       else
-        let subs = comp_subs ulfts env in
+        let subs = comp_subs lfts env in
         subst_constr subs t
 
     | FIrrelevant -> assert (!Flags.in_debugger); mkVar(Id.of_string"_IRRELEVANT_")
     | FLOCKED -> assert (!Flags.in_debugger); mkVar(Id.of_string"_LOCKED_")
 
-and to_constr_case (lfts,_ as ulfts) ci u pms p iv c ve env =
-  let subs = comp_subs ulfts env in
+and to_constr_case lfts ci u pms (p,r) iv c ve env =
+  let subs = comp_subs lfts env in
+  let r = usubst_relevance subs r in
   if is_subs_id (fst env) && is_lift_id lfts then
-    mkCase (ci, usubst_instance subs u, pms, p, iv, to_constr ulfts c, ve)
+    mkCase (ci, usubst_instance subs u, pms, (p,r), iv, to_constr lfts c, ve)
   else
     let f_ctx (nas, c) =
+      let nas = Array.map (usubst_binder subs) nas in
       let c = subst_constr (usubs_liftn (Array.length nas) subs) c in
       (nas, c)
     in
-    mkCase (ci, usubst_instance subs u, Array.map (fun c -> subst_constr subs c) pms,
-            f_ctx p,
+    mkCase (ci,
+            usubst_instance subs u,
+            Array.map (fun c -> subst_constr subs c) pms,
+            (f_ctx p,r),
             iv,
-            to_constr ulfts c,
+            to_constr lfts c,
             Array.map f_ctx ve)
 
-and comp_subs (el,u) (s,u') =
-  Esubst.lift_subst (fun el c -> lazy (to_constr (el,u) c)) el s, u'
+and comp_subs el (s,u') =
+  Esubst.lift_subst (fun el c -> lazy (Vars.make_substituend @@ to_constr el c)) el s, u'
 
 (* This function defines the correspondence between constr and
    fconstr. When we find a closure whose substitution is the identity,
    then we directly return the constr to avoid possibly huge
    reallocation. *)
-let term_of_fconstr c = to_constr (el_id, Univ.Instance.empty) c
+let term_of_fconstr c = to_constr el_id c
+
+let subst_context env ctx =
+  if is_subs_id (fst env) then
+    subst_instance_context (snd env) ctx
+  else
+    let subs = comp_subs el_id env in
+    subst_context subs ctx
+
+let it_mkLambda_or_LetIn ctx t =
+  let open Context.Rel.Declaration in
+  match List.rev ctx with
+  | [] -> t
+  | LocalAssum (n, ty) :: ctx ->
+      let assums, ctx = List.map_until (function LocalAssum (n, ty) -> Some (n, ty) | LocalDef _ -> None) ctx in
+      let assums = (n, ty) :: assums in
+      { term = FLambda(List.length assums, assums, Term.it_mkLambda_or_LetIn (term_of_fconstr t) (List.rev ctx), (subs_id 0, UVars.Instance.empty)); mark = t.mark }
+  | LocalDef _ :: _ ->
+      mk_clos (subs_id 0, UVars.Instance.empty) (Term.it_mkLambda_or_LetIn (term_of_fconstr t) ctx)
 
 (* fstrong applies unfreeze_fun recursively on the (freeze) term and
  * yields a term.  Assumes that the unfreeze_fun never returns a
@@ -673,9 +640,9 @@ let rec zip m stk =
         let t = FCaseT(ci, u, pms, p, m, br, e) in
         let mark = (neutr m.mark) in
         zip {mark; term=t} s
-    | Zproj p :: s ->
+    | Zproj (p,r) :: s ->
         let mark = (neutr m.mark) in
-        zip {mark; term=FProj(Projection.make p true,m)} s
+        zip {mark; term=FProj(Projection.make p true,r,m)} s
     | Zfix(fx,par)::s ->
         zip fx (par @ append_stack [|m|] s)
     | Zshift(n)::s ->
@@ -718,11 +685,11 @@ let strip_update_shift_app_red head stk =
   strip_rec [] head 0 stk
 
 let strip_update_shift_app head stack =
-  assert (match head.mark with Red -> false | Ntrl | Cstr -> true);
+  assert (not (is_red head.mark));
   strip_update_shift_app_red head stack
 
 let get_nth_arg head n stk =
-  assert (match head.mark with Red -> false | Ntrl | Cstr -> true);
+  assert (not (is_red head.mark));
   let rec strip_rec rstk h n = function
     | Zshift(k) as e :: s ->
         strip_rec (e::rstk) (lift_fconstr k h) n s
@@ -880,7 +847,7 @@ let inductive_subst mib u pms =
   mk_pms (Array.length pms - 1) mib.mind_params_ctxt, u
 
 (* Iota-reduction: feed the arguments of the constructor to the branch *)
-let get_branch infos depth ci u pms (ind, c) br e args =
+let get_branch infos depth ci pms ((ind, c), u) br e args =
   let i = c - 1 in
   let args = drop_parameters depth ci.ci_npar args in
   let (_nas, br) = br.(i) in
@@ -935,7 +902,7 @@ let get_branch infos depth ci u pms (ind, c) br e args =
     @raise Not_found if the inductive is not a primitive record, or if the
     constructor is partially applied.
  *)
-let eta_expand_ind_stack env ind m s (f, s') =
+let eta_expand_ind_stack env (ind,u) m s (f, s') =
   let open Declarations in
   let mib = lookup_mind (fst ind) env in
   (* disallow eta-exp for non-primitive records *)
@@ -949,9 +916,9 @@ let eta_expand_ind_stack env ind m s (f, s') =
     let (depth, args, _s) = strip_update_shift_app m s in
     (** Try to drop the params, might fail on partially applied constructors. *)
     let argss = try_drop_parameters depth pars args in
-    let hstack = Array.map (fun p ->
+    let hstack = Array.map (fun (p,r) ->
         { mark = Red; (* right can't be a constructor though *)
-          term = FProj (Projection.make p true, right) })
+          term = FProj (Projection.make p true, UVars.subst_instance_relevance u r, right) })
         projs
     in
     argss, [Zapp hstack]
@@ -995,10 +962,10 @@ let contract_fix_vect fix =
   in
   (on_fst (fun env -> mk_subs env 0) env, thisbody)
 
-let unfold_projection info p =
+let unfold_projection info p r =
   if red_projection info.i_flags p
   then
-    Some (Zproj (Projection.repr p))
+    Some (Zproj (Projection.repr p, r))
   else None
 
 (************************************************************************)
@@ -1011,11 +978,11 @@ module FNativeEntries =
     type elem = fconstr
     type args = fconstr array
     type evd = unit
-    type uinstance = Univ.Instance.t
+    type uinstance = UVars.Instance.t
 
     let mk_construct c =
       (* All constructors used in primitive functions are relevant *)
-      { mark = Cstr; term = FConstruct (Univ.in_punivs c) }
+      { mark = Cstr; term = FConstruct (UVars.in_punivs c) }
 
     let get = Array.get
 
@@ -1027,6 +994,11 @@ module FNativeEntries =
     let get_float () e =
       match [@ocaml.warning "-4"] e.term with
       | FFloat f -> f
+      | _ -> assert false
+
+    let get_string () e =
+      match [@ocaml.warning "-4"] e.term with
+      | FString s -> s
       | _ -> assert false
 
     let get_parray () e =
@@ -1044,7 +1016,7 @@ module FNativeEntries =
       match retro.Retroknowledge.retro_int63 with
       | Some c ->
         defined_int := true;
-        fint := { mark = Ntrl; term = FFlex (ConstKey (Univ.in_punivs c)) }
+        fint := { mark = Ntrl; term = FFlex (ConstKey (UVars.in_punivs c)) }
       | None -> defined_int := false
 
     let defined_float = ref false
@@ -1054,8 +1026,18 @@ module FNativeEntries =
       match retro.Retroknowledge.retro_float64 with
       | Some c ->
         defined_float := true;
-        ffloat := { mark = Ntrl; term = FFlex (ConstKey (Univ.in_punivs c)) }
+        ffloat := { mark = Ntrl; term = FFlex (ConstKey (UVars.in_punivs c)) }
       | None -> defined_float := false
+
+    let defined_string = ref false
+    let fstring = ref dummy
+
+    let init_string retro =
+      match retro.Retroknowledge.retro_string with
+      | Some c ->
+        defined_string := true;
+        fstring := { mark = Ntrl; term = FFlex (ConstKey (UVars.in_punivs c)) }
+      | None -> defined_string := false
 
     let defined_bool = ref false
     let ftrue = ref dummy
@@ -1105,7 +1087,7 @@ module FNativeEntries =
         fLt := mk_construct cLt;
         fGt := mk_construct cGt;
         let (icmp, _) = cEq in
-        fcmp := { mark = Ntrl; term = FInd (Univ.in_punivs icmp) }
+        fcmp := { mark = Ntrl; term = FInd (UVars.in_punivs icmp) }
       | None -> defined_cmp := false
 
     let defined_f_cmp = ref false
@@ -1160,6 +1142,7 @@ module FNativeEntries =
       current_retro := env.retroknowledge;
       init_int !current_retro;
       init_float !current_retro;
+      init_string !current_retro;
       init_bool !current_retro;
       init_carry !current_retro;
       init_pair !current_retro;
@@ -1178,6 +1161,10 @@ module FNativeEntries =
     let check_float env =
       check_env env;
       assert (!defined_float)
+
+    let check_string env =
+      check_env env;
+      assert (!defined_string)
 
     let check_bool env =
       check_env env;
@@ -1214,6 +1201,10 @@ module FNativeEntries =
     let mkFloat env f =
       check_float env;
       { mark = Cstr; term = FFloat f }
+
+    let mkString env s =
+      check_string env;
+      { mark = Cstr; term = FString s }
 
     let mkBool env b =
       check_bool env;
@@ -1311,8 +1302,9 @@ let rec skip_irrelevant_stack info stk = match stk with
 | (Zfix _ | Zproj _) :: s ->
   (* Typing rules ensure that fix / proj over SProp is irrelevant *)
   skip_irrelevant_stack info s
-| ZcaseT (ci, _, _, _, _, _) :: s ->
-  if is_irrelevant info ci.ci_relevance then skip_irrelevant_stack info s
+| ZcaseT (_, _, _, (_,r), _, e) :: s ->
+  let r = usubst_relevance e r in
+  if is_irrelevant info r then skip_irrelevant_stack info s
   else stk
 | Zprimitive _ :: _ -> assert false (* no irrelevant primitives so far *)
 | Zupdate m :: s ->
@@ -1320,13 +1312,11 @@ let rec skip_irrelevant_stack info stk = match stk with
   let () = update m mk_irrelevant.mark mk_irrelevant.term in
   skip_irrelevant_stack info s
 
-let is_irrelevant_constructor infos (ind,_) = match infos.i_cache.i_mode with
-| Conversion -> Indset_env.mem ind infos.i_cache.i_env.irr_inds
-| Reduction -> false
-
-let is_irrelevant_projection infos p = match infos.i_cache.i_mode with
-| Conversion -> not @@ Projection.Repr.relevant @@ Projection.repr p
-| Reduction -> false
+let is_irrelevant_constructor infos ((ind,_),u) =
+  match Indmap_env.find_opt ind (info_env infos).Environ.irr_inds with
+  | None -> false
+  | Some r ->
+    is_irrelevant infos @@ UVars.subst_instance_relevance u r
 
 (*********************************************************************)
 (* A machine that inspects the head of a term until it finds an
@@ -1339,29 +1329,31 @@ let rec knh info m stk =
     | FCLOS(t,e) -> knht info e t (zupdate info m stk)
     | FLOCKED -> assert false
     | FApp(a,b) -> knh info a (append_stack b (zupdate info m stk))
-    | FCaseT(ci,u,pms,p,t,br,e) ->
-      if is_irrelevant info ci.ci_relevance then
+    | FCaseT(ci,u,pms,(_,r as p),t,br,e) ->
+      let r' = usubst_relevance e r in
+      if is_irrelevant info r' then
         (mk_irrelevant, skip_irrelevant_stack info stk)
       else
         knh info t (ZcaseT(ci,u,pms,p,br,e)::zupdate info m stk)
-    | FFix (((ri, n), (lna, _, _)), _) ->
-      if is_irrelevant info (lna.(n)).binder_relevance then
+    | FFix (((ri, n), (lna, _, _)), e) ->
+      if is_irrelevant info (usubst_relevance e (lna.(n)).binder_relevance) then
         (mk_irrelevant, skip_irrelevant_stack info stk)
       else
         (match get_nth_arg m ri.(n) stk with
              (Some(pars,arg),stk') -> knh info arg (Zfix(m,pars)::stk')
            | (None, stk') -> (m,stk'))
-    | FProj (p,c) ->
-      if is_irrelevant_projection info p then
+    | FProj (p,r,c) ->
+      if is_irrelevant info r then
         (mk_irrelevant, skip_irrelevant_stack info stk)
       else
-      (match unfold_projection info p with
+      (match unfold_projection info p r with
        | None -> (m, stk)
        | Some s -> knh info c (s :: zupdate info m stk))
 
 (* cases where knh stops *)
     | (FFlex _|FLetIn _|FConstruct _|FEvar _|FCaseInvert _|FIrrelevant|
-       FCoFix _|FLambda _|FRel _|FAtom _|FInd _|FProd _|FInt _|FFloat _|FArray _) ->
+       FCoFix _|FLambda _|FRel _|FAtom _|FInd _|FProd _|FInt _|FFloat _|
+       FString _|FArray _) ->
         (m, stk)
 
 (* The same for pure terms *)
@@ -1369,27 +1361,35 @@ and knht info e t stk =
   match kind t with
     | App(a,b) ->
         knht info e a (append_stack (mk_clos_vect e b) stk)
-    | Case(ci,u,pms,p,NoInvert,t,br) ->
-      if is_irrelevant info ci.ci_relevance then
+    | Case(ci,u,pms,(_,r as p),NoInvert,t,br) ->
+      if is_irrelevant info (usubst_relevance e r) then
         (mk_irrelevant, skip_irrelevant_stack info stk)
       else
         knht info e t (ZcaseT(ci, u, pms, p, br, e)::stk)
-    | Case(ci,u,pms,p,CaseInvert{indices},t,br) ->
-      if is_irrelevant info ci.ci_relevance then
+    | Case(ci,u,pms,(_,r as p),CaseInvert{indices},t,br) ->
+      if is_irrelevant info (usubst_relevance e r) then
         (mk_irrelevant, skip_irrelevant_stack info stk)
       else
         let term = FCaseInvert (ci, u, pms, p, (Array.map (mk_clos e) indices), mk_clos e t, br, e) in
         { mark = Red; term }, stk
     | Fix (((_, n), (lna, _, _)) as fx) ->
-      if is_irrelevant info (lna.(n)).binder_relevance then
+      if is_irrelevant info (usubst_relevance e (lna.(n)).binder_relevance) then
         (mk_irrelevant, skip_irrelevant_stack info stk)
       else
         knh info { mark = Cstr; term = FFix (fx, e) } stk
     | Cast(a,_,_) -> knht info e a stk
     | Rel n -> knh info (clos_rel (fst e) n) stk
-    | Proj (p, c) -> knh info { mark = Red; term = FProj (p, mk_clos e c) } stk
-    | (Ind _|Const _|Construct _|Var _|Meta _ | Sort _ | Int _|Float _) -> (mk_clos e t, stk)
-    | CoFix cfx -> { mark = Cstr; term = FCoFix (cfx,e) }, stk
+    | Proj (p, r, c) ->
+      let r = usubst_relevance e r in
+      if is_irrelevant info r then
+        (mk_irrelevant, skip_irrelevant_stack info stk)
+      else begin match unfold_projection info p r with
+      | None -> ({ mark = Red; term = FProj (p, r, mk_clos e c) }, stk)
+      | Some s -> knht info e c (s :: stk)
+      end
+    | (Ind _|Const _|Construct _|Var _|Meta _ | Sort _ | Int _|Float _|String _) -> (mk_clos e t, stk)
+    | CoFix cfx ->
+      { mark = Cstr; term = FCoFix (cfx,e) }, stk
     | Lambda _ -> { mark = Cstr ; term = mk_lambda e t }, stk
     | Prod (n, t, c) ->
       { mark = Ntrl; term = FProd (n, mk_clos e t, c, e) }, stk
@@ -1399,11 +1399,12 @@ and knht info e t stk =
       begin match info.i_cache.i_sigma.evar_expand ev with
       | EvarDefined c -> knht info e c stk
       | EvarUndefined (evk, args) ->
-        if info.i_cache.i_sigma.evar_relevant ev then
+        assert (UVars.Instance.is_empty (snd e));
+        if info.i_cache.i_sigma.evar_irrelevant ev then
+          (mk_irrelevant, skip_irrelevant_stack info stk)
+        else
           let repack = info.i_cache.i_sigma.evar_repack in
           { mark = Ntrl; term = FEvar (evk, args, e, repack) }, stk
-        else
-          (mk_irrelevant, skip_irrelevant_stack info stk)
       end
     | Array(u,t,def,ty) ->
       let len = Array.length t in
@@ -1418,62 +1419,481 @@ let conv : (clos_infos -> clos_tab -> fconstr -> fconstr -> bool) ref
   = ref (fun _ _ _ _ -> (assert false : bool))
 let set_conv f = conv := f
 
+type ('a, 'b) reduction = {
+  red_ret : clos_infos -> Table.t -> pat_state:'b -> ?failed:bool -> (fconstr * stack) -> 'a;
+  red_kni : clos_infos -> Table.t -> pat_state:'b -> fconstr -> stack -> 'a;
+  red_knit : clos_infos -> Table.t -> pat_state:'b -> (fconstr Esubst.subs * UVars.Instance.t) -> Constr.t -> stack -> 'a;
+}
+
+type (_, _) escape =
+  | No:  ('i, 'i) escape
+  | Yes: ('a, 'a option) escape
+
+module RedPattern :
+sig
+
+type ('constr, 'stack, 'context) resume_state
+
+type ('constr, 'stack, 'context, _) depth =
+  | Nil: ('constr * 'stack, 'ret) escape -> ('constr, 'stack, 'context, 'ret) depth
+  | Cons: ('constr, 'stack, 'context) resume_state * ('constr, 'stack, 'context, 'ret) depth -> ('constr, 'stack, 'context, 'ret) depth
+
+type 'a patstate = (fconstr, stack, rel_context, 'a) depth
+
+val match_symbol : ('a, 'a patstate) reduction -> clos_infos -> Table.t ->
+  pat_state:(fconstr, stack, rel_context, 'a) depth -> table_key -> UVars.Instance.t * bool * rewrite_rule list -> stack -> 'a
+
+val match_head : ('a, 'a patstate) reduction -> clos_infos -> Table.t ->
+  pat_state:(fconstr, stack, rel_context, 'a) depth -> (fconstr, stack, rel_context) resume_state -> fconstr -> stack -> 'a
+
+end =
+struct
+
+type 'constr partial_subst = {
+  subst: ('constr, Sorts.Quality.t, Univ.Level.t) Partial_subst.t;
+  rhs: constr;
+}
+
+type 'constr subst_status = Dead | Live of 'constr partial_subst
+
+type 'a status =
+  | Check of 'a
+  | Ignore
+
+module Status = struct
+  let split_array n = function
+  | Check a when Array.length a <> n -> invalid_arg "Status.split_array"
+  | Check a -> Array.init n (fun i -> Check (Array.unsafe_get a i))
+  | Ignore as p -> Array.make n p
+
+  let fold_left f a = function Check b -> f a b | Ignore -> a
+end
+
+type ('a, 'b) next =
+  | Continue of 'a
+  | Return of 'b
+
+type ('constr, 'stack, 'context) state =
+  | LocStart of { elims: pattern_elimination list status array; context: 'context; head: 'constr; stack: 'stack; next: ('constr, 'stack, 'context) state_next }
+  | LocArg of { patterns: pattern_argument status array; context: 'context; arg: 'constr; next: ('constr, 'stack, 'context) state }
+
+and ('constr, 'stack, 'context) state_next = (('constr, 'stack, 'context) state, bool * 'constr * 'stack) next
+
+type ('constr, 'stack, 'context) resume_state =
+  { states: 'constr subst_status array; context: 'context; patterns: head_elimination status array; next: ('constr, 'stack, 'context) state }
+
+type ('constr, 'stack, 'context, _) depth =
+  | Nil: ('constr * 'stack, 'ret) escape -> ('constr, 'stack, 'context, 'ret) depth
+  | Cons: ('constr, 'stack, 'context) resume_state * ('constr, 'stack, 'context, 'ret) depth -> ('constr, 'stack, 'context, 'ret) depth
+
+type 'a patstate = (fconstr, stack, rel_context, 'a) depth
+
+let extract_or_kill filter a status =
+  let step elim status =
+    match elim, status with
+    | Ignore, s -> s
+    | _, Dead -> Dead
+    | Check e, Live s -> match filter (e, s) with
+      | None -> Dead
+      | Some s -> Live s
+  in
+  Array.map2 step a status
+
+let extract_or_kill2 filter a status =
+  let step elim status =
+    match elim, status with
+   | Ignore, s -> Ignore, s
+   | _, Dead -> Ignore, Dead
+   | Check e, Live s -> match filter (e, s) with
+      | None -> Ignore, Dead
+      | Some (p, s) -> Check p, Live s
+  in
+  Array.split @@ Array.map2 step a status
+
+let extract_or_kill3 filter a status =
+  let step elim status =
+    match elim, status with
+    | Ignore, s -> Ignore, Ignore, s
+    | _, Dead -> Ignore, Ignore, Dead
+    | Check e, Live s -> match filter (e, s) with
+      | None -> Ignore, Ignore, Dead
+      | Some (p1, p2, s) -> Check p1, Check p2, Live s
+  in
+  Array.split3 @@ Array.map2 step a status
+
+let extract_or_kill4 filter a status =
+  let step elim status =
+    match elim, status with
+    | Ignore, s -> Ignore, Ignore, Ignore, s
+    | _, Dead -> Ignore, Ignore, Ignore, Dead
+    | Check e, Live s -> match filter (e, s) with
+      | None -> Ignore, Ignore, Ignore, Dead
+      | Some (p1, p2, p3, s) -> Check p1, Check p2, Check p3, Live s
+  in
+  Array.split4 @@ Array.map2 step a status
+
+let rec match_main : type a. (a, a patstate) reduction -> _ -> _ -> pat_state:(fconstr, stack, _, a) depth -> _ -> _ -> a =
+  fun red info tab ~pat_state states loc ->
+  if Array.for_all (function Dead -> true | Live _ -> false) states then match_kill red info tab ~pat_state loc else
+  match [@ocaml.warning "-4"] loc with
+  | LocStart { elims; context; head; stack; next = Return _ as next } ->
+    begin match Array.find2_map (fun state elim -> match state, elim with Live s, Check [] -> Some s | _ -> None) states elims with
+    | Some { subst; rhs } ->
+        let subst, qsubst, usubst = Partial_subst.to_arrays subst in
+        let subst = Array.fold_right subs_cons subst (subs_id 0) in
+        let usubst = UVars.Instance.of_array (qsubst, usubst) in
+        let m' = mk_clos (subst, usubst) rhs in
+        begin match pat_state with
+        | Nil Yes -> Some (m', stack)
+        | _ -> red.red_kni info tab ~pat_state m' stack
+        end
+    | None -> match_elim red info tab ~pat_state next context states elims head stack
+    end
+  | LocArg { patterns; context; arg; next } ->
+      match_arg red info tab ~pat_state next context states patterns arg
+  | LocStart { elims; context; head; stack; next } ->
+      match_elim red info tab ~pat_state next context states elims head stack
+
+and match_kill : 'a. ('a, 'a patstate) reduction -> _ -> _ -> pat_state:(fconstr, stack, _, 'a) depth -> _ -> 'a =
+  fun red info tab ~pat_state -> function
+  | LocArg { next; _ } -> match_kill red info tab ~pat_state next
+  | LocStart { head; stack; next; _ } ->
+      ignore (zip head stack);
+      match next with
+      | Continue next -> match_kill red info tab ~pat_state next
+      | Return k -> try_unfoldfix red info tab ~pat_state k
+
+and match_endstack : 'a. ('a, 'a patstate) reduction -> _ -> _ -> pat_state:(_, _, _, 'a) depth -> _ -> _ -> 'a =
+  fun red info tab ~pat_state states next ->
+  match next with
+  | Continue next -> match_main red info tab ~pat_state states next
+  | Return k ->
+      assert (Array.for_all (function Dead -> true | Live _ -> false) states);
+      try_unfoldfix red info tab ~pat_state k
+
+and try_unfoldfix : 'a. ('a, 'a patstate) reduction -> _ -> _ -> pat_state:(_, _, _, 'a) depth -> _ -> 'a =
+  fun red info tab ~pat_state (b, m, stk) ->
+  if not b then red.red_ret info tab ~pat_state ~failed:true (m, stk) else
+  let _, cargs, stack = strip_update_shift_app_red m stk in
+  match [@ocaml.warning "-4"] stack with
+  | Zfix (fx, par) :: s ->
+    let rarg = fapp_stack(m,cargs) in
+    let stk' = par @ append_stack [|rarg|] s in
+    let (fxe,fxbd) = contract_fix_vect fx.term in
+    red.red_knit info tab ~pat_state fxe fxbd stk'
+  | _ -> red.red_ret info tab ~pat_state ~failed:true (m, stk)
+
+and match_elim : 'a. ('a, 'a patstate) reduction -> _ -> _ -> pat_state:(fconstr, stack, _, 'a) depth -> _ -> _ -> _ -> _ -> _ -> _ -> 'a =
+  fun red info tab ~pat_state next context states elims head stk ->
+  match stk with
+  | Zapp args :: s ->
+      let pargselims, states = extract_or_kill2 (function [@ocaml.warning "-4"] PEApp pargs :: es, subst -> Some ((pargs, es), subst) | _ -> None) elims states in
+      let na = Array.length args in
+      let np = Array.fold_left (Status.fold_left (fun a (pargs, _) -> min a (Array.length pargs))) na pargselims in
+      let pargs, elims, states =
+        extract_or_kill3 (fun ((pargs, elims), subst) ->
+          let npp = Array.length pargs in
+          if npp == np then Some (pargs, elims, subst) else
+          let fst, lst = Array.chop np pargs in
+          Some (fst, PEApp lst :: elims, subst))
+          pargselims states
+      in
+      let args, rest = Array.chop np args in
+      let head = {mark=neutr head.mark; term=FApp(head, args)} in
+      let stack = if Array.length rest > 0 then Zapp rest :: s else s in
+      let loc = LocStart { elims; context; head; stack; next } in
+      let loc = Array.fold_right2 (fun patterns arg next -> LocArg { patterns; context; arg; next }) (Array.transpose (Array.map (Status.split_array np) pargs)) args loc in
+      match_main red info tab ~pat_state states loc
+  | Zshift k :: s -> match_elim red info tab ~pat_state next context states elims (lift_fconstr k head) s
+  | Zupdate m :: s ->
+      let () = update m head.mark head.term in
+      match_elim red info tab ~pat_state next context states elims head s
+  | ZcaseT (ci, u, pms, (p, r), brs, e) :: s ->
+      let t = FCaseT(ci, u, pms, (p, r), head, brs, e) in
+      let mark = neutr head.mark in
+      let head = {mark; term=t} in
+      let specif = Environ.lookup_mind (fst ci.ci_ind) info.i_cache.i_env in
+      let specif = (specif, specif.mind_packets.(snd ci.ci_ind)) in
+      let ntys_ret = Environ.expand_arity specif (ci.ci_ind, u) pms (fst p) in
+      let ntys_brs = Environ.expand_branch_contexts specif u pms brs in
+      let prets, pbrss, elims, states = extract_or_kill4 (function [@ocaml.warning "-4"]
+      | PECase (pind, pu, pret, pbrs) :: es, psubst ->
+        if not @@ Ind.CanOrd.equal pind ci.ci_ind then None else
+          let subst = UVars.Instance.pattern_match pu u psubst.subst in
+          Option.map (fun subst -> (pret, pbrs, es, { psubst with subst })) subst
+      | _ -> None)
+          elims states
+      in
+      let loc = LocStart { elims; context; head; stack=s; next } in
+      let ntys_ret = subst_context e ntys_ret in
+      let ret = mk_clos (usubs_liftn (Context.Rel.length ntys_ret) e) (snd p) in
+      let brs = Array.map2 (fun ctx br -> subst_context e ctx, mk_clos (usubs_liftn (Context.Rel.length ctx) e) (snd br)) ntys_brs brs in
+      let loc = Array.fold_right2 (fun patterns (ctx, arg) next -> LocArg { patterns; context = ctx @ context; arg; next }) (Array.transpose (Array.map (Status.split_array (Array.length brs)) pbrss)) brs loc in
+      let loc = LocArg { patterns = prets; context = ntys_ret @ context; arg = ret; next = loc } in
+      match_main red info tab ~pat_state states loc
+  | Zproj (proj', r) :: s ->
+      let mark = (neutr head.mark) in
+      let head = {mark; term=FProj(Projection.make proj' true, r, head)} in
+      let elims, states = extract_or_kill2 (function [@ocaml.warning "-4"]
+      | PEProj proj :: es, subst ->
+        if not @@ Projection.Repr.CanOrd.equal proj proj' then None else
+        Some (es, subst)
+      | _ -> None) elims states
+      in
+      let loc = LocStart { elims; context; head; stack=s; next } in
+      match_main red info tab ~pat_state states loc
+  | Zfix _ :: _ | Zprimitive _ :: _ ->
+      let states = extract_or_kill (fun _ -> None) elims states in
+      ignore (zip head stk);
+      match_endstack red info tab ~pat_state states next
+  | [] ->
+      let states = extract_or_kill (function [], subst -> Some subst | _ -> None) elims states in
+      match_endstack red info tab ~pat_state states next
+
+and match_arg : 'a. ('a, 'a patstate) reduction -> _ -> _ -> pat_state:(fconstr, stack, _, 'a) depth -> _ -> _ -> _ -> _ -> _ -> 'a =
+  fun red info tab ~pat_state next context states patterns t ->
+  let match_deeper = ref false in
+  let t' = it_mkLambda_or_LetIn context t in
+  let patterns, states = Array.split @@ Array.map2
+    (function Dead -> fun _ -> Ignore, Dead | (Live ({ subst; _ } as psubst) as state) -> function
+      | Ignore -> Ignore, state
+      | Check EHole i -> Ignore, Live { psubst with subst = Partial_subst.add_term i t' subst }
+      | Check EHoleIgnored -> Ignore, state
+      | Check ERigid p -> match_deeper := true; Check p, state
+    ) states patterns in
+  if !match_deeper then
+    let pat_state = Cons ({ states; context; patterns; next }, pat_state) in
+    red.red_kni info tab ~pat_state t []
+  else
+    match_main red info tab ~pat_state states next
+
+and match_head : 'a. ('a, 'a patstate) reduction -> _ -> _ -> pat_state:(fconstr, stack, _, 'a) depth -> _ -> _ -> _ -> _ -> _ -> _ -> 'a =
+  fun red info tab ~pat_state next context states patterns t stk ->
+  match [@ocaml.warning "-4"] t.term with
+  | FInd (ind', u) ->
+    let elims, states = extract_or_kill2 (function [@ocaml.warning "-4"]
+    | (PHInd (ind, pu), elims), psubst ->
+      if not @@ Ind.CanOrd.equal ind ind' then None else
+      let subst = UVars.Instance.pattern_match pu u psubst.subst in
+      Option.map (fun subst -> elims, { psubst with subst }) subst
+    | _ -> None) patterns states
+    in
+    let loc = LocStart { elims; context; head=t; stack=stk; next=Continue next } in
+    match_main red info tab ~pat_state states loc
+  | FConstruct (constr', u) ->
+    let elims, states = extract_or_kill2 (function [@ocaml.warning "-4"]
+    | (PHConstr (constr, pu), elims), psubst ->
+      if not @@ Construct.CanOrd.equal constr constr' then None else
+      let subst = UVars.Instance.pattern_match pu u psubst.subst in
+      Option.map (fun subst -> elims, { psubst with subst }) subst
+    | _ -> None) patterns states
+    in
+    let loc = LocStart { elims; context; head=t; stack=stk; next=Continue next } in
+    match_main red info tab ~pat_state states loc
+  | FAtom t' -> begin match [@ocaml.warning "-4"] kind t' with
+    | Sort s ->
+      let elims, states = extract_or_kill2 (function [@ocaml.warning "-4"]
+      | (PHSort ps, elims), psubst ->
+        let subst = Sorts.pattern_match ps s psubst.subst in
+        Option.map (fun subst -> elims, { psubst with subst }) subst
+      | _ -> None) patterns states
+      in
+      let loc = LocStart { elims; context; head=t; stack=stk; next=Continue next } in
+      match_main red info tab ~pat_state states loc
+    | Meta _ ->
+      let elims, states = extract_or_kill2 (fun _ -> None) patterns states in
+      let loc = LocStart { elims; context; head=t; stack=stk; next=Continue next } in
+      match_main red info tab ~pat_state states loc
+    | _ -> assert false
+    end
+  | FFlex (ConstKey (c', u)) ->
+    let elims, states = extract_or_kill2 (function [@ocaml.warning "-4"]
+    | (PHSymbol (c, pu), elims), psubst ->
+      if not @@ Constant.CanOrd.equal c c' then None else
+      let subst = UVars.Instance.pattern_match pu u psubst.subst in
+      Option.map (fun subst -> elims, { psubst with subst }) subst
+    | _ -> None) patterns states
+    in
+    let loc = LocStart { elims; context; head=t; stack=stk; next=Continue next } in
+    match_main red info tab ~pat_state states loc
+  | FRel n ->
+    let elims, states = extract_or_kill2 (function [@ocaml.warning "-4"]
+    | (PHRel n', elims), psubst ->
+      if not @@ Int.equal n n' then None else
+      Some (elims, psubst)
+    | _ -> None) patterns states
+    in
+    let loc = LocStart { elims; context; head=t; stack=stk; next=Continue next } in
+    match_main red info tab ~pat_state states loc
+  | FInt i' ->
+    let elims, states = extract_or_kill2 (function [@ocaml.warning "-4"]
+    | (PHInt i, elims), psubst ->
+      if not @@ Uint63.equal i i' then None else
+      Some (elims, psubst)
+    | _ -> None) patterns states
+    in
+    let loc = LocStart { elims; context; head=t; stack=stk; next=Continue next } in
+    match_main red info tab ~pat_state states loc
+  | FFloat f' ->
+    let elims, states = extract_or_kill2 (function [@ocaml.warning "-4"]
+    | (PHFloat f, elims), psubst ->
+      if not @@ Float64.equal f f' then None else
+      Some (elims, psubst)
+    | _ -> None) patterns states
+    in
+    let loc = LocStart { elims; context; head=t; stack=stk; next=Continue next } in
+    match_main red info tab ~pat_state states loc
+  | FString s' ->
+    let elims, states = extract_or_kill2 (function [@ocaml.warning "-4"]
+    | (PHString s, elims), psubst ->
+      if not @@ Pstring.equal s s' then None else
+      Some (elims, psubst)
+    | _ -> None) patterns states
+    in
+    let loc = LocStart { elims; context; head=t; stack=stk; next=Continue next } in
+    match_main red info tab ~pat_state states loc
+  | FProd (n, ty, body, e) ->
+    let ntys, _ = Term.decompose_prod body in
+    let na = 1 + List.length ntys in
+    let tysbodyelims, states = extract_or_kill2 (function [@ocaml.warning "-4"] (PHProd (ptys, pbod), es), psubst when Array.length ptys <= na -> Some ((ptys, pbod, es), psubst) | _ -> None) patterns states in
+    let na = Array.fold_left (Status.fold_left (fun a (p1, _, _) -> min a (Array.length p1))) na tysbodyelims in
+    assert (na > 0);
+    let ptys, pbody, elims, states = extract_or_kill4 (fun ((ptys, pbod, elims), psubst) ->
+        let npp = Array.length ptys in
+        if npp == na then Some (ptys, pbod, elims, psubst) else
+        let fst, lst = Array.chop na ptys in
+        Some (fst, ERigid (PHProd (lst, pbod), []), elims, psubst)
+      ) tysbodyelims states
+    in
+
+    let ntys, body = Term.decompose_prod_n (na-1) body in
+    let ctx1 = List.map (fun (n, ty) -> Context.Rel.Declaration.LocalAssum (n, ty)) ntys |> subst_context e in
+    let ctx = ctx1 @ [Context.Rel.Declaration.LocalAssum (n, term_of_fconstr ty)] in
+    let ntys'' = List.mapi (fun n (_, t) -> mk_clos (usubs_liftn n e) t) (List.rev ntys) in
+    let tys = Array.of_list (ty :: ntys'') in
+    let contexts_upto = Array.init na (fun i -> List.lastn i ctx @ context) in
+    let loc = LocStart { elims; context; head=t; stack=stk; next=Continue next } in
+    let loc = LocArg { patterns = pbody; context = ctx @ context; arg = mk_clos (usubs_liftn na e) body; next = loc } in
+    let loc = Array.fold_right3 (fun patterns arg context next -> LocArg { patterns; context; arg; next }) (Array.transpose (Array.map (Status.split_array na) ptys)) tys contexts_upto loc in
+    match_main red info tab ~pat_state states loc
+  | FLambda (na, ntys, body, e) ->
+    let tysbodyelims, states = extract_or_kill2 (function [@ocaml.warning "-4"] (PHLambda (ptys, pbod), es), psubst when Array.length ptys <= na -> Some ((ptys, pbod, es), psubst) | _ -> None) patterns states in
+    let na = Array.fold_left (Status.fold_left (fun a (p1, _, _) -> min a (Array.length p1))) na tysbodyelims in
+    assert (na > 0);
+    let ptys, pbody, elims, states = extract_or_kill4 (fun ((ptys, pbod, elims), psubst) ->
+      let np = Array.length ptys in
+      if np == na then Some (ptys, pbod, elims, psubst) else
+      let fst, lst = Array.chop na ptys in
+      Some (fst, ERigid (PHLambda (lst, pbod), []), elims, psubst)
+      ) tysbodyelims states
+    in
+    let ntys, tys' = List.chop na ntys in
+    let body = Term.compose_lam (List.rev tys') body in
+    let ctx = List.rev_map (fun (n, ty) -> Context.Rel.Declaration.LocalAssum (n, ty)) ntys |> subst_context e in
+    let tys = Array.of_list ntys in
+    let tys = Array.mapi (fun n (_, t) -> mk_clos (usubs_liftn n e) t) tys in
+    let contexts_upto = Array.init na (fun i -> List.lastn i ctx @ context) in
+    let loc = LocStart { elims; context; head=t; stack=stk; next=Continue next } in
+    let loc = LocArg { patterns = pbody; context = ctx @ context; arg = mk_clos (usubs_liftn na e) body; next = loc } in
+    let loc = Array.fold_right3 (fun patterns arg context next -> LocArg { patterns; context; arg; next }) (Array.transpose (Array.map (Status.split_array na) ptys)) tys contexts_upto loc in
+    match_main red info tab ~pat_state states loc
+  | _ ->
+    let states = extract_or_kill (fun _ -> None) patterns states in
+    ignore (zip t stk);
+    match_main red info tab ~pat_state states next
+
+let match_symbol red info tab ~pat_state fl (u, b, r) stk =
+  let unfold_fix = b && red_set info.i_flags fFIX in
+  let states, elims = Array.split @@ Array.map
+    (fun r ->
+      let pu, es = r.lhs_pat in
+      let subst = Partial_subst.make r.nvars in
+      let subst = UVars.Instance.pattern_match pu u subst in
+      match subst with
+      | Some subst -> Live { subst; rhs = r.Declarations.rhs }, Check es
+      | None -> Dead, Ignore
+    ) (Array.of_list r)
+  in
+  let m = { mark = Red; term = FFlex fl } in
+  let loc = LocStart { elims; context=[]; head = m; stack = stk; next = Return (unfold_fix, m, stk) } in
+  match_main red info tab ~pat_state states loc
+
+let match_head red info tab ~pat_state { states; context; patterns; next } m stk =
+  match_head red info tab ~pat_state next context states patterns m stk
+
+end
+
+type 'a depth = 'a RedPattern.patstate
+
 (* Computes a weak head normal form from the result of knh. *)
-let rec knr info tab m stk =
+let rec knr : 'a. _ -> _ -> pat_state: 'a depth -> _ -> _ -> 'a =
+  fun info tab ~pat_state m stk ->
   match m.term with
   | FLambda(n,tys,f,e) when red_set info.i_flags fBETA ->
       (match get_args n tys f e stk with
-          Inl e', s -> knit info tab e' f s
-        | Inr lam, s -> (lam,s))
+          Inl e', s -> knit info tab ~pat_state e' f s
+        | Inr lam, s -> knr_ret info tab ~pat_state (lam,s))
   | FFlex fl when red_set info.i_flags fDELTA ->
-      (match ref_value_cache info (RedFlags.red_transparent info.i_flags) tab fl with
-        | Def v -> kni info tab v stk
+      (match Table.lookup info tab fl with
+        | Def (v, _) -> kni info tab ~pat_state v stk
         | Primitive op ->
           if check_native_args op stk then
             let c = match fl with ConstKey c -> c | RelKey _ | VarKey _ -> assert false in
             let rargs, a, nargs, stk = get_native_args1 op c stk in
-            kni info tab a (Zprimitive(op,c,rargs,nargs)::stk)
+            kni info tab ~pat_state a (Zprimitive(op,c,rargs,nargs)::stk)
           else
             (* Similarly to fix, partially applied primitives are not Ntrl! *)
-            (m, stk)
-        | Undef _ | OpaqueDef _ -> (set_ntrl m; (m,stk)))
-  | FConstruct(c,_u) ->
+            knr_ret info tab ~pat_state (m, stk)
+        | Symbol (u, b, r) ->
+          let red = {
+            red_kni = kni;
+            red_knit = knit;
+            red_ret = knr_ret;
+          } in
+          RedPattern.match_symbol red info tab ~pat_state fl (u, b, r) stk
+        | Undef _ | OpaqueDef _ -> (set_ntrl m; knr_ret info tab ~pat_state (m,stk)))
+  | FConstruct c ->
      let use_match = red_set info.i_flags fMATCH in
      let use_fix = red_set info.i_flags fFIX in
      if use_match || use_fix then
       (match [@ocaml.warning "-4"] strip_update_shift_app m stk with
-        | (depth, args, ZcaseT(ci,u,pms,_,br,e)::s) when use_match ->
+        | (depth, args, ZcaseT(ci,_,pms,_,br,e)::s) when use_match ->
             assert (ci.ci_npar>=0);
-            let (br, e) = get_branch info depth ci u pms c br e args in
-            knit info tab e br s
+            (* instance on the case and instance on the constructor are compatible by typing *)
+            let (br, e) = get_branch info depth ci pms c br e args in
+            knit info tab ~pat_state e br s
         | (_, cargs, Zfix(fx,par)::s) when use_fix ->
             let rarg = fapp_stack(m,cargs) in
             let stk' = par @ append_stack [|rarg|] s in
             let (fxe,fxbd) = contract_fix_vect fx.term in
-            knit info tab fxe fxbd stk'
-        | (depth, args, Zproj p::s) when use_match ->
+            knit info tab ~pat_state fxe fxbd stk'
+        | (depth, args, Zproj (p,_)::s) when use_match ->
             let rargs = drop_parameters depth (Projection.Repr.npars p) args in
             let rarg = project_nth_arg (Projection.Repr.arg p) rargs in
-            kni info tab rarg s
+            kni info tab ~pat_state rarg s
         | (_,args,s) ->
-          if is_irrelevant_constructor info c then (mk_irrelevant, skip_irrelevant_stack info stk) else (m,args@s))
+          if is_irrelevant_constructor info c then
+            knr_ret info tab ~pat_state (mk_irrelevant, skip_irrelevant_stack info stk)
+          else
+            knr_ret info tab ~pat_state (m,args@s))
      else if is_irrelevant_constructor info c then
-      (mk_irrelevant, skip_irrelevant_stack info stk)
+      knr_ret info tab ~pat_state (mk_irrelevant, skip_irrelevant_stack info stk)
      else
-      (m, stk)
-  | FCoFix ((i, (lna, _, _)), _) ->
-    if is_irrelevant info (lna.(i)).binder_relevance then
-      (mk_irrelevant, skip_irrelevant_stack info stk)
+      knr_ret info tab ~pat_state (m, stk)
+  | FCoFix ((i, (lna, _, _)), e) ->
+    if is_irrelevant info (usubst_relevance e (lna.(i)).binder_relevance) then
+      knr_ret info tab ~pat_state (mk_irrelevant, skip_irrelevant_stack info stk)
     else if red_set info.i_flags fCOFIX then
       (match strip_update_shift_app m stk with
         | (_, args, (((ZcaseT _|Zproj _)::_) as stk')) ->
             let (fxe,fxbd) = contract_fix_vect m.term in
-            knit info tab fxe fxbd (args@stk')
-        | (_,args, ((Zapp _ | Zfix _ | Zshift _ | Zupdate _ | Zprimitive _) :: _ | [] as s)) -> (m,args@s))
-    else (m, stk)
+            knit info tab ~pat_state fxe fxbd (args@stk')
+        | (_,args, ((Zapp _ | Zfix _ | Zshift _ | Zupdate _ | Zprimitive _) :: _ | [] as s)) ->
+            knr_ret info tab ~pat_state (m,args@s))
+    else knr_ret info tab ~pat_state (m, stk)
   | FLetIn (_,v,_,bd,e) when red_set info.i_flags fZETA ->
-      knit info tab (on_fst (subs_cons v) e) bd stk
-  | FInt _ | FFloat _ | FArray _ ->
+      knit info tab ~pat_state (on_fst (subs_cons v) e) bd stk
+  | FInt _ | FFloat _ | FString _ | FArray _ ->
     (match [@ocaml.warning "-4"] strip_update_shift_app m stk with
      | (_, _, Zprimitive(op,(_,u as c),rargs,nargs)::s) ->
        let (rargs, nargs) = skip_native_args (m::rargs) nargs in
@@ -1481,48 +1901,62 @@ let rec knr info tab m stk =
          | [] ->
            let args = Array.of_list (List.rev rargs) in
            begin match FredNative.red_prim (info_env info) () op u args with
-            | Some m -> kni info tab m s
+            | Some m -> kni info tab ~pat_state m s
             | None -> assert false
            end
          | (kd,a)::nargs ->
            assert (kd = CPrimitives.Kwhnf);
-           kni info tab a (Zprimitive(op,c,rargs,nargs)::s)
+           kni info tab ~pat_state a (Zprimitive(op,c,rargs,nargs)::s)
              end
-     | (_, _, s) -> (m, s))
+     | (_, _, s) -> knr_ret info tab ~pat_state (m, s))
   | FCaseInvert (ci, u, pms, _p,iv,_c,v,env) when red_set info.i_flags fMATCH ->
     let pms = mk_clos_vect env pms in
     let u = usubst_instance env u in
     begin match case_inversion info tab ci u pms iv v with
-      | Some c -> knit info tab env c stk
-      | None -> (m, stk)
+      | Some c -> knit info tab ~pat_state env c stk
+      | None -> knr_ret info tab ~pat_state (m, stk)
     end
   | FIrrelevant ->
     let stk = skip_irrelevant_stack info stk in
-    (m, stk)
+    knr_ret info tab ~pat_state (m, stk)
   | FProd _ | FAtom _ | FInd _ (* relevant statically *)
   | FCaseInvert _ | FProj _ | FFix _ | FEvar _ (* relevant because of knh(t) *)
   | FLambda _ | FFlex _ | FRel _ (* irrelevance handled by conversion *)
   | FLetIn _ (* only happens in reduction mode *) ->
-    (m, stk)
+    knr_ret info tab ~pat_state (m, stk)
   | FLOCKED | FCLOS _ | FApp _ | FCaseT _ | FLIFT _ ->
     (* ruled out by knh(t) *)
     assert false
 
-(* Computes the weak head normal form of a term *)
-and kni info tab m stk =
-  let (hm,s) = knh info m stk in
-  knr info tab hm s
-and knit info tab e t stk =
-  let (ht,s) = knht info e t stk in
-  knr info tab ht s
+and knr_ret : type a. _ -> _ -> pat_state: a depth -> ?failed: _ -> _ -> a =
+  fun info tab ~pat_state ?(failed=false) i ->
+  match pat_state with
+  | RedPattern.Cons (patt, pat_state) ->
+      let m, stk = i in
+      let red = {
+        red_kni = kni;
+        red_knit = knit;
+        red_ret = knr_ret;
+      } in
+      RedPattern.match_head red info tab ~pat_state patt m stk
+  | RedPattern.Nil b ->
+      match b with No -> i | Yes -> if failed then None else Some i
 
-and case_inversion info tab ci u params indices v =
-  let open Declarations in
+(* Computes the weak head normal form of a term *)
+and kni : 'a. _ -> _ -> pat_state: 'a depth -> _ -> _ -> 'a =
+  fun info tab ~pat_state m stk ->
+  let (hm,s) = knh info m stk in
+  knr info tab ~pat_state hm s
+and knit : 'a. _ -> _ -> pat_state: 'a depth -> _ -> _ -> _ -> 'a =
+  fun info tab ~pat_state e t stk ->
+  let (ht,s) = knht info e t stk in
+  knr info tab ~pat_state ht s
+
+and case_inversion info tab ci u params indices v = match v with
+| [||] -> None (* empty type *)
+| [| [||], v |] ->
   (* No binders / lets at all in the unique branch *)
-  let v = match v with
-  | [| [||], v |] -> v
-  | _ -> assert false
-  in
+  let open Declarations in
   if Array.is_empty indices then Some v
   else
     let env = info_env info in
@@ -1533,7 +1967,7 @@ and case_inversion info tab ci u params indices v =
     (* indtyping enforces 1 ctor with no letins in the context *)
     let _, expect = mip.mind_nf_lc.(0) in
     let _ind, expect_args = destApp expect in
-    let tab = if info.i_cache.i_mode == Conversion then tab else KeyTable.create 17 in
+    let tab = if info.i_cache.i_mode == Conversion then tab else Table.create () in
     let info = {info with i_cache = { info.i_cache with i_mode = Conversion}; i_flags=all} in
     let check_index i index =
       let expected = expect_args.(ci.ci_npar + i) in
@@ -1542,7 +1976,16 @@ and case_inversion info tab ci u params indices v =
     in
     if Array.for_all_i check_index 0 indices
     then Some v else None
+| _ -> assert false
 
+let knred = {
+  red_kni = kni;
+  red_knit = knit;
+  red_ret = knr_ret;
+}
+
+let kni info tab v stk = kni info tab ~pat_state:(RedPattern.Nil No) v stk
+let knit info tab v stk = knit info tab ~pat_state:(RedPattern.Nil No) v stk
 let kh info tab v stk = fapp_stack(kni info tab v stk)
 
 (************************************************************************)
@@ -1553,7 +1996,7 @@ let kh info tab v stk = fapp_stack(kni info tab v stk)
       calls itself recursively. *)
 
 let is_val v = match v.term with
-| FAtom _ | FRel _   | FInd _ | FConstruct _ | FInt _ | FFloat _ -> true
+| FAtom _ | FRel _   | FInd _ | FConstruct _ | FInt _ | FFloat _ | FString _ -> true
 | FFlex _ -> v.mark == Ntrl
 | FApp _ | FProj _ | FFix _ | FCoFix _ | FCaseT _ | FCaseInvert _ | FLambda _
 | FProd _ | FLetIn _ | FEvar _ | FArray _ | FLIFT _ | FCLOS _ -> false
@@ -1582,7 +2025,8 @@ and klt info tab e t = match kind t with
     if hd' == hd && args' == args then t
     else mkApp (hd', args')
   | Var _ | Const _ | CoFix _ | Lambda _ | Fix _ | Prod _ | Evar _ | Case _
-  | Cast _ | LetIn _ | Proj _ | Array _ | Rel _ | Meta _ | Sort _ | Int _ | Float _ ->
+  | Cast _ | LetIn _ | Proj _ | Array _ | Rel _ | Meta _ | Sort _ | Int _
+  | Float _ | String _ ->
     let share = info.i_cache.i_share in
     let (nm,s) = knit info tab e t [] in
     let () = if share then ignore (fapp_stack (nm, s)) in (* to unlock Zupdates! *)
@@ -1590,22 +2034,25 @@ and klt info tab e t = match kind t with
   | App _ -> assert false
   end
 | Lambda (na, u, c) ->
+  let na' = usubst_binder e na in
   let u' = klt info tab e u in
-  let c' = klt (push_relevance info na) tab (usubs_lift e) c in
-  if u' == u && c' == c then t
-  else mkLambda (na, u', c')
+  let c' = klt (push_relevance info na') tab (usubs_lift e) c in
+  if na' == na && u' == u && c' == c then t
+  else mkLambda (na', u', c')
 | Prod (na, u, v) ->
+  let na' = usubst_binder e na in
   let u' = klt info tab e u in
-  let v' = klt (push_relevance info na) tab (usubs_lift e) v in
-  if u' == u && v' == v then t
-  else mkProd (na, u', v')
+  let v' = klt (push_relevance info na') tab (usubs_lift e) v in
+  if na' == na && u' == u && v' == v then t
+  else mkProd (na', u', v')
 | Cast (t, _, _) -> klt info tab e t
 | Var _ | Const _ | CoFix _ | Fix _ | Evar _ | Case _ | LetIn _ | Proj _ | Array _ ->
   let share = info.i_cache.i_share in
   let (nm,s) = knit info tab e t [] in
   let () = if share then ignore (fapp_stack (nm, s)) in (* to unlock Zupdates! *)
   zip_term info tab (norm_head info tab nm) s
-| Meta _ | Sort _ | Ind _ | Construct _ | Int _ | Float _ -> subst_instance_constr (snd e) t
+| Meta _ | Sort _ | Ind _ | Construct _ | Int _ | Float _ | String _ ->
+  subst_instance_constr (snd e) t
 
 (* no redex: go up for atoms and already normalized terms, go down
    otherwise. *)
@@ -1614,6 +2061,7 @@ and norm_head info tab m =
     match m.term with
       | FLambda(_n,tys,f,e) ->
         let fold (e, info, ctxt) (na, ty) =
+          let na = usubst_binder e na in
           let ty = klt info tab e ty in
           let info = push_relevance info na in
           (usubs_lift e, info, (na, ty) :: ctxt)
@@ -1622,25 +2070,29 @@ and norm_head info tab m =
         let bd = klt info tab e' f in
         List.fold_left (fun b (na,ty) -> mkLambda(na,ty,b)) bd rvtys
       | FLetIn(na,a,b,f,e) ->
+          let na = usubst_binder e na in
           let c = klt (push_relevance info na) tab (usubs_lift e) f in
           mkLetIn(na, kl info tab a, kl info tab b, c)
       | FProd(na,dom,rng,e) ->
+        let na = usubst_binder e na in
         let rng = klt (push_relevance info na) tab (usubs_lift e) rng in
           mkProd(na, kl info tab dom, rng)
       | FCoFix((n,(na,tys,bds)),e) ->
+          let na = Array.Smart.map (usubst_binder e) na in
           let infobd = push_relevances info na in
           let ftys = Array.map (fun ty -> klt info tab e ty) tys in
           let fbds = Array.map (fun bd -> klt infobd tab (usubs_liftn (Array.length na) e) bd) bds in
           mkCoFix (n, (na, ftys, fbds))
       | FFix((n,(na,tys,bds)),e) ->
+          let na = Array.Smart.map (usubst_binder e) na in
           let infobd = push_relevances info na in
           let ftys = Array.map (fun ty -> klt info tab e ty) tys in
           let fbds = Array.map (fun bd -> klt infobd tab (usubs_liftn (Array.length na) e) bd) bds in
           mkFix (n, (na, ftys, fbds))
       | FEvar(ev, args, env, repack) ->
           repack (ev, List.map (fun a -> klt info tab env a) args)
-      | FProj (p,c) ->
-        mkProj (p, kl info tab c)
+      | FProj (p,r,c) ->
+        mkProj (p, r, kl info tab c)
       | FArray (u, a, ty) ->
         let a, def = Parray.to_array a in
         let a = Array.map (kl info tab) a in
@@ -1649,24 +2101,26 @@ and norm_head info tab m =
         mkArray (u, a, def, ty)
       | FLOCKED | FRel _ | FAtom _ | FFlex _ | FInd _ | FConstruct _
       | FApp _ | FCaseT _ | FCaseInvert _ | FLIFT _ | FCLOS _ | FInt _
-      | FFloat _ -> term_of_fconstr m
+      | FFloat _ | FString _ -> term_of_fconstr m
       | FIrrelevant -> assert false (* only introduced when converting *)
 
 and zip_term info tab m stk = match stk with
 | [] -> m
 | Zapp args :: s ->
     zip_term info tab (mkApp(m, Array.map (kl info tab) args)) s
-| ZcaseT(ci, u, pms, p, br, e) :: s ->
-    let zip_ctx (nas, c) =
+| ZcaseT(ci, u, pms, (p,r), br, e) :: s ->
+  let zip_ctx (nas, c) =
+      let nas = Array.map (usubst_binder e) nas in
       let e = usubs_liftn (Array.length nas) e in
       (nas, klt info tab e c)
     in
+    let r = usubst_relevance e r in
     let u = usubst_instance e u in
-    let t = mkCase(ci, u, Array.map (fun c -> klt info tab e c) pms, zip_ctx p,
+    let t = mkCase(ci, u, Array.map (fun c -> klt info tab e c) pms, (zip_ctx p, r),
       NoInvert, m, Array.map zip_ctx br) in
     zip_term info tab t s
-| Zproj p::s ->
-    let t = mkProj (Projection.make p true, m) in
+| Zproj (p,r)::s ->
+    let t = mkProj (Projection.make p true, r, m) in
     zip_term info tab t s
 | Zfix(fx,par)::s ->
     let h = mkApp(zip_term info tab (kl info tab fx) par,[|m|]) in
@@ -1706,31 +2160,15 @@ let whd_stack infos tab m stk = match m.mark with
   in
   k
 
-let create_conv_infos ?univs ?(evars=default_evar_handler) flgs env =
-  let univs = Option.default (universes env) univs in
-  let share = (Environ.typing_flags env).Declarations.share_reduction in
-  let cache = {
-    i_env = env;
-    i_sigma = evars;
-    i_share = share;
-    i_univs = univs;
-    i_mode = Conversion;
-  } in
-  { i_flags = flgs; i_relevances = Range.empty; i_cache = cache }
+let create_infos i_mode ?univs ?evars i_flags i_env =
+  let evars = Option.default (default_evar_handler i_env) evars in
+  let i_univs = Option.default (Environ.universes i_env) univs in
+  let i_share = (Environ.typing_flags i_env).Declarations.share_reduction in
+  let i_cache = {i_env; i_sigma = evars; i_share; i_univs; i_mode} in
+  {i_flags; i_relevances = Range.empty; i_cache}
 
-let create_clos_infos ?univs ?(evars=default_evar_handler) flgs env =
-  let univs = Option.default (universes env) univs in
-  let share = (Environ.typing_flags env).Declarations.share_reduction in
-  let cache = {
-    i_env = env;
-    i_sigma = evars;
-    i_share = share;
-    i_univs = univs;
-    i_mode = Reduction;
-  } in
-  { i_flags = flgs; i_relevances = Range.empty; i_cache = cache }
-
-let create_tab () = KeyTable.create 17
+let create_conv_infos = create_infos Conversion
+let create_clos_infos = create_infos Reduction
 
 let oracle_of_infos infos = Environ.oracle infos.i_cache.i_env
 
@@ -1738,11 +2176,16 @@ let infos_with_reds infos reds =
   { infos with i_flags = reds }
 
 let unfold_ref_with_args infos tab fl v =
-  let flags = RedFlags.red_transparent (info_flags infos) in
-  match ref_value_cache infos flags tab fl with
-  | Def def -> Some (def, v)
+  match Table.lookup infos tab fl with
+  | Def (def, _) -> Some (def, v)
   | Primitive op when check_native_args op v ->
     let c = match [@ocaml.warning "-4"] fl with ConstKey c -> c | _ -> assert false in
     let rargs, a, nargs, v = get_native_args1 op c v in
     Some (a, (Zupdate a::(Zprimitive(op,c,rargs,nargs)::v)))
+  | Symbol (u, b, r) ->
+    RedPattern.match_symbol knred (infos_with_reds infos all) tab ~pat_state:(RedPattern.Nil Yes) fl (u, b, r) v
   | Undef _ | OpaqueDef _ | Primitive _ -> None
+
+let get_ref_mask info tab fl = match Table.lookup info tab fl with
+| Def (_, mask) -> mask
+| Primitive _ | Symbol _ | Undef _ | OpaqueDef _ -> [||]

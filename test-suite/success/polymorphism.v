@@ -180,6 +180,7 @@ Module binders.
   Abort.
 
   Fail Lemma bar@{u v | } : let x := (fun x => x) : Type@{u} -> Type@{v} in nat.
+  Fail Fixpoint fbar@{u v | } (n:nat) : let x := (fun x => x) : Type@{u} in nat.
 
   Lemma bar@{i j| i < j} : Type@{j}.
   Proof.
@@ -200,7 +201,6 @@ End binders.
 #[universes(polymorphic)]
 Section cats.
   Local Set Universe Polymorphism.
-  Require Import Utf8.
   Definition fibration (A : Type) := A -> Type.
   Definition Hom (A : Type) := A -> A -> Type.
 
@@ -208,27 +208,27 @@ Section cats.
     { proj1 : A; proj2 : P proj1} .
 
   Class Identity {A} (M : Hom A) :=
-    identity : ∀ x, M x x.
+    identity : forall x, M x x.
   
   Class Inverse {A} (M : Hom A) :=
-    inverse : ∀ x y:A, M x y -> M y x.
+    inverse : forall x y:A, M x y -> M y x.
   
   Class Composition {A} (M : Hom A) :=
-    composition : ∀ {x y z:A}, M x y -> M y z -> M x z.
+    composition : forall {x y z:A}, M x y -> M y z -> M x z.
   
   Notation  "g ° f" := (composition f g) (at level 50). 
   
   Class Equivalence T (Eq : Hom T):= 
     {
-      Equivalence_Identity :> Identity Eq ;
-      Equivalence_Inverse :> Inverse Eq ;
-      Equivalence_Composition :> Composition Eq 
+      Equivalence_Identity :: Identity Eq ;
+      Equivalence_Inverse :: Inverse Eq ;
+      Equivalence_Composition :: Composition Eq
     }.
 
   Class EquivalenceType (T : Type) : Type := 
     {
       m2: Hom T;
-      equiv_struct :> Equivalence T m2 }.
+      equiv_struct :: Equivalence T m2 }.
   
   Polymorphic Record cat (T : Type) := 
     { cat_hom : Hom T;
@@ -238,7 +238,7 @@ Section cats.
 
   Notation "[ T ]" := (proj1 T).
 
-  Require Import Program.
+  From Corelib.Program Require Import Basics Tactics Wf.
 
   Program Definition small_cat : cat Empty_set :=
     {| cat_hom x y := unit |}.
@@ -355,7 +355,7 @@ Qed.
 End eta.
 
 Module Hurkens'.
-  Require Import Hurkens.
+  Require Import TestSuite.hurkens.
 
 Polymorphic Record box (X : Type) (T := Type) : Type := wrap { unwrap : T }.
 
@@ -422,7 +422,7 @@ Module Restrict.
 End Restrict.
 
 Module F.
-  Context {A B : Type}.
+  #[warning="context-outside-section"] Context {A B : Type}.
   Definition foo : Type := B.
 End F.
 
@@ -464,3 +464,67 @@ Axiom poly@{i} : forall(A : Type@{i}) (a : A), unit.
 
 Definition nonpoly := @poly True Logic.I.
 Definition check := nonpoly@{}.
+
+Module ProgramFixpoint.
+
+  Local Set Universe Polymorphism.
+  Program Fixpoint f@{u} (A:Type@{u}) (n:nat) : Type@{u} :=
+    match n with 0 => A | S n => f (A->A) n end.
+  Check f@{Set}. (* Check that it depends on only one universe *)
+
+End ProgramFixpoint.
+
+Module EarlyPolyUniverseDeclarationCheck.
+
+  Local Set Universe Polymorphism.
+
+  Fail Definition f@{u} n : match n return Type@{v} with 0 => Type@{u} | _ => Type@{u} end.
+
+  Definition f@{u v} n : match n return Type@{v} with 0 => Type@{u} | _ => Type@{u} end.
+  exact (match n with 0 => nat | _ => nat end).
+  Defined.
+
+  Program Fixpoint f'@{u} (A:Type@{u}) (n:nat) : Type@{u} :=
+    match n with 0 => _ | S n => f' (A->A) n end.
+  Next Obligation. exact nat. Defined.
+
+  Fail Program Fixpoint f''@{u} (A:Type@{u}) (n:nat) {measure n} : Type@{u} :=
+    match n with 0 => _ | S n => f'' (Type->A) n end.
+
+  Local Set Universe Polymorphism.
+  Program Fixpoint f''@{u} (A:Type@{u}) (n:nat) {measure n} : Type@{u} :=
+    match n with 0 => _ | S n => f'' (A->A) n end.
+  Next Obligation. Show. exact nat. Defined.
+  Next Obligation. Show. Admitted.
+
+End EarlyPolyUniverseDeclarationCheck.
+
+Module EarlyMonoUniverseDeclarationCheck.
+
+  Local Unset Universe Polymorphism.
+
+  Fail Definition f@{u} n : match n return Type@{v} with 0 => Type@{u} | _ => Type@{u} end.
+
+  Definition f@{u v} n : match n return Type@{v} with 0 => Type@{u} | _ => Type@{u} end.
+  exact (match n with 0 => nat | _ => nat end).
+  Defined.
+
+  Fail Program Fixpoint f'@{u} (A:Type@{u}) (n:nat) : Type@{u} := (* By convention, we require extensibility for Program *)
+    match n with 0 => _ | S n => f' (A->A) n end.
+
+  Program Fixpoint f'@{u +} (A:Type@{u}) (n:nat) : Type@{u} :=
+    match n with 0 => _ | S n => f' (A->A) n end.
+  Next Obligation. exact nat. Defined.
+
+  Fail Program Fixpoint f''@{u} (A:Type@{u}) (n:nat) {measure n} : Type@{u} :=
+    match n with 0 => _ | S n => f'' (Type->A) n end.
+
+  Fail Program Fixpoint f''@{u} (A:Type@{u}) (n:nat) {measure n} : Type@{u} := (* By convention, we require extensibility for Program *)
+    match n with 0 => _ | S n => f'' (A->A) n end.
+
+  Program Fixpoint f''@{u +} (A:Type@{u}) (n:nat) {measure n} : Type@{u} :=
+    match n with 0 => _ | S n => f'' (A->A) n end.
+  Next Obligation. Show. exact nat. Defined.
+  Next Obligation. Show. Admitted.
+
+End EarlyMonoUniverseDeclarationCheck.

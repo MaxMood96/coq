@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -30,10 +30,34 @@ val get_bidirectionality_hint : GlobRef.t -> int option
 
 val clear_bidirectionality_hint : GlobRef.t -> unit
 
-(** An auxiliary function for searching for fixpoint guard indexes *)
+(** An auxiliary function for searching for fixpoint guard indices *)
+
+(* Tells the possible indices liable to guard a fixpoint *)
+type possible_fix_indices = int list list
+
+(* Tells if possibly a cofixpoint or a fixpoint over the given list of possible indices *)
+type possible_guard = {
+  possibly_cofix : bool;
+  possible_fix_indices : possible_fix_indices;
+} (* Note: if no fix indices are given, it has to be a cofix *)
 
 val search_guard :
-  ?loc:Loc.t -> env -> int list list -> Constr.rec_declaration -> int array
+  ?loc:Loc.t -> ?evars:CClosure.evar_handler -> env ->
+  possible_guard -> Constr.rec_declaration -> int array option
+
+val search_fix_guard : (* For Fixpoints only *)
+  ?loc:Loc.t -> ?evars:CClosure.evar_handler -> env ->
+  possible_fix_indices -> Constr.rec_declaration -> int array
+
+val esearch_guard :
+  ?loc:Loc.t -> env -> evar_map -> possible_guard ->
+  EConstr.rec_declaration -> int array option
+
+val esearch_fix_guard : (* For Fixpoints only *)
+  ?loc:Loc.t -> env -> evar_map -> possible_fix_indices ->
+  EConstr.rec_declaration -> int array
+
+val esearch_cofix_guard : ?loc:Loc.t -> env -> evar_map -> EConstr.rec_declaration -> unit
 
 type typing_constraint =
   | IsType (** Necessarily a type *)
@@ -57,6 +81,9 @@ type inference_flags = {
   expand_evars : bool;
   program_mode : bool;
   polymorphic : bool;
+  undeclared_evars_patvars : bool;
+  patvars_abstract : bool;
+  unconstrained_sorts : bool;
 }
 
 val default_inference_flags : bool -> inference_flags
@@ -98,6 +125,10 @@ val understand_ltac : inference_flags ->
   env -> evar_map -> ltac_var_map ->
   typing_constraint -> glob_constr -> evar_map * EConstr.t
 
+val understand_ltac_ty : inference_flags ->
+  env -> evar_map -> ltac_var_map ->
+  typing_constraint -> glob_constr -> evar_map * EConstr.t * EConstr.types
+
 (** Standard call to get a constr from a glob_constr, resolving
     implicit arguments and coercions, and compiling pattern-matching;
     the default inference_flags tells to use type classes and
@@ -105,7 +136,7 @@ val understand_ltac : inference_flags ->
     ensure that conversion problems are all solved and that no
     unresolved evar remains, expanding evars. *)
 val understand : ?flags:inference_flags -> ?expected_type:typing_constraint ->
-  env -> evar_map -> glob_constr -> constr Evd.in_evar_universe_context
+  env -> evar_map -> glob_constr -> constr Evd.in_ustate
 
 val understand_uconstr :
   ?flags:inference_flags -> ?expected_type:typing_constraint ->
@@ -149,17 +180,20 @@ type pretype_flags = {
   resolve_tc : bool;
   program_mode : bool;
   use_coercions : bool;
+  undeclared_evars_patvars : bool;
+  patvars_abstract : bool;
+  unconstrained_sorts : bool;
 }
 
 type 'a pretype_fun = ?loc:Loc.t -> flags:pretype_flags -> Evardefine.type_constraint -> GlobEnv.t -> evar_map -> evar_map * 'a
 
 type pretyper = {
-  pretype_ref : pretyper -> GlobRef.t * glob_level list option -> unsafe_judgment pretype_fun;
+  pretype_ref : pretyper -> GlobRef.t * glob_instance option -> unsafe_judgment pretype_fun;
   pretype_var : pretyper -> Id.t -> unsafe_judgment pretype_fun;
   pretype_evar : pretyper -> existential_name CAst.t * (lident * glob_constr) list -> unsafe_judgment pretype_fun;
   pretype_patvar : pretyper -> Evar_kinds.matching_var_kind -> unsafe_judgment pretype_fun;
   pretype_app : pretyper -> glob_constr * glob_constr list -> unsafe_judgment pretype_fun;
-  pretype_proj : pretyper -> (Constant.t * glob_level list option) * glob_constr list * glob_constr -> unsafe_judgment pretype_fun;
+  pretype_proj : pretyper -> (Constant.t * glob_instance option) * glob_constr list * glob_constr -> unsafe_judgment pretype_fun;
   pretype_lambda : pretyper -> Name.t * binding_kind * glob_constr * glob_constr -> unsafe_judgment pretype_fun;
   pretype_prod : pretyper -> Name.t * binding_kind * glob_constr * glob_constr -> unsafe_judgment pretype_fun;
   pretype_letin : pretyper -> Name.t * glob_constr * glob_constr option * glob_constr -> unsafe_judgment pretype_fun;
@@ -168,12 +202,13 @@ type pretyper = {
   pretype_if : pretyper -> glob_constr * (Name.t * glob_constr option) * glob_constr * glob_constr -> unsafe_judgment pretype_fun;
   pretype_rec : pretyper -> glob_fix_kind * Id.t array * glob_decl list array * glob_constr array * glob_constr array -> unsafe_judgment pretype_fun;
   pretype_sort : pretyper -> glob_sort -> unsafe_judgment pretype_fun;
-  pretype_hole : pretyper -> Evar_kinds.t * Namegen.intro_pattern_naming_expr -> unsafe_judgment pretype_fun;
+  pretype_hole : pretyper -> Evar_kinds.glob_evar_kind -> unsafe_judgment pretype_fun;
   pretype_genarg : pretyper -> Genarg.glob_generic_argument -> unsafe_judgment pretype_fun;
   pretype_cast : pretyper -> glob_constr * Constr.cast_kind option * glob_constr -> unsafe_judgment pretype_fun;
   pretype_int : pretyper -> Uint63.t -> unsafe_judgment pretype_fun;
   pretype_float : pretyper -> Float64.t -> unsafe_judgment pretype_fun;
-  pretype_array : pretyper -> glob_level list option * glob_constr array * glob_constr * glob_constr -> unsafe_judgment pretype_fun;
+  pretype_string : pretyper -> Pstring.t -> unsafe_judgment pretype_fun;
+  pretype_array : pretyper -> glob_instance option * glob_constr array * glob_constr * glob_constr -> unsafe_judgment pretype_fun;
   pretype_type : pretyper -> glob_constr -> unsafe_type_judgment pretype_fun;
 }
 (** Type of pretyping algorithms in open-recursion style. A typical way to

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -35,10 +35,11 @@ val check_modpath_equiv : env -> ModPath.t -> ModPath.t -> unit
 val implem_smart_map :
   (structure_body -> structure_body) ->
   (module_expression -> module_expression) ->
-  (module_implementation -> module_implementation)
+  ('a, module_implementation) when_mod_body ->
+  ('a, module_implementation) when_mod_body
 
 val annotate_module_expression : module_expression -> module_signature ->
-  (module_type_body, (constr * Univ.AbstractContext.t option) module_alg_expr) functorize
+  (module_type_body, (constr * UVars.AbstractContext.t option) module_alg_expr) functorize
 
 val annotate_struct_body : structure_body -> module_signature -> module_signature
 
@@ -62,7 +63,7 @@ val add_linked_module : module_body -> link_info -> env -> env
 (** same, for a module type *)
 val add_module_type : ModPath.t -> module_type_body -> env -> env
 
-val add_retroknowledge : module_implementation module_retroknowledge -> env -> env
+val add_retroknowledge : mod_body module_retroknowledge -> env -> env
 
 (** {6 Strengthening } *)
 
@@ -112,8 +113,9 @@ type signature_mismatch_error =
   | NotEqualInductiveAliases
   | IncompatibleUniverses of UGraph.univ_inconsistency
   | IncompatiblePolymorphism of env * types * types
-  | IncompatibleConstraints of { got : Univ.AbstractContext.t; expect : Univ.AbstractContext.t }
+  | IncompatibleConstraints of { got : UVars.AbstractContext.t; expect : UVars.AbstractContext.t }
   | IncompatibleVariance
+  | NoRewriteRulesSubtyping
 
 type subtyping_trace_elt =
   | Submodule of Label.t

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -17,7 +17,7 @@
 
 (** Hints for the proof search: these combinators should be considered rigid. *)
 
-Require Import Coq.Program.Basics.
+Require Import Corelib.Program.Basics.
 
 Global Typeclasses Opaque id const flip compose arrow impl iff not all.
 

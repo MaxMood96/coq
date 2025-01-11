@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -124,7 +124,7 @@ let family_eq f1 f2 = match f1, f2 with
 
 
 type 'a term =
-    Symb of constr
+    Symb of constr * (* Hash: *) int
   | Product of Sorts.t * Sorts.t
   | Eps of Id.t
   | Appli of 'a * 'a
@@ -139,7 +139,7 @@ sig
   val mkProduct : (Sorts.t * Sorts.t) -> t
   val mkEps : Id.t -> t
   val mkAppli : (t * t) -> t
-  val mkConstructor : cinfo -> t
+  val mkConstructor : Environ.env -> cinfo -> t
 
   val equal : t -> t -> bool
   val constr : t -> constr
@@ -156,13 +156,13 @@ struct
 
   let rec term_equal t1 t2 =
     match t1, t2 with
-      | Symb c1, Symb c2 -> eq_constr_nounivs c1 c2
+      | Symb (c1,_), Symb (c2,_) -> eq_constr_nounivs c1 c2
       | Product (s1, t1), Product (s2, t2) -> family_eq s1 s2 && family_eq t1 t2
       | Eps i1, Eps i2 -> Id.equal i1 i2
       | Appli (t1', u1'), Appli (t2', u2') -> term_equal t1'.term t2'.term && term_equal u1'.term u2'.term
       | Constructor {ci_constr=(c1,u1); ci_arity=i1; ci_nhyps=j1},
         Constructor {ci_constr=(c2,u2); ci_arity=i2; ci_nhyps=j2} ->
-          Int.equal i1 i2 && Int.equal j1 j2 && Construct.CanOrd.equal c1 c2 (* FIXME check eq? *)
+          Int.equal i1 i2 && Int.equal j1 j2 && Construct.UserOrd.equal c1 c2
       | _ -> false
 
   let equal t1 t2 = term_equal t1.term t2.term
@@ -171,11 +171,11 @@ struct
 
   let hash_term t =
     match t with
-    | Symb c -> combine 1 (Constr.hash c)
+    | Symb (_,hash_c) -> combine 1 hash_c
     | Product (s1, s2) -> combine3 2 (Sorts.hash s1) (Sorts.hash s2)
     | Eps i -> combine 3 (Id.hash i)
     | Appli (t1', t2') -> combine3 4 (t1'.hash) (t2'.hash)
-    | Constructor {ci_constr=(c,u); ci_arity=i; ci_nhyps=j} -> combine4 5 (Construct.CanOrd.hash c) i j
+    | Constructor {ci_constr=(c,u); ci_arity=i; ci_nhyps=j} -> combine4 5 (Construct.UserOrd.hash c) i j
 
   let hash t = t.hash
 
@@ -190,7 +190,7 @@ struct
              mkLambda(make_annot _B_ Sorts.Relevant,mkSort(s2),_body_))
 
   let rec constr_of_term = function
-      Symb s -> s
+      Symb (s,_) -> s
     | Product(s1,s2) -> cc_product s1 s2
     | Eps id -> mkVar id
     | Constructor cinfo -> mkConstructU cinfo.ci_constr
@@ -207,7 +207,15 @@ struct
     constr = lazy (constr_of_term t);
     hash = hash_term t }
 
-  let mkSymb s = make (Symb s)
+  let rec drop_univ c =
+    match kind c with
+    | Const (c,_u) -> mkConstU (c,UVars.Instance.empty)
+    | Ind (c,_u) -> mkIndU (c,UVars.Instance.empty)
+    | Construct (c,_u) -> mkConstructU (c,UVars.Instance.empty)
+    | Sort (Type _u) -> mkSort (type1)
+    | _ -> Constr.map drop_univ c
+
+  let mkSymb s = make (Symb (s, Constr.hash (drop_univ s)))
 
   let mkProduct (s1, s2) = make (Product (s1, s2))
 
@@ -215,7 +223,10 @@ struct
 
   let mkAppli (t1', t2') = make (Appli (t1', t2'))
 
-  let mkConstructor info = make (Constructor info)
+  let mkConstructor env info =
+    let canon i = Environ.QConstruct.canonize env i in
+    let info = { info with ci_constr = on_fst canon info.ci_constr } in
+    make (Constructor info)
 
   let rec nth_arg t n =
     match t.term with
@@ -502,10 +513,10 @@ let rec canonize_name c =
           mkLetIn (na, func b,func t,func ct)
       | App (ct,l) ->
           mkApp (func ct,Array.Smart.map func l)
-      | Proj(p,c) ->
+      | Proj(p,r,c) ->
         let p' = Projection.map (fun kn ->
           MutInd.make1 (MutInd.canonical kn)) p in
-          (mkProj (p', func c))
+          (mkProj (p', r, func c))
       | _ -> c
 
 (* rebuild a term from a pattern and a substitution *)
@@ -813,7 +824,7 @@ let process_mark t m state =
 type explanation =
     Discrimination of (int*pa_constructor*int*pa_constructor)
   | Contradiction of disequality
-  | Incomplete
+  | Incomplete of (EConstr.t * int) list
 
 let check_disequalities state =
   let uf=state.uf in
@@ -854,7 +865,7 @@ let __eps__ = Id.of_string "_eps_"
 let new_state_var typ state =
   let ids = Environ.ids_of_named_context_val (Environ.named_context_val state.env) in
   let id = Namegen.next_ident_away __eps__ ids in
-  let r = Sorts.Relevant in (* TODO relevance *)
+  let r = EConstr.ERelevance.relevant in (* TODO relevance *)
   state.env<- EConstr.push_named (Context.Named.Declaration.LocalAssum (make_annot id r,typ)) state.env;
   id
 
@@ -1021,6 +1032,17 @@ let find_instances state =
     with Stack.Empty -> () in
     !res
 
+let build_term_to_complete uf pac =
+  let open EConstr in
+  let cinfo = get_constructor_info uf pac.cnode in
+  let real_args = List.rev_map (fun i -> EConstr.of_constr (ATerm.constr (aterm uf i))) pac.args in
+  let (kn, u) = cinfo.ci_constr in
+  (applist (mkConstructU (kn, EInstance.make u), real_args), pac.arity)
+
+let terms_to_complete state =
+  let uf = forest state in
+  List.map (build_term_to_complete uf) (epsilons uf)
+
 let rec execute first_run state =
   debug_congruence (fun () -> str "Executing ... ");
   try
@@ -1058,10 +1080,10 @@ let rec execute first_run state =
       | Some dis -> Some
           begin
             if first_run then Contradiction dis
-            else Incomplete
+            else Incomplete (terms_to_complete state)
           end
   with Discriminable(s,spac,t,tpac) -> Some
     begin
       if first_run then Discrimination (s,spac,t,tpac)
-      else Incomplete
+      else Incomplete (terms_to_complete state)
     end

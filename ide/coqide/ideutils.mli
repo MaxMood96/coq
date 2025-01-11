@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -19,6 +19,7 @@ val browse_keyword : (string -> unit) -> string -> unit
 val byte_offset_to_char_offset : string -> int -> int
 val byte_off_to_buffer_off : GText.buffer -> int -> int
 val buffer_off_to_byte_off : GText.buffer -> int -> int
+val get_iter_at_byte : GText.buffer -> line:int -> int -> GText.iter
 
 val ulen : int -> int
 
@@ -41,12 +42,12 @@ val stock_to_widget :
   ?size:[`CUSTOM of int * int | Gtk.Tags.icon_size] ->
     GtkStock.id -> GObj.widget
 
-val custom_coqtop : string option ref
-(* @return command to call coqtop
-   - custom_coqtop if set
+val custom_rocqtop : string option ref
+(* @return command to call rocqtop
+   - custom_rocqtop if set
    - from the prefs is set
    - try to infer it else *)
-val coqtop_path : unit -> string
+val rocqtop_path : unit -> string
 
 
 val status : GMisc.statusbar

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -148,7 +148,7 @@ module ModIdmap = Id.Map
 
 (** Dirpaths are lists of module identifiers.
     The actual representation is reversed to optimise sharing:
-    Coq.A.B is ["B";"A";"Coq"] *)
+    Corelib.A.B is ["B";"A";"Corelib"] *)
 
 let dummy_module_name = "If you see this, it's a bug"
 
@@ -285,6 +285,8 @@ module ModPath = struct
     | MPbound uid -> MBId.to_string uid
     | MPdot (mp,l) -> to_string mp ^ "." ^ Label.to_string l
 
+  let print mp = str (to_string mp)
+
   let rec debug_to_string = function
     | MPfile sl -> DirPath.to_string sl
     | MPbound uid -> MBId.debug_to_string uid
@@ -366,14 +368,19 @@ module KerName = struct
   type t = {
     modpath : ModPath.t;
     knlabel : Label.t;
-    mutable refhash : int;
+    refhash : int;
     (** Lazily computed hash. If unset, it is set to negative values. *)
   }
 
   type kernel_name = t
 
   let make modpath knlabel =
-    { modpath; knlabel; refhash = -1; }
+    let open Hashset.Combine in
+    let refhash = combine (ModPath.hash modpath) (Label.hash knlabel) in
+    (* Truncate for backwards compatibility w.r.t. ordering *)
+    let refhash = refhash land 0x3FFFFFFF in
+    { modpath; knlabel; refhash; }
+
   let repr kn = (kn.modpath, kn.knlabel)
 
   let modpath kn = kn.modpath
@@ -406,18 +413,7 @@ module KerName = struct
       Label.equal kn1.knlabel kn2.knlabel &&
       ModPath.equal kn1.modpath kn2.modpath
 
-  open Hashset.Combine
-
-  let hash kn =
-    let h = kn.refhash in
-    if h < 0 then
-      let { modpath = mp; knlabel = lbl; _ } = kn in
-      let h = combine (ModPath.hash mp) (Label.hash lbl) in
-      (* Ensure positivity on all platforms. *)
-      let h = h land 0x3FFFFFFF in
-      let () = kn.refhash <- h in
-      h
-    else h
+  let hash kn = kn.refhash
 
   module Self_Hashcons = struct
     type t = kernel_name
@@ -458,6 +454,7 @@ sig
   module CanOrd : EqType with type t = t
   module UserOrd : EqType with type t = t
   module SyntacticOrd : EqType with type t = t
+  val canonize : t -> t
 end
 
 (** For constant and inductive names, we use a kernel name couple (kn1,kn2)
@@ -493,6 +490,10 @@ module KerPair = struct
   let user = function
     | Same kn -> kn
     | Dual (kn,_) -> kn
+
+  let canonize kp = match kp with
+  | Same _ -> kp
+  | Dual (_, kn) -> Same kn
 
   let same kn = Same kn
   let make knu knc = if KerName.equal knu knc then Same knc else Dual (knu,knc)
@@ -660,6 +661,10 @@ struct
       Hashset.Combine.combine (MutInd.SyntacticOrd.hash m) (Int.hash i)
   end
 
+  let canonize ((mind, i) as ind) =
+    let mind' = MutInd.canonize mind in
+    if mind' == mind then ind else (mind', i)
+
 end
 
 module Construct =
@@ -706,6 +711,10 @@ struct
       Hashset.Combine.combine (Ind.SyntacticOrd.hash ind) (Int.hash i)
   end
 
+  let canonize ((ind, i) as cstr) =
+    let ind' = Ind.canonize ind in
+    if ind' == ind then cstr else (ind', i)
+
 end
 
 (** Designation of a (particular) inductive type. *)
@@ -714,37 +723,10 @@ type inductive = Ind.t
 (** Designation of a (particular) constructor of a (particular) inductive type. *)
 type constructor = Construct.t
 
-let ind_modpath = Ind.modpath
-let constr_modpath = Construct.modpath
-
 let ith_mutual_inductive (mind, _) i = (mind, i)
 let ith_constructor_of_inductive ind i = (ind, i)
 let inductive_of_constructor (ind, _i) = ind
 let index_of_constructor (_ind, i) = i
-
-let eq_ind = Ind.CanOrd.equal
-let eq_user_ind = Ind.UserOrd.equal
-let eq_syntactic_ind = Ind.SyntacticOrd.equal
-
-let ind_ord = Ind.CanOrd.compare
-let ind_user_ord = Ind.UserOrd.compare
-let ind_syntactic_ord = Ind.SyntacticOrd.compare
-
-let ind_hash = Ind.CanOrd.hash
-let ind_user_hash = Ind.UserOrd.hash
-let ind_syntactic_hash = Ind.SyntacticOrd.hash
-
-let eq_constructor = Construct.CanOrd.equal
-let eq_user_constructor = Construct.UserOrd.equal
-let eq_syntactic_constructor = Construct.SyntacticOrd.equal
-
-let constructor_ord = Construct.CanOrd.compare
-let constructor_user_ord = Construct.UserOrd.compare
-let constructor_syntactic_ord = Construct.SyntacticOrd.compare
-
-let constructor_hash = Construct.CanOrd.hash
-let constructor_user_hash = Construct.UserOrd.hash
-let constructor_syntactic_hash = Construct.SyntacticOrd.hash
 
 module Indset = Set.Make(Ind.CanOrd)
 module Indset_env = Set.Make(Ind.UserOrd)
@@ -764,7 +746,7 @@ module Hind = Hashcons.Make(
     type u = MutInd.t -> MutInd.t
     let hashcons hmind (mind, i) = (hmind mind, i)
     let eq (mind1,i1) (mind2,i2) = mind1 == mind2 && Int.equal i1 i2
-    let hash = ind_hash
+    let hash = Ind.CanOrd.hash
   end)
 
 module Hconstruct = Hashcons.Make(
@@ -773,7 +755,7 @@ module Hconstruct = Hashcons.Make(
     type u = inductive -> inductive
     let hashcons hind (ind, j) = (hind ind, j)
     let eq (ind1, j1) (ind2, j2) = ind1 == ind2 && Int.equal j1 j2
-    let hash = constructor_hash
+    let hash = Construct.CanOrd.hash
   end)
 
 let hcons_con = Constant.hcons
@@ -800,6 +782,13 @@ let eq_table_key f ik1 ik2 =
   | RelKey k1, RelKey k2 -> Int.equal k1 k2
   | _ -> false
 
+let hash_table_key f ik =
+  let open Hashset.Combine in
+  match ik with
+  | ConstKey c -> combinesmall 1 (f c)
+  | VarKey id -> combinesmall 2 (Id.hash id)
+  | RelKey i -> combinesmall 3 (Int.hash i)
+
 let eq_mind_chk = MutInd.UserOrd.equal
 let eq_ind_chk (kn1,i1) (kn2,i2) = Int.equal i1 i2 && eq_mind_chk kn1 kn2
 
@@ -822,35 +811,31 @@ struct
   module Repr = struct
     type t =
       { proj_ind : inductive;
-        proj_relevant : bool;
         proj_npars : int;
         proj_arg : int;
-        proj_name : Label.t; }
+        proj_name : Constant.t;
+        (** The only relevant data is the label, the rest is canonically derived
+            from proj_ind. *)
+      }
 
-    let make proj_ind ~proj_npars ~proj_arg ~proj_relevant proj_name =
-      {proj_ind;proj_npars;proj_arg;proj_relevant;proj_name}
+    let make proj_ind ~proj_npars ~proj_arg proj_name =
+      let proj_name = KerPair.change_label (fst proj_ind) proj_name in
+      {proj_ind;proj_npars;proj_arg;proj_name}
 
     let inductive c = c.proj_ind
 
     let mind c = fst c.proj_ind
 
-    let constant c = KerPair.change_label (mind c) c.proj_name
+    let constant c = c.proj_name
 
-    let label c = c.proj_name
+    let label c = Constant.label c.proj_name
 
     let npars c = c.proj_npars
 
     let arg c = c.proj_arg
 
-    let relevant c = c.proj_relevant
-
     let hash p =
-      Hashset.Combine.combinesmall p.proj_arg (ind_hash p.proj_ind)
-
-    let bcomp b1 b2 = match b1, b2 with
-    | true, true | false, false -> 0
-    | true, false -> 1
-    | false, true -> -1
+      Hashset.Combine.combinesmall p.proj_arg (Ind.CanOrd.hash p.proj_ind)
 
     let compare_gen a b =
       let c = Int.compare a.proj_arg b.proj_arg in
@@ -859,68 +844,72 @@ struct
         let c = Int.compare a.proj_npars b.proj_npars in
         if c <> 0 then c
         else
-          let c = Label.compare a.proj_name b.proj_name in
-          if c <> 0 then c
-          else bcomp a.proj_relevant b.proj_relevant
+          Label.compare (Constant.label a.proj_name) (Constant.label b.proj_name)
 
     module SyntacticOrd = struct
       type nonrec t = t
 
       let compare a b =
-        let c = ind_syntactic_ord a.proj_ind b.proj_ind in
+        let c = Ind.SyntacticOrd.compare a.proj_ind b.proj_ind in
         if c <> 0 then c
         else compare_gen a b
 
       let equal a b = compare a b == 0
 
       let hash p =
-        Hashset.Combine.combinesmall p.proj_arg (ind_hash p.proj_ind)
+        Hashset.Combine.combinesmall p.proj_arg (Ind.CanOrd.hash p.proj_ind)
     end
     module CanOrd = struct
       type nonrec t = t
 
       let compare a b =
-        let c = ind_ord a.proj_ind b.proj_ind in
+        let c = Ind.CanOrd.compare a.proj_ind b.proj_ind in
         if c <> 0 then c
         else compare_gen a b
 
       let equal a b = compare a b == 0
 
       let hash p =
-        Hashset.Combine.combinesmall p.proj_arg (ind_hash p.proj_ind)
+        Hashset.Combine.combinesmall p.proj_arg (Ind.CanOrd.hash p.proj_ind)
     end
     module UserOrd = struct
       type nonrec t = t
 
       let compare a b =
-        let c = ind_user_ord a.proj_ind b.proj_ind in
+        let c = Ind.UserOrd.compare a.proj_ind b.proj_ind in
         if c <> 0 then c
         else compare_gen a b
 
       let equal a b = compare a b == 0
 
       let hash p =
-        Hashset.Combine.combinesmall p.proj_arg (ind_user_hash p.proj_ind)
+        Hashset.Combine.combinesmall p.proj_arg (Ind.UserOrd.hash p.proj_ind)
     end
 
     let equal = CanOrd.equal
     let compare = CanOrd.compare
 
+    let canonize p =
+      let { proj_ind; proj_npars; proj_arg; proj_name } = p in
+      let proj_ind' = Ind.canonize proj_ind in
+      let proj_name' = Constant.canonize proj_name in
+      if proj_ind' == proj_ind && proj_name' == proj_name then p
+      else { proj_ind = proj_ind'; proj_name = proj_name'; proj_npars; proj_arg }
+
     module Self_Hashcons = struct
       type nonrec t = t
-      type u = (inductive -> inductive) * (Id.t -> Id.t)
+      type u = (inductive -> inductive) * (Constant.t -> Constant.t)
       let hashcons (hind,hid) p =
         { proj_ind = hind p.proj_ind;
-          proj_relevant = p.proj_relevant;
           proj_npars = p.proj_npars;
           proj_arg = p.proj_arg;
           proj_name = hid p.proj_name }
       let eq p p' =
-        p == p' || (p.proj_relevant == p'.proj_relevant && p.proj_ind == p'.proj_ind && p.proj_npars == p'.proj_npars && p.proj_arg == p'.proj_arg && p.proj_name == p'.proj_name)
+        p == p' || (p.proj_ind == p'.proj_ind && p.proj_npars == p'.proj_npars && p.proj_arg == p'.proj_arg && p.proj_name == p'.proj_name)
       let hash = hash
     end
     module HashRepr = Hashcons.Make(Self_Hashcons)
-    let hcons = Hashcons.simple_hcons HashRepr.generate HashRepr.hcons (hcons_ind,Id.hcons)
+    let hcons = Hashcons.simple_hcons HashRepr.generate HashRepr.hcons (hcons_ind,Constant.hcons)
 
     let map_npars f p =
       let npars = p.proj_npars in
@@ -932,7 +921,9 @@ struct
       let ind = fst p.proj_ind in
       let ind' = f ind in
       if ind == ind' then p
-      else {p with proj_ind = (ind',snd p.proj_ind)}
+      else
+        let proj_name = KerPair.change_label ind' (label p) in
+        {p with proj_ind = (ind',snd p.proj_ind); proj_name}
 
     let to_string p = Constant.to_string (constant p)
     let print p = Constant.print (constant p)
@@ -960,24 +951,27 @@ struct
 
   module SyntacticOrd = struct
     type nonrec t = t
-    let compare (c, b) (c', b') =
-      if b = b' then Repr.SyntacticOrd.compare c c' else -1
+    let compare (p, b) (p', b') =
+      let c = Bool.compare b b' in
+      if c <> 0 then c else Repr.SyntacticOrd.compare p p'
     let equal (c, b as x) (c', b' as x') =
       x == x' || b = b' && Repr.SyntacticOrd.equal c c'
     let hash (c, b) = (if b then 0 else 1) + Repr.SyntacticOrd.hash c
   end
   module CanOrd = struct
     type nonrec t = t
-    let compare (c, b) (c', b') =
-      if b = b' then Repr.CanOrd.compare c c' else -1
+    let compare (p, b) (p', b') =
+      let c = Bool.compare b b' in
+      if c <> 0 then c else Repr.CanOrd.compare p p'
     let equal (c, b as x) (c', b' as x') =
       x == x' || b = b' && Repr.CanOrd.equal c c'
     let hash (c, b) = (if b then 0 else 1) + Repr.CanOrd.hash c
   end
   module UserOrd = struct
     type nonrec t = t
-    let compare (c, b) (c', b') =
-      if b = b' then Repr.UserOrd.compare c c' else -1
+    let compare (p, b) (p', b') =
+      let c = Bool.compare b b' in
+      if c <> 0 then c else Repr.UserOrd.compare p p'
     let equal (c, b as x) (c', b' as x') =
       x == x' || b = b' && Repr.UserOrd.equal c c'
     let hash (c, b) = (if b then 0 else 1) + Repr.UserOrd.hash c
@@ -993,13 +987,17 @@ struct
       let hash = hash
     end
 
+  let canonize ((r, u) as p) =
+    let r' = Repr.canonize r in
+    if r' == r then p else (r',  u)
+
   module HashProjection = Hashcons.Make(Self_Hashcons)
 
   let hcons = Hashcons.simple_hcons HashProjection.generate HashProjection.hcons Repr.hcons
 
-  let compare (c, b) (c', b') =
-    if b == b' then Repr.compare c c'
-    else if b then 1 else -1
+  let compare (p, b) (p', b') =
+    let c = Bool.compare b b' in
+    if c <> 0 then c else Repr.compare p p'
 
   let map f (c, b as x) =
     let c' = Repr.map f c in
@@ -1012,7 +1010,17 @@ struct
   let to_string p = Constant.to_string (constant p)
   let print p = Constant.print (constant p)
 
+  let debug_to_string p =
+    (if unfolded p then "unfolded(" else "") ^
+    Constant.debug_to_string (constant p) ^
+    (if unfolded p then ")" else "")
+  let debug_print p = str (debug_to_string p)
+
 end
+
+module PRmap = HMap.Make(Projection.Repr.CanOrd)
+module PRset = PRmap.Set
+module PRpred = Predicate.Make(Projection.Repr.CanOrd)
 
 module GlobRefInternal = struct
 
@@ -1025,8 +1033,8 @@ module GlobRefInternal = struct
   let equal gr1 gr2 =
     gr1 == gr2 || match gr1,gr2 with
     | ConstRef con1, ConstRef con2 -> Constant.equal con1 con2
-    | IndRef kn1, IndRef kn2 -> eq_ind kn1 kn2
-    | ConstructRef kn1, ConstructRef kn2 -> eq_constructor kn1 kn2
+    | IndRef kn1, IndRef kn2 -> Ind.CanOrd.equal kn1 kn2
+    | ConstructRef kn1, ConstructRef kn2 -> Construct.CanOrd.equal kn1 kn2
     | VarRef v1, VarRef v2 -> Id.equal v1 v2
     | (ConstRef _ | IndRef _ | ConstructRef _ | VarRef _), _ -> false
 
@@ -1098,6 +1106,18 @@ module GlobRef = struct
     let equal gr1 gr2 = GlobRefInternal.global_eq_gen Constant.SyntacticOrd.equal Ind.SyntacticOrd.equal Construct.SyntacticOrd.equal gr1 gr2
     let hash gr = GlobRefInternal.global_hash_gen Constant.SyntacticOrd.hash Ind.SyntacticOrd.hash Construct.SyntacticOrd.hash gr
   end
+
+  let canonize gr = match gr with
+  | VarRef _ -> gr
+  | ConstRef c ->
+    let c' = Constant.canonize c in
+    if c' == c then gr else ConstRef c'
+  | IndRef ind ->
+    let ind' = Ind.canonize ind in
+    if ind' == ind then gr else IndRef ind'
+  | ConstructRef c ->
+    let c' = Construct.canonize c in
+    if c' == c then gr else ConstructRef c'
 
   let is_bound = function
   | VarRef _ -> false

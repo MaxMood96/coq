@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -9,6 +9,7 @@
 (************************************************************************)
 
 (* The fields below are absolute paths *)
+val install_prefix : string   (* Install prefix passed by the user *)
 val coqlib : string     (* where the std library is installed *)
 val configdir : string  (* where configuration files are installed *)
 val datadir : string    (* where extra data files are installed *)

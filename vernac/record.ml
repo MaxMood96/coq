@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -28,19 +28,23 @@ module RelDecl = Context.Rel.Declaration
 
 (********** definition d'un record (structure) **************)
 
-let typeclasses_strict =
+let { Goptions.get = typeclasses_strict } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Typeclasses";"Strict";"Resolution"]
     ~value:false
+    ()
 
-let typeclasses_unique =
+let { Goptions.get = typeclasses_unique } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Typeclasses";"Unique";"Instances"]
     ~value:false
+    ()
+
+let { Goptions.get = typeclasses_default_mode } =
+  Goptions.declare_interpreted_string_option_and_ref Hints.parse_mode Hints.string_of_mode
+    ~key:["Typeclasses";"Default";"Mode"]
+    ~value:Hints.ModeOutput
+    ()
 
 let interp_fields_evars env sigma ~ninds ~nparams impls_env nots l =
   let _, sigma, impls, newfs, _ =
@@ -87,7 +91,7 @@ let interp_fields_evars env sigma ~ninds ~nparams impls_env nots l =
 
 let check_anonymous_type ind =
   match ind with
-  | { CAst.v = CSort (Glob_term.UAnonymous {rigid=true}) } -> true
+  | { CAst.v = CSort s } -> Constrexpr_ops.(sort_expr_eq expr_Type_sort s)
   | _ -> false
 
 let error_parameters_must_be_named bk {CAst.loc; v=name} =
@@ -97,12 +101,12 @@ let error_parameters_must_be_named bk {CAst.loc; v=name} =
   | _ -> ()
 
 let check_parameters_must_be_named = function
-  | CLocalDef (b, _, _) ->
+  | CLocalDef (b, _, _, _) ->
     error_parameters_must_be_named default_binder_kind b
-  | CLocalAssum (ls, bk, _ce) ->
+  | CLocalAssum (ls, _, bk, _ce) ->
     List.iter (error_parameters_must_be_named bk) ls
   | CLocalPattern {CAst.loc} ->
-    Loc.raise ?loc (Gramlib.Stream.Error "pattern with quote not allowed in record parameters")
+    Loc.raise ?loc (Gramlib.Grammar.Error "pattern with quote not allowed in record parameters")
 
 (** [DataI.t] contains the information used in record interpretation,
    it is a strict subset of [Ast.t] thus this should be
@@ -122,8 +126,8 @@ end
    type-inference *)
 module DataR = struct
   type t =
-    { min_univ : Sorts.t
-    ; arity : Constr.t
+    { arity : Constr.t
+    ; default_dep_elim : DeclareInd.default_dep_elim
     ; implfs : Impargs.manual_implicits list
     ; fields : Constr.rel_declaration list
     }
@@ -149,29 +153,37 @@ module Data = struct
   }
 end
 
-let build_type_telescope newps env0 sigma { DataI.arity; _ } = match arity with
+(** Is [s] a single local level (type or qsort)? If so return it. *)
+let is_sort_variable sigma s =
+  match EConstr.ESorts.kind sigma s with
+  | SProp | Prop | Set -> None
+  | Type u | QSort (_, u) -> match Univ.Universe.level u with
+    | None -> None
+    | Some l ->
+      if Univ.Level.Set.mem l (fst (Evd.universe_context_set sigma))
+      then Some l
+      else None
+
+let build_type_telescope ~unconstrained_sorts newps env0 sigma { DataI.arity; _ } = match arity with
   | None ->
-    let uvarkind = Evd.univ_flexible_alg in
-    let sigma, s = Evd.new_sort_variable uvarkind sigma in
+    let sigma, s = Evd.new_sort_variable Evd.univ_flexible_alg sigma in
+    sigma, (EConstr.mkSort s, s)
+  | Some { CAst.v = CSort s; loc } when Constrexpr_ops.(sort_expr_eq expr_Type_sort s) ->
+    (* special case: the user wrote ": Type". We want to allow it to become algebraic
+       (and Prop but that may change in the future) *)
+    let sigma, s = Evd.new_sort_variable ?loc UState.univ_flexible_alg sigma in
     sigma, (EConstr.mkSort s, s)
   | Some t ->
     let env = EConstr.push_rel_context newps env0 in
-    let poly =
-      match t with
-      | { CAst.v = CSort (Glob_term.UAnonymous {rigid=true}) } -> true | _ -> false in
     let impls = Constrintern.empty_internalization_env in
-    let sigma, s = Constrintern.interp_type_evars ~program_mode:false env sigma ~impls t in
+    let sigma, s =
+      let t = Constrintern.intern_gen IsType ~impls env sigma t in
+      let flags = { Pretyping.all_no_fail_flags with program_mode = false; unconstrained_sorts } in
+      Pretyping.understand_tcc ~flags env sigma ~expected_type:IsType t
+    in
     let sred = Reductionops.whd_allnolet env sigma s in
     (match EConstr.kind sigma sred with
-     | Sort s' ->
-       (if poly then
-          match Evd.is_sort_variable sigma s' with
-          | Some l ->
-            let sigma = Evd.make_flexible_variable sigma ~algebraic:true l in
-            sigma, (s, s')
-          | None ->
-            sigma, (s, s')
-        else sigma, (s, s'))
+     | Sort s' -> (sigma, (s, s'))
      | _ -> user_err ?loc:(constr_loc t) (str"Sort expected."))
 
 type tc_result =
@@ -182,23 +194,45 @@ type tc_result =
   * Constr.rel_context
   * DataR.t list
 
+(* returned DefaultElim value will eventually be discarded *)
+let def_class_levels ~def env_ar sigma aritysorts ctors =
+  let s, ctor = match aritysorts, ctors with
+    | [s], [_,ctor] -> begin match ctor with
+        | [LocalAssum (_,t)] -> s, t
+        | _ -> assert false
+      end
+    | _ -> CErrors.user_err Pp.(str "Mutual definitional classes are not supported.")
+  in
+  let ctor_sort = Retyping.get_sort_of env_ar sigma ctor in
+  let is_prop_ctor = EConstr.ESorts.is_prop sigma ctor_sort in
+  let sigma = Evd.set_leq_sort env_ar sigma ctor_sort s in
+  if Option.cata (Evd.is_flexible_level sigma) false (is_sort_variable sigma s)
+  && is_prop_ctor
+  then (* We assume that the level in aritysort is not constrained
+          and clear it, if it is flexible *)
+    let sigma = Evd.set_eq_sort env_ar sigma EConstr.ESorts.set s in
+    (sigma, [DeclareInd.DefaultElim, EConstr.mkProp])
+  else
+    sigma, [DefaultElim, EConstr.mkSort s]
+
 (* ps = parameter list *)
-let typecheck_params_and_fields def poly udecl ps (records : DataI.t list) : tc_result =
+let typecheck_params_and_fields def ~poly udecl ps (records : DataI.t list) : tc_result =
   let env0 = Global.env () in
   (* Special case elaboration for template-polymorphic inductives,
      lower bound on introduced universes is Prop so that we do not miss
      any Set <= i constraint for universes that might actually be instantiated with Prop. *)
   let is_template =
     List.exists (fun { DataI.arity; _} -> Option.cata check_anonymous_type true arity) records in
-  let env0 = if not poly && not def && is_template then Environ.set_universes_lbound env0 UGraph.Bound.Prop else env0 in
+  let unconstrained_sorts = not poly && not def && is_template in
   let sigma, decl, variances = Constrintern.interp_cumul_univ_decl_opt env0 udecl in
   let () = List.iter check_parameters_must_be_named ps in
   let sigma, (impls_env, ((_env1,newps), imps)) =
-    Constrintern.interp_context_evars ~program_mode:false env0 sigma ps in
+    Constrintern.interp_context_evars ~program_mode:false ~unconstrained_sorts env0 sigma ps in
   let sigma, typs =
-    List.fold_left_map (build_type_telescope newps env0) sigma records in
-  let arities = List.map (fun (typ, _) -> EConstr.it_mkProd_or_LetIn typ newps) typs in
-  let relevances = List.map (fun (_,s) -> EConstr.ESorts.relevance_of_sort sigma s) typs in
+    List.fold_left_map (build_type_telescope ~unconstrained_sorts newps env0) sigma records in
+  let typs, aritysorts = List.split typs in
+  let arities = List.map (fun typ -> EConstr.it_mkProd_or_LetIn typ newps) typs in
+  let relevances = List.map (fun s -> EConstr.ESorts.relevance_of_sort s) aritysorts in
   let fold accu { DataI.name; _ } arity r =
     EConstr.push_rel (LocalAssum (make_annot (Name name) r,arity)) accu in
   let env_ar = EConstr.push_rel_context newps (List.fold_left3 fold env0 records arities relevances) in
@@ -215,38 +249,40 @@ let typecheck_params_and_fields def poly udecl ps (records : DataI.t list) : tc_
   let (sigma, data) = List.fold_left_map fold sigma records in
   let sigma =
     Pretyping.solve_remaining_evars Pretyping.all_and_fail_flags env_ar sigma in
-  let sigma = Evd.minimize_universes sigma in
-  let fold sigma (typ, esort) (_, newfs) =
-    let sort = EConstr.ESorts.kind sigma esort in
-    let univ = ComInductive.Internal.compute_constructor_level env_ar sigma newfs in
-    let univ = if Sorts.is_sprop sort then univ else if Sorts.is_sprop univ then Sorts.prop else univ in
-      if not def && is_impredicative_sort env0 sort then
-        sigma, (sort, typ)
-      else
-        let sigma = Evd.set_leq_sort env_ar sigma (EConstr.ESorts.make univ) esort in
-        if Sorts.is_small univ &&
-           Option.cata (Evd.is_flexible_level sigma) false (Evd.is_sort_variable sigma esort) then
-           (* We can assume that the level in aritysort is not constrained
-               and clear it, if it is flexible *)
-          Evd.set_eq_sort env_ar sigma EConstr.ESorts.set esort, (univ, EConstr.mkSort (EConstr.ESorts.make univ))
-        else sigma, (univ, typ)
+  let sigma, typs =
+    if def then def_class_levels ~def env_ar sigma aritysorts data
+    else (* each inductive has one constructor *)
+      let ctors = List.map (fun (_,newfs) -> [newfs]) data in
+      let indnames = List.map (fun x -> x.DataI.name) records in
+      let arities_explicit = List.map (fun x -> Option.has_some x.DataI.arity) records in
+      let sigma, (default_dep_elim, typs) =
+        ComInductive.Internal.inductive_levels env_ar sigma ~poly ~indnames ~arities_explicit typs ctors
+      in
+      sigma, List.combine default_dep_elim typs
   in
-  let (sigma, typs) = List.fold_left2_map fold sigma typs data in
   (* TODO: Have this use Declaredef.prepare_definition *)
-  let sigma, (newps, ans) = Evarutil.finalize sigma (fun nf ->
-      let nf_rel r = Evarutil.nf_relevance sigma r in
-      let map_decl = function
-      | LocalAssum (na, t) -> LocalAssum (UnivSubst.nf_binder_annot nf_rel na, nf t)
-      | LocalDef (na, c, t) -> LocalDef (UnivSubst.nf_binder_annot nf_rel na, nf c, nf t)
-      in
-      let newps = List.map map_decl newps in
-      let map (implfs, fields) (min_univ, typ) =
-        let fields = List.map map_decl fields in
-        let arity = nf typ in
-        { DataR.min_univ; arity; implfs; fields }
-      in
-      let ans = List.map2 map data typs in
-      newps, ans)
+  let lbound = if unconstrained_sorts then UGraph.Bound.Prop else UGraph.Bound.Set in
+  let sigma, (newps, ans) =
+    (* too complex for Evarutil.finalize as we normalize non-constr *)
+    let sigma = Evd.minimize_universes ~lbound sigma in
+    let uvars = ref Univ.Level.Set.empty in
+    let nf c =
+      let _, varsc = EConstr.universes_of_constr sigma c in
+      let c = EConstr.to_constr sigma c in
+      uvars := Univ.Level.Set.union !uvars varsc;
+      c
+    in
+    let nf_rel r = EConstr.ERelevance.kind sigma r in
+    let map_decl = RelDecl.map_constr_het nf_rel nf in
+    let newps = List.map map_decl newps in
+    let map (implfs, fields) (default_dep_elim, typ) =
+      let fields = List.map map_decl fields in
+      let arity = nf typ in
+      { DataR.arity; default_dep_elim; implfs; fields }
+    in
+    let ans = List.map2 map data typs in
+    let sigma = Evd.restrict_universe_context ~lbound sigma !uvars in
+    sigma, (newps, ans)
   in
   let univs = Evd.check_univ_decl ~poly sigma decl in
   let ce t = Pretyping.check_evars env0 sigma (EConstr.of_constr t) in
@@ -261,6 +297,17 @@ let warn_cannot_define_projection =
   CWarnings.create ~name:"cannot-define-projection" ~category:CWarnings.CoreCategories.records
          (fun msg -> hov 0 msg)
 
+type arity_error =
+  | NonInformativeToInformative
+  | StrongEliminationOnNonSmallType
+
+let error_elim_explain kp ki =
+  let open Sorts in
+  match kp,ki with
+  | (InType | InSet), InProp -> Some NonInformativeToInformative
+  | InType, InSet -> Some StrongEliminationOnNonSmallType (* if Set impredicative *)
+  | _ -> None
+
 (* If a projection is not definable, we throw an error if the user
 asked it to be a coercion or instance. Otherwise, we just print an info
 message. The user might still want to name the field of the record. *)
@@ -272,20 +319,28 @@ let warning_or_error ~info flags indsp err =
            strbrk" cannot be defined because the projection" ++ str s ++ spc () ++
            prlist_with_sep pr_comma Id.print projs ++ spc () ++ str have ++
            strbrk " not defined.")
-    | BadTypedProj (fi,_ctx,te) ->
-        match te with
-          | ElimArity (_, _, Some (_, _, (InType | InSet), InProp)) ->
+    | BadTypedProj (fi,env,te) ->
+      let err = match te with
+        | ElimArity (_, _, Some s) ->
+          error_elim_explain (Sorts.family s)
+            (Inductiveops.elim_sort (Global.lookup_inductive indsp))
+        | _ -> None
+      in
+        match err with
+          | Some NonInformativeToInformative ->
               (Id.print fi ++
                 strbrk" cannot be defined because it is informative and " ++
                 Printer.pr_inductive (Global.env()) indsp ++
                 strbrk " is not.")
-          | ElimArity (_, _, Some (_, _, InType, InSet)) ->
+          | Some StrongEliminationOnNonSmallType ->
               (Id.print fi ++
                 strbrk" cannot be defined because it is large and " ++
                 Printer.pr_inductive (Global.env()) indsp ++
                 strbrk " is not.")
-          | _ ->
-              (Id.print fi ++ strbrk " cannot be defined because it is not typable.")
+          | None ->
+            (Id.print fi ++ str " cannot be defined because it is not typable:" ++ spc() ++
+             Himsg.explain_type_error env (Evd.from_env env)
+               (Pretype_errors.of_type_error te))
   in
   if flags.Data.pf_coercion || flags.Data.pf_instance then user_err ~info st;
   warn_cannot_define_projection (hov 0 st)
@@ -336,13 +391,11 @@ let instantiate_possibly_recursive_type ind u ntypes paramdecls fields =
 
 (** Declare projection [ref] over [from] a coercion
    or a typeclass instance according to [flags]. *)
-(* remove the last argument (it will become alway true) after deprecation phase
-   (started in 8.17, c.f. https://github.com/coq/coq/pull/16230) *)
-let declare_proj_coercion_instance ~flags ref from ~poly ~with_coercion =
-  if with_coercion && flags.Data.pf_coercion then begin
+let declare_proj_coercion_instance ~flags ref from =
+  if flags.Data.pf_coercion then begin
     let cl = ComCoercion.class_of_global from in
     let local = flags.Data.pf_locality = Goptions.OptLocal in
-    ComCoercion.try_add_new_coercion_with_source ref ~local ~poly ~nonuniform:false ~reversible:flags.Data.pf_reversible ~source:cl
+    ComCoercion.try_add_new_coercion_with_source ref ~local ~reversible:flags.Data.pf_reversible ~source:cl
   end;
   if flags.Data.pf_instance then begin
     let env = Global.env () in
@@ -372,22 +425,17 @@ let build_named_proj ~primitive ~flags ~poly ~univs ~uinstance ~kind env paramde
       (* [ccl] is defined in context [params;x:rp] *)
       (* [ccl'] is defined in context [params;x:rp;x:rp] *)
       if primitive then
-        let proj_relevant = match rci with
-        | Sorts.Irrelevant -> false
-        | Sorts.Relevant -> true
-        | Sorts.RelevanceVar _ -> assert false
-        in
         let p = Projection.Repr.make indsp
-            ~proj_relevant ~proj_npars:mib.mind_nparams ~proj_arg:i (Label.of_id fid) in
-        mkProj (Projection.make p true, mkRel 1), Some p
+            ~proj_npars:mib.mind_nparams ~proj_arg:i (Label.of_id fid) in
+        mkProj (Projection.make p false, rci, mkRel 1), Some (p,rci)
       else
         let ccl' = liftn 1 2 ccl in
         let p = mkLambda (x, lift 1 rp, ccl') in
         let branch = it_mkLambda_or_LetIn (mkRel nfi) lifted_fields in
-        let ci = Inductiveops.make_case_info env indsp rci LetStyle in
+        let ci = Inductiveops.make_case_info env indsp LetStyle in
         (* Record projections are always NoInvert because they're at
            constant relevance *)
-        mkCase (Inductive.contract_case env (ci, p, NoInvert, mkRel 1, [|branch|])), None
+        mkCase (Inductive.contract_case env (ci, (p, rci), NoInvert, mkRel 1, [|branch|])), None
   in
   let proj = it_mkLambda_or_LetIn (mkLambda (x,rp,body)) paramdecls in
   let projtyp = it_mkProd_or_LetIn (mkProd (x,rp,ccl)) paramdecls in
@@ -398,6 +446,7 @@ let build_named_proj ~primitive ~flags ~poly ~univs ~uinstance ~kind env paramde
   let entry = Declare.definition_entry ~univs ~types:projtyp proj in
   let kind = Decls.IsDefinition kind in
   let kn =
+    (* XXX more precise loc *)
     try Declare.declare_constant ~name:fid ~kind (Declare.DefinitionEntry entry)
     with Type_errors.TypeError (ctx,te) as exn when not primitive ->
       let _, info = Exninfo.capture exn in
@@ -405,9 +454,9 @@ let build_named_proj ~primitive ~flags ~poly ~univs ~uinstance ~kind env paramde
   in
   Declare.definition_message fid;
   let term = match p_opt with
-    | Some p ->
+    | Some (p,r) ->
       let _ = DeclareInd.declare_primitive_projection p kn in
-      mkProj (Projection.make p false,mkRel 1)
+      mkProj (Projection.make p false, r, mkRel 1)
     | None ->
       let proj_args = (*Rel 1 refers to "x"*) paramargs@[mkRel 1] in
       match decl with
@@ -416,7 +465,7 @@ let build_named_proj ~primitive ~flags ~poly ~univs ~uinstance ~kind env paramde
   in
   let refi = GlobRef.ConstRef kn in
   Impargs.maybe_declare_manual_implicits false refi impls;
-  declare_proj_coercion_instance ~flags refi (GlobRef.IndRef indsp) ~poly ~with_coercion:true;
+  declare_proj_coercion_instance ~flags refi (GlobRef.IndRef indsp);
   let i = if is_local_assum decl then i+1 else i in
   (Some kn, i, Projection term::subst)
 
@@ -453,14 +502,14 @@ let declare_projections indsp univs ?(kind=Decls.StructureComponent) inhabitant_
   let (mib,mip) = Global.lookup_inductive indsp in
   let poly = Declareops.inductive_is_polymorphic mib in
   let uinstance = match fst univs with
-    | Polymorphic_entry uctx -> Univ.UContext.instance uctx
-    | Monomorphic_entry -> Univ.Instance.empty
+    | Polymorphic_entry uctx -> UVars.UContext.instance uctx
+    | Monomorphic_entry -> UVars.Instance.empty
   in
   let paramdecls = Inductive.inductive_paramdecls (mib, uinstance) in
   let r = mkIndU (indsp,uinstance) in
   let rp = applist (r, Context.Rel.instance_list mkRel 0 paramdecls) in
   let paramargs = Context.Rel.instance_list mkRel 1 paramdecls in (*def in [[params;x:rp]]*)
-  let x = make_annot (Name inhabitant_id) mip.mind_relevance in
+  let x = make_annot (Name inhabitant_id) (Inductive.relevance_of_ind_body mip uinstance) in
   let fields = instantiate_possibly_recursive_type (fst indsp) uinstance mib.mind_ntypes paramdecls fields in
   let lifted_fields = Vars.lift_rel_context 1 fields in
   let primitive =
@@ -521,11 +570,6 @@ let bound_names_rdata { DataR.fields; _ } : Id.Set.t =
   let add_names names field = add_bound_names_constr names (RelDecl.get_type field) in
   List.fold_left add_names Id.Set.empty fields
 
-(** Pick a variable name for a record, avoiding names bound in its fields. *)
-let data_name id rdata =
-  let name = Id.of_string (Unicode.lowercase_first_char (Id.to_string id)) in
-  Namegen.next_ident_away name (bound_names_rdata rdata)
-
 (** Main record declaration part:
 
    The entry point is [definition_structure], which will match on the
@@ -544,6 +588,7 @@ let data_name id rdata =
 module Record_decl = struct
   type t = {
     mie : Entries.mutual_inductive_entry;
+    default_dep_elim : DeclareInd.default_dep_elim list;
     records : Data.t list;
     primitive_proj : bool;
     impls : DeclareInd.one_inductive_impls list;
@@ -553,7 +598,7 @@ module Record_decl = struct
     ubinders : UnivNames.universe_binders;
     projections_kind : Decls.definition_object_kind;
     poly : bool;
-    indlocs : Loc.t option list;
+    indlocs : DeclareInd.indlocs;
   }
 end
 
@@ -564,7 +609,7 @@ module Ast = struct
     ; is_coercion : coercion_flag
     ; binders: local_binder_expr list
     ; cfs : (local_decl_expr * record_field_attr) list
-    ; idbuild : Id.t
+    ; idbuild : lident
     ; sort : constr_expr option
     ; default_inhabitant_id : Id.t option
     }
@@ -584,14 +629,20 @@ let check_unique_names records =
     | Vernacexpr.DefExpr ({CAst.v=Name id},_,_,_) -> id::acc
     | _ -> acc in
   let indlocs =
-    records |> List.map (fun { Ast.name; _ } -> name ) in
+    records |> List.map (fun { Ast.name; idbuild; _ } -> name, idbuild ) in
   let fields_names =
     records |> List.fold_left (fun acc { Ast.cfs; _ } ->
       List.fold_left extract_name acc cfs) [] in
   let allnames =
-    fields_names @ (indlocs |> List.map (fun x -> x.CAst.v)) in
+    (* XXX we don't check the name of the constructor ([idbuild])
+       because definitional classes ignore it so it being a duplicate must be allowed.
+
+       Maybe we will refactor this someday, or maybe we will remove
+       the early check and let declaration fail when there are duplicates. *)
+    fields_names @ (indlocs |> List.map (fun (x,_) -> x.CAst.v))
+  in
   match List.duplicates Id.equal allnames with
-  | [] -> List.map (fun x -> x.CAst.loc) indlocs
+  | [] -> List.map (fun (x,y) -> x.CAst.loc, [y.CAst.loc]) indlocs
   | id :: _ -> user_err (str "Two objects have the same name" ++ spc () ++ quote (Id.print id) ++ str ".")
 
 type kind_class = NotClass | RecordClass | DefClass
@@ -600,6 +651,11 @@ let kind_class =
   let open Vernacexpr in
   function Class true -> DefClass | Class false -> RecordClass
   | Inductive_kw | CoInductive | Variant | Record | Structure -> NotClass
+
+(** Pick a variable name for a record, avoiding names bound in its fields. *)
+let canonical_inhabitant_id ~isclass ind_id =
+  if isclass then ind_id
+  else Id.of_string (Unicode.lowercase_first_char (Id.to_string ind_id))
 
 let check_priorities kind records =
   let open Vernacexpr in
@@ -612,17 +668,16 @@ let check_priorities kind records =
 
 let extract_record_data records =
   let data = List.map Ast.to_datai records in
-  let pss = List.map (fun { Ast.binders; _ } -> binders) records in
-  let ps = match pss with
+  let ps = match records with
   | [] -> CErrors.anomaly (str "Empty record block.")
-  | ps :: rem ->
+  | r :: rem ->
     let eq_local_binders bl1 bl2 = List.equal local_binder_eq bl1 bl2 in
-    let () =
-      if not (List.for_all (eq_local_binders ps) rem) then
-        user_err (str "Parameters should be syntactically the \
-          same for each inductive type.")
-    in
-    ps
+    match List.find_opt (fun r' -> not @@ eq_local_binders r.Ast.binders r'.Ast.binders) rem with
+    | None -> r.Ast.binders
+    | Some r' ->
+      ComInductive.Internal.error_differing_params ~kind:"record"
+        (r.name, (r.binders,None))
+        (r'.name, (r'.binders,None))
   in
   ps, data
 
@@ -633,35 +688,18 @@ let implicits_of_context ctx =
          | LocalAssum _ as d -> Some (RelDecl.get_name d))
          ctx)))
 
-(* deprecated in 8.16, to be removed at the end of the deprecation phase
-   (c.f., https://github.com/coq/coq/pull/15802 ) *)
-let warn_future_coercion_class_constructor =
-  CWarnings.create ~name:"future-coercion-class-constructor" ~category:CWarnings.CoreCategories.deprecated
-    ~default:CWarnings.AsError
-    Pp.(fun () -> str "'Class >' currently does nothing. Use 'Class' instead.")
-
-(* deprecated in 8.17, to be removed at the end of the deprecation phase
-   (c.f., https://github.com/coq/coq/pull/16230 ) *)
-let warn_future_coercion_class_field =
-  CWarnings.create ~name:"future-coercion-class-field" ~category:CWarnings.CoreCategories.deprecated Pp.(fun definitional ->
-    strbrk "A coercion will be introduced instead of an instance in future versions when using ':>' in 'Class' declarations. "
-    ++ strbrk "Replace ':>' with '::' (or use '#[global] Existing Instance field.' for compatibility with Coq < 8.17). Beware that the default locality for '::' is #[export], as opposed to #[global] for ':>' currently."
-    ++ strbrk (if definitional then "" else " Add an explicit #[global] attribute to the field if you need to keep the current behavior. For example: \"Class foo := { #[global] field :: bar }.\""))
-
 let check_proj_flags kind rf =
   let open Vernacexpr in
   let pf_coercion, pf_reversible =
     match rf.rf_coercion with
-    (* replace "kind_class kind = NotClass" with true after deprecation phase *)
-    | AddCoercion -> kind_class kind = NotClass, Option.default true rf.rf_reversible
+    | AddCoercion -> true, Option.default true rf.rf_reversible
     | NoCoercion ->
        if rf.rf_reversible <> None then
          Attributes.(unsupported_attributes
            [CAst.make ("reversible (without :>)",VernacFlagEmpty)]);
        false, false in
   let pf_instance =
-    match rf.rf_instance with NoInstance -> false | BackInstance -> true
-    | BackInstanceWarning -> kind_class kind <> NotClass in
+    match rf.rf_instance with NoInstance -> false | BackInstance -> true in
   let pf_priority = rf.rf_priority in
   let pf_locality =
     begin match rf.rf_coercion, rf.rf_instance with
@@ -675,19 +713,10 @@ let check_proj_flags kind rf =
            [CAst.make ("export (without ::)",VernacFlagEmpty)])
     | _ -> ()
     end; rf.rf_locality in
-  (* remove following let after deprecation phase (started in 8.17,
-     c.f., https://github.com/coq/coq/pull/16230 ) *)
-  let pf_locality =
-    match rf.rf_instance, rf.rf_locality with
-    | BackInstanceWarning, Goptions.OptDefault -> Goptions.OptGlobal
-    | _ -> pf_locality in
   let pf_canonical = rf.rf_canonical in
   Data.{ pf_coercion; pf_reversible; pf_instance; pf_priority; pf_locality; pf_canonical }
 
-(* remove the definitional argument at the end of the deprecation phase
-   (started in 8.17)
-   (c.f., https://github.com/coq/coq/pull/16230 ) *)
-let pre_process_structure ?(definitional=false) udecl kind ~poly (records : Ast.t list) =
+let pre_process_structure udecl kind ~poly (records : Ast.t list) =
   let indlocs = check_unique_names records in
   let () = check_priorities kind records in
   let ps, data = extract_record_data records in
@@ -698,7 +727,7 @@ let pre_process_structure ?(definitional=false) udecl kind ~poly (records : Ast.
        is messing state beyond that.
     *)
     Vernacstate.System.protect (fun () ->
-        typecheck_params_and_fields (kind = Class true) poly udecl ps data) ()
+        typecheck_params_and_fields (kind = Class true) ~poly udecl ps data) ()
   in
   let adjust_impls impls = match kind_class kind with
     | NotClass -> impargs @ [CAst.make None] @ impls
@@ -707,18 +736,14 @@ let pre_process_structure ?(definitional=false) udecl kind ~poly (records : Ast.
   let map rdata { Ast.name; is_coercion; cfs; idbuild; default_inhabitant_id; _ } =
     let proj_flags = List.map (fun (_, rf) -> check_proj_flags kind rf) cfs in
     let inhabitant_id =
-      match default_inhabitant_id, kind_class kind with
-      | None, NotClass -> data_name name.CAst.v rdata
-      | None, _ -> Namegen.next_ident_away name.CAst.v (Termops.vars_of_env (Global.env()))
-      | Some n, _ -> n
+      match default_inhabitant_id with
+      | Some n -> n
+      | None ->
+        let canonical_inhabitant_id = canonical_inhabitant_id ~isclass:(kind_class kind != NotClass) name.CAst.v in
+        Namegen.next_ident_away canonical_inhabitant_id (bound_names_rdata rdata)
     in
     let is_coercion = match is_coercion with AddCoercion -> true | NoCoercion -> false in
-    if kind_class kind <> NotClass then begin
-      if is_coercion then warn_future_coercion_class_constructor ();
-      if List.exists (function (_, Vernacexpr.{ rf_instance = BackInstanceWarning; _ }) -> true | _ -> false) cfs then
-        warn_future_coercion_class_field definitional
-    end;
-    { Data.id = name.CAst.v; idbuild; rdata; is_coercion; proj_flags; inhabitant_id }
+    { Data.id = name.CAst.v; idbuild = idbuild.v; rdata; is_coercion; proj_flags; inhabitant_id }
   in
   let data = List.map2 map data records in
   let projections_kind =
@@ -747,10 +772,9 @@ let interp_structure_core ~cumulative finite ~univs ~variances ~primitive_proj i
   let blocks = List.mapi mk_block data in
   let ind_univs, global_univ_decls = match blocks, data with
   | [entry], [data] ->
-    let concl = Some data.Data.rdata.DataR.min_univ in
-    let env_ar_params = Environ.push_rel_context params (Global.env ()) in
     ComInductive.compute_template_inductive ~user_template:template
-      ~env_ar_params ~ctx_params:params ~univ_entry:univs entry concl
+      ~ctx_params:params ~univ_entry:univs entry
+      (if Term.isArity entry.mind_entry_arity then SyntaxAllowsTemplatePoly else SyntaxNoTemplatePoly)
   | _ ->
     begin match template with
     | Some true -> user_err Pp.(str "Template-polymorphism not allowed with mutual records.")
@@ -759,10 +783,6 @@ let interp_structure_core ~cumulative finite ~univs ~variances ~primitive_proj i
       | UState.Polymorphic_entry uctx -> Polymorphic_ind_entry uctx, Univ.ContextSet.empty
       | UState.Monomorphic_entry uctx -> Monomorphic_ind_entry, uctx
     end
-  in
-  let primitive =
-    primitive_proj  &&
-    List.for_all (fun { Data.rdata = { DataR.fields; _ }; _ } -> List.exists is_local_assum fields) data
   in
   let globnames, global_univ_decls = match ind_univs with
   | Monomorphic_ind_entry -> (univs, ubinders), Some global_univ_decls
@@ -773,7 +793,7 @@ let interp_structure_core ~cumulative finite ~univs ~variances ~primitive_proj i
   let variance = ComInductive.variance_of_entry ~cumulative ~variances univs in
   let mie =
     { mind_entry_params = params;
-      mind_entry_record = Some (if primitive then Some (Array.map_of_list (fun a -> a.Data.inhabitant_id) data) else None);
+      mind_entry_record = Some (if primitive_proj then Some (Array.map_of_list (fun a -> a.Data.inhabitant_id) data) else None);
       mind_entry_finite = finite;
       mind_entry_inds = blocks;
       mind_entry_private = None;
@@ -782,29 +802,37 @@ let interp_structure_core ~cumulative finite ~univs ~variances ~primitive_proj i
     }
   in
   let impls = List.map (fun _ -> impargs, []) data in
+  let default_dep_elim = List.map (fun d -> d.Data.rdata.default_dep_elim) data in
   let open Record_decl in
-  { mie; primitive_proj; impls; globnames; global_univ_decls; projunivs;
+  { mie; default_dep_elim; primitive_proj; impls; globnames; global_univ_decls; projunivs;
     ubinders; projections_kind; poly; records = data;
     indlocs;
   }
 
 
-let interp_structure udecl kind ~template ~cumulative ~poly ~primitive_proj finite records =
+let interp_structure ~flags udecl kind ~primitive_proj records =
+  assert (kind <> Vernacexpr.Class true);
+  let ComInductive.{
+      poly;
+      cumulative;
+      template;
+      finite;
+    } = flags in
   let impargs, params, univs, variances, projections_kind, data, indlocs =
     pre_process_structure udecl kind ~poly records in
   interp_structure_core ~cumulative finite ~univs ~variances ~primitive_proj impargs params template ~projections_kind ~indlocs data
 
-let declare_structure { Record_decl.mie; primitive_proj; impls; globnames; global_univ_decls; projunivs; ubinders; projections_kind; poly; records; indlocs } =
-  Option.iter (DeclareUctx.declare_universe_context ~poly:false) global_univ_decls;
+let declare_structure { Record_decl.mie; default_dep_elim; primitive_proj; impls; globnames; global_univ_decls; projunivs; ubinders; projections_kind; poly; records; indlocs } =
+  Option.iter Global.push_context_set global_univ_decls;
   let kn = DeclareInd.declare_mutual_inductive_with_eliminations mie globnames impls
-      ~primitive_expected:primitive_proj ~indlocs
+      ~primitive_expected:primitive_proj ~indlocs ~default_dep_elim
   in
   let map i { Data.is_coercion; proj_flags; rdata = { DataR.implfs; fields; _}; inhabitant_id; _ } =
     let rsp = (kn, i) in (* This is ind path of idstruc *)
     let cstr = (rsp, 1) in
     let projections = declare_projections rsp (projunivs,ubinders) ~kind:projections_kind inhabitant_id proj_flags implfs fields in
     let build = GlobRef.ConstructRef cstr in
-    let () = if is_coercion then ComCoercion.try_add_new_coercion build ~local:false ~poly ~nonuniform:false ~reversible:true in
+    let () = if is_coercion then ComCoercion.try_add_new_coercion build ~local:false ~reversible:false in
     let struc = Structure.make (Global.env ()) rsp projections in
     let () = declare_structure_entry struc in
     GlobRef.IndRef rsp
@@ -838,9 +866,9 @@ let declare_class_constant ~univs paramimpls params data =
   in
   let inst, univs = match univs with
     | UState.Monomorphic_entry _, ubinders ->
-      Univ.Instance.empty, (UState.Monomorphic_entry Univ.ContextSet.empty, ubinders)
+      UVars.Instance.empty, (UState.Monomorphic_entry Univ.ContextSet.empty, ubinders)
     | UState.Polymorphic_entry uctx, _ ->
-      Univ.UContext.instance uctx, univs
+      UVars.UContext.instance uctx, univs
   in
   let cstu = (cst, inst) in
   let inst_type = appvectc (mkConstU cstu) (Context.Rel.instance mkRel 0 params) in
@@ -856,17 +884,39 @@ let declare_class_constant ~univs paramimpls params data =
   Impargs.declare_manual_implicits false cref paramimpls;
   Impargs.declare_manual_implicits false (GlobRef.ConstRef proj_cst) (List.hd implfs);
   Classes.set_typeclass_transparency ~locality:Hints.SuperGlobal
-    [Tacred.EvalConstRef cst] false;
+    [Evaluable.EvalConstRef cst] false;
   let () =
-    let csb = Global.lookup_constant cst in
-    let poly = Declareops.constant_is_polymorphic csb in
-    declare_proj_coercion_instance ~flags:proj_flags (GlobRef.ConstRef proj_cst) cref ~poly ~with_coercion:false in
+    declare_proj_coercion_instance ~flags:proj_flags (GlobRef.ConstRef proj_cst) cref in
   let m = {
     meth_name = Name proj_name;
     meth_info = None;
     meth_const = Some proj_cst;
   } in
   [cref], [m]
+
+
+let set_class_mode ref mode ctx =
+  let modes =
+    match mode with
+    | Some (Some m) -> Some m
+    | _ ->
+      let ctxl = Context.Rel.nhyps ctx in
+      let def = typeclasses_default_mode () in
+      let mode = match def with
+      | Hints.ModeOutput -> None
+      | Hints.ModeInput ->
+        Some (List.init ctxl (fun _ -> Hints.ModeInput))
+      | Hints.ModeNoHeadEvar ->
+        Some (List.init ctxl (fun _ -> Hints.ModeNoHeadEvar))
+      in
+      let wm = List.init ctxl (fun _ -> def) in
+      Classes.warn_default_mode (ref, wm);
+      mode
+  in
+  match modes with
+  | None -> ()
+  | Some modes -> Classes.set_typeclass_mode ~locality:Hints.SuperGlobal ref modes
+
 
 (** [declare_class] will prepare and declare a [Class]. This is done in
    2 steps:
@@ -892,7 +942,7 @@ let declare_class_constant ~univs paramimpls params data =
    in the form of [Classes.typeclass]
 
   *)
-let declare_class ~univs params inds def data =
+let declare_class ~univs params inds def ?mode data =
   let { Data.rdata } = get_class_params data in
   let fields = rdata.DataR.fields in
   let map ind =
@@ -911,14 +961,14 @@ let declare_class ~univs params inds def data =
   let univs, params, fields =
     match fst univs with
     | UState.Polymorphic_entry uctx ->
-      let usubst, auctx = Univ.abstract_universes uctx in
-      let usubst = Univ.make_instance_subst usubst in
+      let usubst, auctx = UVars.abstract_universes uctx in
+      let usubst = UVars.make_instance_subst usubst in
       let map c = Vars.subst_univs_level_constr usubst c in
       let fields = Context.Rel.map map fields in
       let params = Context.Rel.map map params in
       auctx, params, fields
     | UState.Monomorphic_entry _ ->
-      Univ.AbstractContext.empty, params, fields
+      UVars.AbstractContext.empty, params, fields
   in
   let map (impl, projs) =
     let k =
@@ -930,7 +980,8 @@ let declare_class ~univs params inds def data =
         cl_props = fields;
         cl_projs = projs }
     in
-    Classes.add_class k
+    Classes.add_class k;
+    set_class_mode impl mode params
   in
   List.iter map data
 
@@ -940,7 +991,7 @@ let add_constant_class cst =
   let r = (Environ.lookup_constant cst env).const_relevance in
   let ctx, _ = decompose_prod_decls ty in
   let args = Context.Rel.instance Constr.mkRel 0 ctx in
-  let t = mkApp (mkConstU (cst, Univ.make_abstract_instance univs), args) in
+  let t = mkApp (mkConstU (cst, UVars.make_abstract_instance univs), args) in
   let tc =
     { cl_univs = univs;
       cl_impl = GlobRef.ConstRef cst;
@@ -953,15 +1004,15 @@ let add_constant_class cst =
   in
   Classes.add_class tc;
   Classes.set_typeclass_transparency ~locality:Hints.SuperGlobal
-    [Tacred.EvalConstRef cst] false
+    [Evaluable.EvalConstRef cst] false
 
 let add_inductive_class ind =
   let env = Global.env () in
   let mind, oneind = Inductive.lookup_mind_specif env ind in
+  let ctx = oneind.mind_arity_ctxt in
   let k =
-    let ctx = oneind.mind_arity_ctxt in
     let univs = Declareops.inductive_polymorphic_context mind in
-    let inst = Univ.make_abstract_instance univs in
+    let inst = UVars.make_abstract_instance univs in
     let ty = Inductive.type_of_inductive ((mind, oneind), inst) in
     let r = oneind.mind_relevance in
       { cl_univs = univs;
@@ -991,26 +1042,27 @@ let declare_existing_class g =
     list telling if the corresponding fields must me declared as coercions
     or subinstances. *)
 
-let definition_structure udecl kind ~template ~cumulative ~poly ~primitive_proj
-    finite (records : Ast.t list) : GlobRef.t list =
+let definition_structure ~flags udecl kind ~primitive_proj (records : Ast.t list)
+  : GlobRef.t list =
+  let ComInductive.{
+      poly;
+      cumulative;
+      template;
+      finite;
+    } = flags in
   let impargs, params, univs, variances, projections_kind, data, indlocs =
-    let definitional = kind_class kind = DefClass in
-    pre_process_structure ~definitional udecl kind ~poly records
+    pre_process_structure udecl kind ~poly records
   in
   let inds, def = match kind_class kind with
     | DefClass -> declare_class_constant ~univs impargs params data
     | RecordClass | NotClass ->
-      (* remove the following block after deprecation phase
-         (started in 8.16, c.f., https://github.com/coq/coq/pull/15802 ) *)
-      let data = if kind_class kind = NotClass then data else
-          List.map (fun d -> { d with Data.is_coercion = false }) data in
       let structure =
         interp_structure_core
           ~cumulative finite ~univs ~variances ~primitive_proj
           impargs params template ~projections_kind ~indlocs data in
       declare_structure structure
   in
-  if kind_class kind <> NotClass then declare_class ~univs params inds def data;
+  if kind_class kind <> NotClass then declare_class ~univs params inds def ~mode:flags.mode data;
   inds
 
 module Internal = struct

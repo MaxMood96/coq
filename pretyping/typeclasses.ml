@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -26,19 +26,11 @@ type 'a hint_info_gen =
 
 type hint_info = (Id.Set.t * Pattern.constr_pattern) hint_info_gen
 
-let get_typeclasses_unique_solutions =
+let { Goptions.get = get_typeclasses_unique_solutions } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Typeclasses";"Unique";"Solutions"]
     ~value:false
-
-let solve_one_instance = ref (fun env evm t unique -> assert false)
-
-let resolve_one_typeclass ?(unique=get_typeclasses_unique_solutions ()) env evm t =
-  !solve_one_instance env evm t unique
-
-let set_solve_one_instance f = solve_one_instance := f
+    ()
 
 type class_method = {
   meth_name : Name.t;
@@ -49,7 +41,7 @@ type class_method = {
 (* This module defines type-classes *)
 type typeclass = {
   (* Universe quantification *)
-  cl_univs : Univ.AbstractContext.t;
+  cl_univs : UVars.AbstractContext.t;
 
   (* The class implementation *)
   cl_impl : GlobRef.t;
@@ -91,7 +83,7 @@ let classes : typeclasses ref = Summary.ref GlobRef.Map.empty ~name:"classes"
 let instances : instances ref = Summary.ref GlobRef.Map.empty ~name:"instances"
 
 let typeclass_univ_instance (cl, u) =
-  assert (Univ.AbstractContext.size cl.cl_univs == Univ.Instance.length u);
+  assert (UVars.eq_sizes (UVars.AbstractContext.size cl.cl_univs) (UVars.Instance.length u));
   let subst_ctx c = Context.Rel.map (subst_instance_constr u) c in
     { cl with cl_context = subst_ctx cl.cl_context;
       cl_props = subst_ctx cl.cl_props}
@@ -113,7 +105,7 @@ let global_class_of_constr env sigma c =
 let decompose_class_app env sigma c =
   let hd, args = EConstr.decompose_app_list sigma c in
   match EConstr.kind sigma hd with
-  | Proj (p, c) ->
+  | Proj (p, _, c) ->
     let expp = Retyping.expand_projection env sigma p c args in
     EConstr.decompose_app_list sigma expp
   | _ -> hd, args
@@ -141,7 +133,7 @@ let rec is_class_type evd c =
     match EConstr.kind evd c with
     | Prod (_, _, t) -> is_class_type evd t
     | Cast (t, _, _) -> is_class_type evd t
-    | Proj (p, c) -> GlobRef.(Map.mem (ConstRef (Projection.constant p))) !classes
+    | Proj (p, _, c) -> GlobRef.(Map.mem (ConstRef (Projection.constant p))) !classes
     | _ -> is_class_constr evd c
 
 let is_class_evar evd evi =
@@ -153,7 +145,7 @@ let rec is_maybe_class_type evd c =
     | Prod (_, _, t) -> is_maybe_class_type evd t
     | Cast (t, _, _) -> is_maybe_class_type evd t
     | Evar _ -> true
-    | Proj (p, c) -> GlobRef.(Map.mem (ConstRef (Projection.constant p))) !classes
+    | Proj (p, _, c) -> GlobRef.(Map.mem (ConstRef (Projection.constant p))) !classes
     | _ -> is_class_constr evd c
 
 let () = Hook.set Evd.is_maybe_typeclass_hook (fun evd c -> is_maybe_class_type evd (EConstr.of_constr c))
@@ -271,12 +263,23 @@ let resolve_typeclasses ?(filter=no_goals) ?(unique=get_typeclasses_unique_solut
 let error_unresolvable env evd comp =
   let exception MultipleFound in
   let fold ev accu =
-    let evi = Evd.find_undefined evd ev in
-    let ev_class = class_of_constr env evd (Evd.evar_concl evi) in
-    if Option.is_empty ev_class then accu
-    else (* focus on one instance if only one was searched for *)
-    if Option.has_some accu then raise MultipleFound
-    else (Some ev)
+    match Evd.find_undefined evd ev with
+    | exception Not_found -> None
+    | evi ->
+      let ev_class = class_of_constr env evd (Evd.evar_concl evi) in
+      if Option.is_empty ev_class then accu
+      else (* focus on one instance if only one was searched for *)
+      if Option.has_some accu then raise MultipleFound
+      else (Some ev)
   in
   let ev = try Evar.Set.fold fold comp None with MultipleFound -> None in
   Pretype_errors.unsatisfiable_constraints env evd ev comp
+
+(** Deprecated *)
+
+let solve_one_instance = ref (fun env evm t -> assert false)
+
+let resolve_one_typeclass ?unique:_ env evm t =
+  !solve_one_instance env evm t
+
+let set_solve_one_instance f = solve_one_instance := f

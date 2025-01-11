@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -48,8 +48,9 @@ type signature_mismatch_error =
   | NotEqualInductiveAliases
   | IncompatibleUniverses of UGraph.univ_inconsistency
   | IncompatiblePolymorphism of env * types * types
-  | IncompatibleConstraints of { got : Univ.AbstractContext.t; expect : Univ.AbstractContext.t }
+  | IncompatibleConstraints of { got : UVars.AbstractContext.t; expect : UVars.AbstractContext.t }
   | IncompatibleVariance
+  | NoRewriteRulesSubtyping
 
 type subtyping_trace_elt =
   | Submodule of Label.t
@@ -136,12 +137,12 @@ let rec functor_smart_map fty f0 funct = match funct with
 (** {6 Misc operations } *)
 
 let module_type_of_module mb =
-  { mb with mod_expr = (); mod_type_alg = None;
-    mod_retroknowledge = ModTypeRK; }
+  { mb with mod_expr = ModTypeNul; mod_type_alg = None;
+    mod_retroknowledge = ModTypeNul; }
 
 let module_body_of_type mp mtb =
-  { mtb with mod_expr = Abstract; mod_mp = mp;
-      mod_retroknowledge = ModBodyRK []; }
+  { mtb with mod_expr = ModBodyVal Abstract; mod_mp = mp;
+      mod_retroknowledge = ModBodyVal []; }
 
 let check_modpath_equiv env mp1 mp2 =
   if ModPath.equal mp1 mp2 then ()
@@ -151,10 +152,14 @@ let check_modpath_equiv env mp1 mp2 =
     if ModPath.equal mp1' mp2' then ()
     else error_not_equal_modpaths mp1 mp2
 
-let implem_smart_map fs fa impl = match impl with
-  | Struct e -> let e' = fs e in if e==e' then impl else Struct e'
-  | Algebraic a -> let a' = fa a in if a==a' then impl else Algebraic a'
-  | Abstract | FullStruct -> impl
+let implem_smart_map (type a) fs fa (expr : (a, _) when_mod_body) : (a, _) when_mod_body =
+  match expr with
+  | ModTypeNul -> ModTypeNul
+  | ModBodyVal impl ->
+    match impl with
+    | Struct e -> let e' = fs e in if e==e' then expr else ModBodyVal (Struct e')
+    | Algebraic a -> let a' = fa a in if a==a' then expr else ModBodyVal (Algebraic a')
+    | Abstract | FullStruct -> expr
 
 let rec annotate_module_expression me mty = match me, mty with
 | MENoFunctor me, (NoFunctor _ | MoreFunctor _) -> NoFunctor me
@@ -167,6 +172,8 @@ let rec annotate_struct_body body sign = match sign with
 | NoFunctor _ -> NoFunctor body
 | MoreFunctor (mbid, mty, sign) ->
   MoreFunctor (mbid, mty, annotate_struct_body body sign)
+
+type 'a mod_expr = ('a, module_implementation) when_mod_body
 
 (** {6 Substitutions of modular structures } *)
 
@@ -188,6 +195,9 @@ let rec subst_structure subst do_delta sign =
     | SFBmind mib ->
       let mib' = subst_mind_body subst mib in
       if mib==mib' then orig else (l,SFBmind mib')
+    | SFBrules rrb ->
+      let rrb' = subst_rewrite_rules subst rrb in
+      if rrb==rrb' then orig else (l,SFBrules rrb')
     | SFBmodule mb ->
       let mb' = subst_module subst do_delta mb in
       if mb==mb' then orig else (l,SFBmodule mb')
@@ -200,13 +210,13 @@ let rec subst_structure subst do_delta sign =
 and subst_retro : type a. Mod_subst.substitution -> a module_retroknowledge -> a module_retroknowledge =
   fun subst retro ->
     match retro with
-    | ModTypeRK as r -> r
-    | ModBodyRK l as r ->
+    | ModTypeNul as r -> r
+    | ModBodyVal l as r ->
       let l' = List.Smart.map (subst_retro_action subst) l in
-      if l == l' then r else ModBodyRK l
+      if l == l' then r else ModBodyVal l
 
-and subst_module_body : 'a. _ -> _ -> (_ -> 'a -> 'a) -> _ -> 'a generic_module_body -> 'a generic_module_body =
-  fun is_mod subst subst_impl do_delta mb ->
+and subst_module_body : type a. _ -> _ -> _ -> a generic_module_body -> a generic_module_body =
+  fun is_mod subst do_delta mb ->
     let { mod_mp=mp; mod_expr=me; mod_type=ty; mod_type_alg=aty;
           mod_retroknowledge=retro; _ } = mb in
   let mp' = subst_mp subst mp in
@@ -233,13 +243,14 @@ and subst_module_body : 'a. _ -> _ -> (_ -> 'a -> 'a) -> _ -> 'a generic_module_
     }
 
 and subst_module subst do_delta mb =
-  subst_module_body true subst subst_impl do_delta mb
+  subst_module_body true subst do_delta mb
 
-and subst_impl subst me =
+and subst_impl : type a. _ -> (a, _) when_mod_body -> (a, _) when_mod_body =
+  fun subst me ->
   implem_smart_map
     (subst_structure subst id_delta) (subst_expression subst id_delta) me
 
-and subst_modtype subst do_delta mtb = subst_module_body false subst (fun _ () -> ()) do_delta mtb
+and subst_modtype subst do_delta mtb = subst_module_body false subst do_delta mtb
 
 and subst_expr subst do_delta seb = match seb with
   | MEident mp ->
@@ -279,7 +290,7 @@ let subst_structure subst = subst_structure subst do_delta_codom
 
 let add_retroknowledge r env =
   match r with
-  | ModBodyRK l -> List.fold_left Primred.add_retroknowledge env l
+  | ModBodyVal l -> List.fold_left Primred.add_retroknowledge env l
 
 let rec add_structure mp sign resolver linkinfo env =
   let add_field env (l,elem) = match elem with
@@ -296,6 +307,7 @@ let rec add_structure mp sign resolver linkinfo env =
       Environ.add_mind_key mind (mib,ref linkinfo) env
     | SFBmodule mb -> add_module mb linkinfo env (* adds components as well *)
     | SFBmodtype mtb -> Environ.add_modtype mtb env
+    | SFBrules r -> Environ.add_rewrite_rules r.rewrules_rules env
   in
   List.fold_left add_field env sign
 
@@ -328,7 +340,7 @@ let strengthen_const mp_from l cb resolver =
   | _ ->
     let kn = KerName.make mp_from l in
     let con = constant_of_delta_kn resolver kn in
-    let u = Univ.make_abstract_instance (Declareops.constant_polymorphic_context cb) in
+    let u = UVars.make_abstract_instance (Declareops.constant_polymorphic_context cb) in
       { cb with
         const_body = Def (mkConstU (con,u));
         const_body_code = Some (Vmbytegen.compile_alias con) }
@@ -339,7 +351,7 @@ let rec strengthen_module mp_from mp_to mb =
   | NoFunctor struc ->
     let reso,struc' = strengthen_signature mp_from struc mp_to mb.mod_delta in
     { mb with
-      mod_expr = Algebraic (MENoFunctor (MEident mp_to));
+      mod_expr = ModBodyVal (Algebraic (MENoFunctor (MEident mp_to)));
       mod_type = NoFunctor struc';
       mod_delta =
         add_mp_delta_resolver mp_from mp_to
@@ -352,7 +364,7 @@ and strengthen_signature mp_from struc mp_to reso = match struc with
     let item' = l,SFBconst (strengthen_const mp_from l cb reso) in
     let reso',rest' = strengthen_signature mp_from rest mp_to reso in
     reso',item'::rest'
-  | (_,SFBmind _ as item):: rest ->
+  | (_,(SFBmind _|SFBrules _) as item):: rest ->
     let reso',rest' = strengthen_signature mp_from rest mp_to reso in
     reso',item::rest'
   | (l,SFBmodule mb) :: rest ->
@@ -393,7 +405,7 @@ let rec strengthen_and_subst_module mb subst mp_from mp_to =
       in
       { mb with
         mod_mp = mp_to;
-        mod_expr = Algebraic (MENoFunctor (MEident mp_from));
+        mod_expr = ModBodyVal (Algebraic (MENoFunctor (MEident mp_from)));
         mod_type = NoFunctor struc';
         mod_delta = add_mp_delta_resolver mp_to mp_from reso' }
   | MoreFunctor _ ->
@@ -425,6 +437,17 @@ and strengthen_and_subst_struct struc subst mp_from mp_to alias incl reso =
     | (l,SFBmind mib) ->
         let mib' = subst_mind_body subst mib in
         let item' = if mib' == mib then item else (l, SFBmind mib') in
+        (* Same as constant *)
+        if incl then
+          let kn_from = KerName.make mp_from l in
+          let kn_to = KerName.make mp_to l in
+          let kn_canonical = kn_of_delta reso kn_from in
+          add_kn_delta_resolver kn_to kn_canonical reso', item'
+        else
+          reso', item'
+    | (l, SFBrules rrb) ->
+        let rrb' = subst_rewrite_rules subst rrb in
+        let item' = if rrb' == rrb then item else (l, SFBrules rrb') in
         (* Same as constant *)
         if incl then
           let kn_from = KerName.make mp_from l in
@@ -498,7 +521,7 @@ let strengthen_and_subst_module_body mb mp include_b = match mb.mod_type with
     { mb with
       mod_mp = mp;
       mod_type = NoFunctor struc';
-      mod_expr = Algebraic (MENoFunctor (MEident mb.mod_mp));
+      mod_expr = ModBodyVal (Algebraic (MENoFunctor (MEident mb.mod_mp)));
       mod_delta =
         if include_b then reso'
         else add_delta_resolver new_resolver reso' }
@@ -524,21 +547,13 @@ let rec is_bounded_expr l = function
       is_bounded_expr l (MEident mp) || is_bounded_expr l fexpr
   | _ -> false
 
-let rec clean_module_body l mb =
-  let impl, typ = mb.mod_expr, mb.mod_type in
+let rec clean_module_body : type a. _ -> a generic_module_body -> a generic_module_body =
+  fun l mb ->
+  let typ = mb.mod_type in
   let typ' = clean_signature l typ in
-  let impl' = match impl with
-    | Algebraic (MENoFunctor m) when is_bounded_expr l m -> FullStruct
-    | _ -> implem_smart_map (clean_structure l) (clean_expression l) impl
-  in
-  if typ==typ' && impl==impl' then mb
-  else { mb with mod_type=typ'; mod_expr=impl' }
-
-and clean_module_type l mb =
-  let (), typ = mb.mod_expr, mb.mod_type in
-  let typ' = clean_signature l typ in
-  if typ==typ' then mb
-  else { mb with mod_type=typ' }
+  let expr' = clean_mod_expr l mb.mod_expr in
+  if typ==typ' && mb.mod_expr==expr' then mb
+  else { mb with mod_type=typ'; mod_expr = expr' }
 
 and clean_field l field = match field with
   | (lab,SFBmodule mb) ->
@@ -549,9 +564,17 @@ and clean_field l field = match field with
 and clean_structure l = List.Smart.map (clean_field l)
 
 and clean_signature l =
-  functor_smart_map (clean_module_type l) (clean_structure l)
+  functor_smart_map (clean_module_body l) (clean_structure l)
 
 and clean_expression _ me = me
+
+and clean_mod_expr : type a. _ -> a mod_expr -> a mod_expr =
+  fun l me -> match me with
+  | ModBodyVal (Algebraic (MENoFunctor m)) when is_bounded_expr l m ->
+    ModBodyVal FullStruct
+  | _ ->
+    let me' = implem_smart_map (clean_structure l) (clean_expression l) me in
+    if me == me' then me else me'
 
 let rec collect_mbid l sign =  match sign with
   | MoreFunctor (mbid,ty,m) ->
@@ -580,10 +603,10 @@ let inline_delta_resolver env inl mp mbid mtb delta =
         let constant = lookup_constant con env in
         let l = make_inline delta r in
         match constant.const_body with
-        | Undef _ | OpaqueDef _ | Primitive _ -> l
+        | Undef _ | OpaqueDef _ | Primitive _ | Symbol _ -> l
         | Def constr ->
           let ctx = Declareops.constant_polymorphic_context constant in
-          let constr = Univ.{univ_abstracted_value=constr; univ_abstracted_binder=ctx} in
+          let constr = {UVars.univ_abstracted_value=constr; univ_abstracted_binder=ctx} in
           add_inline_delta_resolver kn (lev, Some constr) l
   in
   make_inline delta constants

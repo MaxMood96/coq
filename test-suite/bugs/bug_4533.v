@@ -5,20 +5,20 @@ then from 285 lines to 271 lines *)
 (* coqc version 8.5 (January 2016) compiled on Jan 23 2016 16:15:22 with OCaml
 4.01.0
    coqtop version 8.5 (January 2016) *)
-Require Import Coq.Init.Ltac.
+Require Import Corelib.Init.Ltac.
 Inductive False := .
 Axiom proof_admitted : False.
 Tactic Notation "admit" := case proof_admitted.
-Require Coq.Init.Datatypes.
-Import Coq.Init.Notations.
+Require Corelib.Init.Datatypes.
+Import Corelib.Init.Notations.
 Global Set Universe Polymorphism.
 Global Set Primitive Projections.
 Notation "A -> B" := (forall (_ : A), B) : type_scope.
 Module Export Datatypes.
   Set Implicit Arguments.
-  Notation nat := Coq.Init.Datatypes.nat.
-  Notation O := Coq.Init.Datatypes.O.
-  Notation S := Coq.Init.Datatypes.S.
+  Notation nat := Corelib.Init.Datatypes.nat.
+  Notation O := Corelib.Init.Datatypes.O.
+  Notation S := Corelib.Init.Datatypes.S.
   Notation one := (S O).
   Notation two := (S one).
   Record prod (A B : Type) := pair { fst : A ; snd : B }.
@@ -51,8 +51,8 @@ Open Scope fibration_scope.
 Open Scope function_scope.
 Notation pr1 := projT1.
 Notation pr2 := projT2.
-Notation "x .1" := (pr1 x) (at level 3, format "x '.1'") : fibration_scope.
-Notation "x .2" := (pr2 x) (at level 3, format "x '.2'") : fibration_scope.
+Notation "x .1" := (pr1 x) : fibration_scope.
+Notation "x .2" := (pr2 x) : fibration_scope.
 Notation compose := (fun g f x => g (f x)).
 Notation "g 'o' f" := (compose g%function f%function) (at level 40, left
 associativity) : function_scope.
@@ -82,7 +82,7 @@ Class IsEquiv {A B : Type} (f : A -> B) := BuildIsEquiv {
                                                eisadj : forall x : A, eisretr
 (f x) = ap f (eissect x)
                                              }.
-Arguments eissect {A B}%type_scope f%function_scope {_} _.
+Arguments eissect {A B}%_type_scope f%_function_scope {_} _.
 Inductive Unit : Type1 := tt : Unit.
 Local Open Scope path_scope.
 Definition concat_p_pp {A : Type} {x y z t : A} (p : x = y) (q : y = z) (r : z

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -28,7 +28,6 @@ open Tacinterp
 open Pretyping
 open Ppconstr
 open Printer
-open Namegen
 open Evar_kinds
 open Constrexpr
 open Constrexpr_ops
@@ -52,7 +51,7 @@ let _ =
   Goptions.declare_bool_option
     { Goptions.optstage = Summary.Stage.Interp;
       Goptions.optkey   = ["Debug";"SsrMatching"];
-      Goptions.optdepr  = false;
+      Goptions.optdepr  = None;
       Goptions.optread  = (fun _ -> !pp_ref == ssr_pp);
       Goptions.optwrite = debug }
 let pp s = !pp_ref s
@@ -111,7 +110,7 @@ let add_genarg tag pr =
   let interp ist x = Ftactic.return (Geninterp.Val.Dyn (tag, x)) in
   let gen_pr env sigma _ _ _ = pr env sigma in
   let () = Genintern.register_intern0 wit glob in
-  let () = Genintern.register_subst0 wit subst in
+  let () = Gensubst.register_subst0 wit subst in
   let () = Geninterp.register_interp0 wit interp in
   let () = Geninterp.register_val0 wit (Some (Geninterp.Val.Base tag)) in
   Pptactic.declare_extra_genarg_pprule wit gen_pr gen_pr gen_pr;
@@ -124,22 +123,22 @@ let destCVar = function
     qualid_basename qid
   | _ ->
     CErrors.anomaly (str"not a CRef.")
-let isGLambda c = match DAst.get c with GLambda (Name _, _, _, _) -> true | _ -> false
-let destGLambda c = match DAst.get c with GLambda (Name id, _, _, c) -> (id, c)
+let isGLambda c = match DAst.get c with GLambda (Name _, _, _, _, _) -> true | _ -> false
+let destGLambda c = match DAst.get c with GLambda (Name id, _, _, _, c) -> (id, c)
   | _ -> CErrors.anomaly (str "not a GLambda")
 let isGHole c = match DAst.get c with GHole _ -> true | _ -> false
-let mkCHole ~loc = CAst.make ?loc @@ CHole (None, IntroAnonymous)
+let mkCHole ~loc = CAst.make ?loc @@ CHole (None)
 let mkCLambda ?loc name ty t = CAst.make ?loc @@
-   CLambdaN ([CLocalAssum([CAst.make ?loc name], Default Explicit, ty)], t)
+   CLambdaN ([CLocalAssum([CAst.make ?loc name], None, Default Explicit, ty)], t)
 let mkCLetIn ?loc name bo t = CAst.make ?loc @@
    CLetIn ((CAst.make ?loc name), bo, None, t)
 let mkCCast ?loc t ty = CAst.make ?loc @@ CCast (t, Some DEFAULTcast, ty)
 
 (** Constructors for rawconstr *)
-let mkRHole = DAst.make @@ GHole (InternalHole, IntroAnonymous)
+let mkRHole = DAst.make @@ GHole (GInternalHole)
 let mkRApp f args = if args = [] then f else DAst.make @@ GApp (f, args)
 let mkRCast rc rt =  DAst.make @@ GCast (rc, Some DEFAULTcast, rt)
-let mkRLambda n s t = DAst.make @@ GLambda (n, Explicit, s, t)
+let mkRLambda n s t = DAst.make @@ GLambda (n, None, Explicit, s, t)
 
 (* }}} *)
 
@@ -190,13 +189,13 @@ let unif_HO_args env ise0 pa i ca =
     if j = n then ise else loop (unif_HO env ise pa.(j) (ca.(i + j))) (j + 1) in
   loop ise0 0
 
-(* FO unification should boil down to calling w_unify with no_delta, but  *)
-(* alas things are not so simple: w_unify does partial type-checking,     *)
-(* which breaks down when the no-delta flag is on (as the Coq type system *)
-(* requires full convertibility. The workaround here is to convert all    *)
-(* evars into metas, since 8.2 does not TC metas. This means some lossage *)
-(* for HO evars, though hopefully Miller patterns can pick up some of     *)
-(* those cases, and HO matching will mop up the rest.                     *)
+(* FO unification should boil down to calling w_unify with no_delta, but   *)
+(* alas things are not so simple: w_unify does partial type-checking,      *)
+(* which breaks down when the no-delta flag is on (as the Rocq type system *)
+(* requires full convertibility. The workaround here is to convert all     *)
+(* evars into metas, since 8.2 does not TC metas. This means some lossage  *)
+(* for HO evars, though hopefully Miller patterns can pick up some of      *)
+(* those cases, and HO matching will mop up the rest.                      *)
 let flags_FO env =
   let oracle = Environ.oracle env in
   let ts = Conv_oracle.get_transp_state oracle in
@@ -217,8 +216,8 @@ let flags_FO env =
   }
 
 let unif_FO env ise metas p c =
-  let ise = Metamap.fold (fun mv t accu -> Evd.meta_declare mv t accu) metas ise in
-  let _ : Evd.evar_map = Unification.w_unify env ise Conversion.CONV ~flags:(flags_FO env) p c in
+  let metas = Unification.Metamap.fold (fun mv t accu -> Unification.Meta.meta_declare mv t accu) metas Unification.Meta.empty in
+  let _ : _ * Evd.evar_map = Unification.w_unify ~metas env ise Conversion.CONV ~flags:(flags_FO env) p c in
   ()
 
 (* Perform evar substitution in main term and prune substitution. *)
@@ -242,7 +241,7 @@ let nf_open_term sigma0 ise c =
   let c' = nf c in
   let _ = Evd.fold_undefined copy_def sigma0 () in
   let changed = sigma0 != !s' in
-  changed, !s', Evd.evar_universe_context ise, c'
+  changed, !s', Evd.ustate ise, c'
 
 let unif_end ?(solve_TC=true) env sigma0 ise0 pt ok =
   let ise = Evarconv.solve_unif_constraints_with_heuristics env ise0 in
@@ -272,14 +271,14 @@ let iter_constr_LR sigma f c = match EConstr.kind sigma c with
   | Prod (_, t, b) | Lambda (_, t, b)  -> f t; f b
   | LetIn (_, v, t, b) -> f v; f t; f b
   | App (cf, a) -> f cf; Array.iter f a
-  | Case (_, _, pms, (_, p), iv, v, b) ->
+  | Case (_, _, pms, ((_, p), _), iv, v, b) ->
     f v; Array.iter f pms; f p; iter_invert f iv; Array.iter (fun (_, c) -> f c) b
   | Fix (_, (_, t, b)) | CoFix (_, (_, t, b)) ->
     for i = 0 to Array.length t - 1 do f t.(i); f b.(i) done
-  | Proj(_,a) -> f a
+  | Proj(_,_,a) -> f a
   | Array(_u,t,def,ty) -> Array.iter f t; f def; f ty
   | (Rel _ | Meta _ | Var _   | Sort _ | Const _ | Ind _ | Construct _
-     | Int _ | Float _) -> ()
+     | Int _ | Float _ | String _) -> ()
 
 (* The comparison used to determine which subterms matches is KEYED        *)
 (* CONVERSION. This looks for convertible terms that either have the same  *)
@@ -309,7 +308,7 @@ type pattern_class =
 
 type tpattern = {
   up_k : pattern_class;
-  up_FO : EConstr.t Metamap.t * EConstr.t;
+  up_FO : EConstr.t Unification.Metamap.t * EConstr.t;
   up_f : EConstr.t;
   up_a : EConstr.t array;
   up_t : EConstr.t;                      (* equation proof term or matched term *)
@@ -334,10 +333,10 @@ let proj_nparams c =
 
 let isRigid sigma c = match EConstr.kind sigma c with
   | (Prod _ | Sort _ | Lambda _ | Case _ | Fix _ | CoFix _| Int _
-    | Float _ | Array _) -> true
+    | Float _ | String _ | Array _) -> true
   | (Rel _ | Var _ | Meta _ | Evar (_, _) | Cast (_, _, _) | LetIn (_, _, _, _)
     | App (_, _) | Const (_, _) | Ind ((_, _), _) | Construct (((_, _), _), _)
-    | Proj (_, _)) -> false
+    | Proj _) -> false
 
 
 let hole_var = mkVar (Id.of_string "_")
@@ -360,7 +359,7 @@ let pr_econstr_pat env sigma c0 =
 (* Turn (new) evars into metas *)
 let evars_for_FO ~hack ~rigid env (ise0:evar_map) c0 =
   let open EConstr in
-  let metas = ref Metamap.empty in
+  let metas = ref Unification.Metamap.empty in
   let sigma = ref ise0 in
   let nenv = env_size env + if hack then 1 else 0 in
   let rec put c = match EConstr.kind !sigma c with
@@ -377,7 +376,7 @@ let evars_for_FO ~hack ~rigid env (ise0:evar_map) c0 =
       Context.Named.fold_inside abs_dc ~init:([], put (Evd.evar_concl evi)) dc
     in
     let m = Evarutil.new_meta () in
-    let () = metas := Metamap.add m t !metas in
+    let () = metas := Unification.Metamap.add m t !metas in
     sigma := Evd.define k (applistc (mkMeta m) a) !sigma;
     put c
   | _ -> map !sigma put c in
@@ -394,7 +393,7 @@ let mk_tpattern ?p_origin ?(hack=false) ?(ok = all_ok) ~rigid env t dir p { tpat
       let np = proj_nparams p in
       if np = 0 || np > List.length a then KpatConst, f, a else
       let a1, a2 = List.chop np a in KpatProj p, (applistc f a1), a2
-    | Proj (p,arg) -> KpatProj (Projection.constant p), f, a
+    | Proj (p,_,arg) -> KpatProj (Projection.constant p), f, a
     | Var _ | Ind _ | Construct _ -> KpatFixed, f, a
     | Evar (k, _) ->
       if rigid k then KpatEvar k, f, a else
@@ -424,7 +423,7 @@ let ungen_upat lhs (c, sigma, uc, t) u =
   | LetIn _ -> KpatLet
   | Lambda _ -> KpatLam
   | _ -> KpatRigid in
-  c, sigma, uc, {u with up_k = k; up_FO = (Metamap.empty, lhs); up_f = f; up_a = a; up_t = t}
+  c, sigma, uc, {u with up_k = k; up_FO = (Unification.Metamap.empty, lhs); up_f = f; up_a = a; up_t = t}
 
 let nb_cs_proj_args env ise pc f u =
   let open EConstr in
@@ -443,7 +442,8 @@ let nb_cs_proj_args env ise pc f u =
   | Prod _ -> na Prod_cs
   | Sort s -> na (Sort_cs (Sorts.family (ESorts.kind ise s)))
   | Const (c',_) when Environ.QConstant.equal env c' pc -> nargs_of_proj u.up_f
-  | Proj (c',_) when Environ.QConstant.equal env (Names.Projection.constant c') pc -> nargs_of_proj u.up_f
+  | Proj (c',_,_) when Environ.QConstant.equal env (Names.Projection.constant c') pc -> nargs_of_proj u.up_f
+  | Proj (c',_,_) -> let _ = na (Proj_cs (Names.Projection.repr c')) in 0
   | Var _ | Ind _ | Construct _ | Const _ -> na (Const_cs (fst @@ destRef ise f))
   | _ -> -1
   with Not_found -> -1
@@ -489,7 +489,7 @@ let filter_upat env sigma i0 f n u fpats =
   let () = if !i0 < np then i0 := n in (u, np) :: fpats
 
 let eq_prim_proj env sigma c t = match EConstr.kind sigma t with
-  | Proj(p,_) -> Environ.QConstant.equal env (Projection.constant p) c
+  | Proj(p,_,_) -> Environ.QConstant.equal env (Projection.constant p) c
   | _ -> false
 
 let filter_upat_FO env sigma i0 f n u fpats =
@@ -543,7 +543,7 @@ let match_upats_FO upats env sigma0 ise orig_c =
          if skip || not (EConstr.Vars.closed0 ise c') then () else try
            let () = match u.up_k with
            | KpatFlex ->
-             let kludge v = mkLambda (make_annot Anonymous Sorts.Relevant, mkProp, v) in
+             let kludge v = mkLambda (make_annot Anonymous ERelevance.relevant, mkProp, v) in
              let (metas, p_FO) = u.up_FO in
              unif_FO env ise metas (kludge p_FO) (kludge c')
            | KpatLet ->
@@ -607,7 +607,17 @@ let match_upats_HO ~on_instance upats env sigma0 ise c =
             (EConstr.push_rel (Context.Rel.Declaration.LocalAssum(x, t)) env)
             ise' pb b
         | KpatFlex | KpatProj _ ->
-          unif_HO env ise u.up_f (mkSubApp f (i - Array.length u.up_a) a)
+          let fa = mkSubApp f (i - Array.length u.up_a) a in
+          let ise =
+            match EConstr.kind ise f, EConstr.kind ise u.up_f with
+            | Proj _, _ | _, Proj _ ->
+               (* with primitive projections we "lose" parameters so we unify
+                * the type of the arguments to retrieve that information *)
+               let tuf = Retyping.get_type_of ~lax:true env ise u.up_f in
+               let tfa = Retyping.get_type_of ~lax:true env ise fa in
+               unif_HO env ise tuf tfa
+            | _ -> ise in
+          unif_HO env ise u.up_f fa
         | _ -> unif_HO env ise u.up_f f in
         let ise'' = unif_HO_args env ise' u.up_a (i - Array.length u.up_a) a in
         let lhs = mkSubApp f i a in
@@ -940,13 +950,13 @@ let glob_cpattern gs p =
      if k = Cpattern then glob_ssrterm gs {kind=InParens; pattern=(v, Some t); interpretation=None} else
      match t.CAst.v with
      | CNotation(_,(InConstrEntry,"( _ in _ )"), ([t1; t2], [], [], [])) ->
-         (try match glob t1, glob t2 with
-         | (r1, None), (r2, None) -> encode k "In" [r1;r2]
-         | (r1, Some _), (r2, Some _) when isCVar t1 ->
-             encode k "In" [r1; r2; bind_in t1 t2]
-         | (r1, Some _), (r2, Some _) -> encode k "In" [r1; r2]
-         | _ -> CErrors.anomaly (str"where are we?.")
-         with _ when isCVar t1 -> encode k "In" [bind_in t1 t2])
+       (try match glob t1, glob t2 with
+          | (r1, None), (r2, None) -> encode k "In" [r1;r2]
+          | (r1, Some _), (r2, Some _) when isCVar t1 ->
+            encode k "In" [r1; r2; bind_in t1 t2]
+          | (r1, Some _), (r2, Some _) -> encode k "In" [r1; r2]
+          | _ -> CErrors.anomaly (str"where are we?.")
+        with e when CErrors.noncritical e && isCVar t1 -> encode k "In" [bind_in t1 t2])
      | CNotation(_,(InConstrEntry,"( _ in _ in _ )"), ([t1; t2; t3], [], [], [])) ->
          check_var t2; encode k "In" [fst (glob t1); bind_in t2 t3]
      | CNotation(_,(InConstrEntry,"( _ as _ )"), ([t1; t2], [], [], [])) ->
@@ -1155,7 +1165,7 @@ let interp_pattern ?wit_ssrpatternarg env sigma0 red redty =
   | Some b -> {kind; pattern=(g,Some (mkCLetIn ?loc x (mkCHole ~loc) b)); interpretation}
   | None -> { kind
             ; pattern = DAst.make ?loc @@ GLetIn
-                  (x, DAst.make ?loc @@ GHole (BinderType x, IntroAnonymous), None, g), None
+                  (x, None, DAst.make ?loc @@ GHole (GBinderType x), None, g), None
             ; interpretation} in
   match red with
   | T t -> let sigma, t = interp_term env sigma0 t in { pat_sigma = sigma; pat_pat = T t }
@@ -1285,7 +1295,7 @@ let redex_of_pattern_nf env p =
   | None -> CErrors.anomaly (str"pattern without redex.")
   | Some (sigma, e) -> sigma, e
   in
-  Evarutil.nf_evar sigma e, Evd.evar_universe_context sigma
+  Evarutil.nf_evar sigma e, Evd.ustate sigma
 
 let fill_occ_pattern ?raise_NoMatch env sigma cl pat occ h =
   let do_make_rel, occ =
@@ -1329,13 +1339,13 @@ let fill_occ_term env sigma0 cl occ (sigma, t) =
     if changed then CErrors.user_err Pp.(str "matching impacts evars")
     else cl, t'
   with NoMatch -> try
-    let changed, sigma', uc, t' =
-      unif_end env sigma0 (create_evar_defs sigma) t (fun _ -> true) in
-    if changed then raise NoMatch
-    else cl, t'
-  with _ ->
-    errorstrm (str "partial term " ++ pr_econstr_pat env sigma t
-            ++ str " does not match any subterm of the goal")
+      let changed, sigma', uc, t' =
+        unif_end env sigma0 (create_evar_defs sigma) t (fun _ -> true) in
+      if changed then raise NoMatch
+      else cl, t'
+    with e when CErrors.noncritical e ->
+      errorstrm (str "partial term " ++ pr_econstr_pat env sigma t
+                 ++ str " does not match any subterm of the goal")
 
 let cpattern_of_id id =
   { kind= NoFlag
@@ -1362,8 +1372,9 @@ let ssrpatterntac _ist arg =
   let pat = interp_rpattern env sigma0 arg in
   let (t, uc), concl_x =
     fill_occ_pattern env sigma0 concl0 pat noindex 1 in
-  let sigma, tty = Typing.type_of env sigma0 t in
-  let concl = EConstr.mkLetIn (make_annot (Name (Id.of_string "selected")) Sorts.Relevant, t, tty, concl_x) in
+  let sigma = Evd.set_universe_context sigma0 uc in
+  let sigma, tty = Typing.type_of env sigma t in
+  let concl = EConstr.mkLetIn (make_annot (Name (Id.of_string "selected")) EConstr.ERelevance.relevant, t, tty, concl_x) in
   Proofview.Unsafe.tclEVARS sigma <*>
   convert_concl ~cast:false ~check:true concl DEFAULTcast
   end
@@ -1375,14 +1386,14 @@ let () =
       let v = Id.Map.find (Names.Id.of_string "pattern") ist.lfun in
       Value.cast (topwit wit_ssrpatternarg) v in
     ssrpatterntac ist arg in
-  let name = { mltac_plugin = "coq-core.plugins.ssrmatching"; mltac_tactic = "ssrpattern"; } in
+  let name = { mltac_plugin = "rocq-runtime.plugins.ssrmatching"; mltac_tactic = "ssrpattern"; } in
   let () = Tacenv.register_ml_tactic name [|mltac|] in
   let tac =
     CAst.make (TacFun ([Name (Id.of_string "pattern")],
       CAst.make (TacML ({ mltac_name = name; mltac_index = 0 }, [])))) in
   let obj () =
     Tacenv.register_ltac true false (Id.of_string "ssrpattern") tac in
-  Mltop.declare_cache_obj obj "coq-core.plugins.ssrmatching"
+  Mltop.declare_cache_obj obj "rocq-runtime.plugins.ssrmatching"
 
 let ssrinstancesof arg =
   Proofview.Goal.enter begin fun gl ->

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -19,20 +19,17 @@ module Ast : sig
     ; is_coercion : coercion_flag
     ; binders: local_binder_expr list
     ; cfs : (local_decl_expr * record_field_attr) list
-    ; idbuild : Id.t
+    ; idbuild : lident
     ; sort : constr_expr option
     ; default_inhabitant_id : Id.t option
     }
 end
 
 val definition_structure
-  :  cumul_univ_decl_expr option
+  : flags:ComInductive.flags
+  -> cumul_univ_decl_expr option
   -> inductive_kind
-  -> template:bool option
-  -> cumulative:bool
-  -> poly:bool
   -> primitive_proj:bool
-  -> Declarations.recursivity_kind
   -> Ast.t list
   -> GlobRef.t list
 
@@ -60,6 +57,7 @@ val definition_structure
   module Record_decl : sig
     type t = {
       mie : Entries.mutual_inductive_entry;
+      default_dep_elim : DeclareInd.default_dep_elim list;
       records : Data.t list;
       (* TODO: this part could be factored in mie *)
       primitive_proj : bool;
@@ -70,24 +68,23 @@ val definition_structure
       ubinders : UnivNames.universe_binders;
       projections_kind : Decls.definition_object_kind;
       poly : bool;
-      indlocs : Loc.t option list;
+      indlocs : DeclareInd.indlocs;
     }
 end
 
 (** Ast.t list at the constr level *)
 val interp_structure
-  :  cumul_univ_decl_expr option
+  : flags:ComInductive.flags
+  -> cumul_univ_decl_expr option
   -> inductive_kind
-  -> template:bool option
-  -> cumulative:bool
-  -> poly:bool
   -> primitive_proj:bool
-  -> Declarations.recursivity_kind
   -> Ast.t list
   -> Record_decl.t
 
 
 val declare_existing_class : GlobRef.t -> unit
+
+val canonical_inhabitant_id : isclass:bool -> Id.t -> Id.t
 
 (* Implementation internals, consult Coq developers before using;
    current user Elpi, see https://github.com/LPCIC/coq-elpi/pull/151 *)

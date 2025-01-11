@@ -16,14 +16,13 @@ if [ "$DOWNLOAD_ONLY" ]; then exit 0; fi
 stacksize=32768
 
 # fiat-crypto is not guaranteed to build with the latest version of
-# bedrock2, so we use the pinned version of bedrock2, but the external
-# version of other developments
-make_args=(EXTERNAL_REWRITER=1 EXTERNAL_COQPRIME=1)
+# bedrock2, so we use the pinned version of bedrock2 (set in
+# ci-basic-overlay), but the external version of other developments
+make_args=(EXTERNAL_REWRITER=1 EXTERNAL_COQPRIME=1 EXTERNAL_COQUTIL=1 EXTERNAL_BEDROCK2=1)
 
+export COQEXTRAFLAGS='-native-compiler no' # following bedrock2
 ( cd "${CI_BUILD_DIR}/fiat_crypto"
   ulimit -s $stacksize
-  make "${make_args[@]}" pre-standalone-extracted printlite lite ||
-    make -j 1 "${make_args[@]}" pre-standalone-extracted printlite lite
-  make "${make_args[@]}" all-except-compiled ||
-    make -j 1 "${make_args[@]}" all-except-compiled
+  make "${make_args[@]}" pre-standalone-extracted printlite lite check-output ||
+    make -j 1 "${make_args[@]}" pre-standalone-extracted printlite lite check-output
 )

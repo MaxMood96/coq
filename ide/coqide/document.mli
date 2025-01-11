@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -51,6 +51,12 @@ val push : 'a document -> 'a -> unit
 (** Remove the tip setence.
     @raise Empty *)
 val pop : 'a document -> 'a
+
+(** preserve the last error(s) (tooltip fix) *)
+val set_errors : 'a document -> string list -> unit
+
+(** get the last error(s) (tooltip fix) *)
+val get_errors : 'a document -> string list
 
 (** Assign the state_id of the tip.
     @raise Empty *)

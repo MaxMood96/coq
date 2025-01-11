@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -112,7 +112,7 @@ let option_assert_get o msg =
 (** Constructors for rawconstr *)
 open Glob_term
 
-let mkRHole = DAst.make @@ GHole (Evar_kinds.InternalHole, Namegen.IntroAnonymous)
+let mkRHole = DAst.make @@ GHole (GInternalHole)
 
 let rec mkRHoles n = if n > 0 then mkRHole :: mkRHoles (n - 1) else []
 let rec isRHoles cl = match cl with
@@ -122,16 +122,16 @@ let mkRApp f args = if args = [] then f else DAst.make @@ GApp (f, args)
 let mkRVar id = DAst.make @@ GRef (GlobRef.VarRef id,None)
 let mkRltacVar id = DAst.make @@ GVar (id)
 let mkRCast rc rt =  DAst.make @@ GCast (rc, Some DEFAULTcast, rt)
-let mkRType =  DAst.make @@ GSort (UAnonymous {rigid=true})
-let mkRProp =  DAst.make @@ GSort (UNamed (None, [GProp, 0]))
-let mkRArrow rt1 rt2 = DAst.make @@ GProd (Anonymous, Explicit, rt1, rt2)
+let mkRType =  DAst.make @@ GSort Glob_ops.glob_Type_sort
+let mkRProp =  DAst.make @@ GSort Glob_ops.glob_Prop_sort
+let mkRArrow rt1 rt2 = DAst.make @@ GProd (Anonymous, None, Explicit, rt1, rt2)
 let mkRConstruct c = DAst.make @@ GRef (GlobRef.ConstructRef c,None)
 let mkRInd mind = DAst.make @@ GRef (GlobRef.IndRef mind,None)
-let mkRLambda n s t = DAst.make @@ GLambda (n, Explicit, s, t)
+let mkRLambda n s t = DAst.make @@ GLambda (n, None, Explicit, s, t)
 
 let rec mkRnat n =
-  if n <= 0 then DAst.make @@ GRef (Coqlib.lib_ref "num.nat.O", None) else
-  mkRApp (DAst.make @@ GRef (Coqlib.lib_ref "num.nat.S", None)) [mkRnat (n - 1)]
+  if n <= 0 then DAst.make @@ GRef (Rocqlib.lib_ref "num.nat.O", None) else
+  mkRApp (DAst.make @@ GRef (Rocqlib.lib_ref "num.nat.S", None)) [mkRnat (n - 1)]
 
 let glob_constr ist genv = function
   | _, Some ce ->
@@ -152,10 +152,10 @@ let intern_term ist env (_, c) = glob_constr ist env c
 
 let splay_open_constr env (sigma, c) =
   let t = Retyping.get_type_of env sigma c in
-  Reductionops.hnf_decompose_prod env sigma t
+  Reductionops.whd_decompose_prod env sigma t
 
 let isAppInd env sigma c =
-  let c = Reductionops.clos_whd_flags CClosure.all env sigma c in
+  let c = Reductionops.clos_whd_flags RedFlags.all env sigma c in
   let c, _ = EConstr.decompose_app sigma c in
   EConstr.isInd sigma c
 
@@ -175,6 +175,9 @@ let interp_refine env sigma ist ~concl rc =
     expand_evars = true;
     program_mode = false;
     polymorphic = false;
+    undeclared_evars_patvars = false;
+    patvars_abstract = false;
+    unconstrained_sorts = false;
   }
   in
   let sigma, c = Pretyping.understand_ltac flags env sigma vars kind rc in
@@ -353,7 +356,7 @@ let is_id_constr sigma c = match EConstr.kind sigma c with
 
 let red_product_skip_id env sigma c = match EConstr.kind sigma c with
   | App(hd,args) when Array.length args = 1 && is_id_constr sigma hd -> args.(0)
-  | _ -> try Tacred.red_product env sigma c with _ -> c
+  | _ -> match Tacred.red_product env sigma c with Some c -> c | None -> c
 
 let ssrevaltac ist gtac = Tacinterp.tactic_of_value ist gtac
 
@@ -396,7 +399,7 @@ let resolve_typeclasses env sigma ~where ~fail =
 
 let abs_evars env sigma0 ?(rigid = []) (sigma, c0) =
   let c0 = Evarutil.nf_evar sigma c0 in
-  let sigma0, ucst = sigma0, Evd.evar_universe_context sigma in
+  let sigma0, ucst = sigma0, Evd.ustate sigma in
   let nenv = env_size env in
   let abs_evar n k =
     let open EConstr in
@@ -431,7 +434,7 @@ let abs_evars env sigma0 ?(rigid = []) (sigma, c0) =
     | _ -> EConstr.map_with_binders sigma ((+) 1) get i c in
     let rec loop c i = function
     | (_, (n, t)) :: evl ->
-      loop (mkLambda (make_annot (mk_evar_name n) Sorts.Relevant, get (i - 1) t, c)) (i - 1) evl
+      loop (mkLambda (make_annot (mk_evar_name n) ERelevance.relevant, get (i - 1) t, c)) (i - 1) evl
     | [] -> c in
     loop (get 1 c0) 1 evlist, List.map fst evlist, ucst
 
@@ -460,13 +463,10 @@ let call_on_evar env sigma tac e =
     Exninfo.iraise (e, info)
 
 open Pp
-let pp _ = () (* FIXME *)
 module Intset = Evar.Set
 
 let abs_evars_pirrel env sigma0 (sigma, c0) =
-  pp(lazy(str"==PF_ABS_EVARS_PIRREL=="));
-  pp(lazy(str"c0= " ++ Printer.pr_econstr_env env sigma c0));
-  let c0 = Evarutil.nf_evar sigma0 (Evarutil.nf_evar sigma c0) in
+  let c0 = Evarutil.nf_evar sigma c0 in
   let nenv = env_size env in
   let abs_evar n k =
     let open EConstr in
@@ -477,22 +477,20 @@ let abs_evars_pirrel env sigma0 (sigma, c0) =
     | NamedDecl.LocalDef (x,b,t) -> mkNamedLetIn sigma x b t (mkArrow t x.binder_relevance c)
     | NamedDecl.LocalAssum (x,t) -> mkNamedProd sigma x t c in
     let t = Context.Named.fold_inside abs_dc ~init:concl dc in
-    Evarutil.nf_evar sigma0 (Evarutil.nf_evar sigma t) in
+    Evarutil.nf_evar sigma t
+  in
   let rec put evlist c = match EConstr.kind sigma c with
   | Evar (k, a) ->
     if List.mem_assoc k evlist || Evd.mem sigma0 k then evlist else
     let n = max 0 (SList.length a - nenv) in
-    let k_ty =
-      Retyping.get_sort_family_of
-        env sigma (Evd.evar_concl (Evd.find_undefined sigma k)) in
+    (* FIXME? this is not the right environment in general *)
+    let k_ty = Retyping.get_sort_family_of env sigma (Evd.evar_concl (Evd.find_undefined sigma k)) in
     let is_prop = k_ty = InProp in
-    let t = abs_evar n k in (k, (n, t, is_prop)) :: put evlist t
+    let t = abs_evar n k in
+    (k, (n, t, is_prop)) :: put evlist t
   | _ -> EConstr.fold sigma put evlist c in
   let evlist = put [] c0 in
   if evlist = [] then 0, c0 else
-  let pr_constr t = Printer.pr_econstr_env env sigma (Reductionops.nf_beta env sigma0 t) in
-  pp(lazy(str"evlist=" ++ pr_list (fun () -> str";")
-    (fun (k,_) -> Evar.print k) evlist));
   let evplist =
     let depev = List.fold_left (fun evs (_,(_,t,_)) ->
         Intset.union evs (Evarutil.undefined_evars_of_term sigma t)) Intset.empty evlist in
@@ -503,13 +501,11 @@ let abs_evars_pirrel env sigma0 (sigma, c0) =
       try
         let sigma = call_on_evar env sigma !ssrautoprop_tac i in
         List.filter (fun (j,_) -> j <> i) ev, evp, sigma
-      with _ -> ev, p::evp, sigma) (evlist, [], sigma) (List.rev evplist) in
+      with e when CErrors.noncritical e -> ev, p::evp, sigma) (evlist, [], sigma) (List.rev evplist) in
   let c0 = Evarutil.nf_evar sigma c0 in
-  let evlist =
-    List.map (fun (x,(y,t,z)) -> x,(y,Evarutil.nf_evar sigma t,z)) evlist in
-  let evplist =
-    List.map (fun (x,(y,t,z)) -> x,(y,Evarutil.nf_evar sigma t,z)) evplist in
-  pp(lazy(str"c0= " ++ pr_constr c0));
+  let nf (k, (n, t, p)) = (k, (n, Evarutil.nf_evar sigma t, p)) in
+  let evlist = List.map nf evlist in
+  let evplist = List.map nf evplist in
   let rec lookup k i = function
     | [] -> 0, 0
     | (k', (n,_,_)) :: evl -> if k = k' then i,n else lookup k (i + 1) evl in
@@ -526,26 +522,25 @@ let abs_evars_pirrel env sigma0 (sigma, c0) =
       let j = destRel sigma hd in
       mkApp (mkRel j, Array.of_list (List.map (Vars.lift (i-1)) extra_args @ args))
   | _ -> EConstr.map_with_binders sigma ((+) 1) (app extra_args) i c in
-  let rec loopP evlist c i = function
+  let rec loopP evlist accu i = function
+  | [] -> List.rev accu
   | (_, (n, t, _)) :: evl ->
     let t = get evlist (i - 1) t in
     let n = Name (Id.of_string (ssr_anon_hyp ^ string_of_int n)) in
-    loopP evlist (mkProd (make_annot n Sorts.Relevant, t, c)) (i - 1) evl
-  | [] -> c in
+    loopP evlist (RelDecl.LocalAssum (make_annot n ERelevance.relevant, t) :: accu) (i - 1) evl
+  in
   let rec loop c i = function
   | (_, (n, t, _)) :: evl ->
     let evs = Evarutil.undefined_evars_of_term sigma t in
     let t_evplist = List.filter (fun (k,_) -> Intset.mem k evs) evplist in
-    let t = loopP t_evplist (get t_evplist 1 t) 1 t_evplist in
+    let ctx_t = loopP t_evplist [] 1 t_evplist in
+    let t = EConstr.it_mkProd_or_LetIn (get t_evplist 1 t) ctx_t in
     let t = get evlist (i - 1) t in
-    let extra_args =
-      List.map (fun (k,_) -> mkRel (fst (lookup k i evlist)))
-        (List.rev t_evplist) in
+    let extra_args = List.rev_map (fun (k,_) -> mkRel (fst (lookup k i evlist))) t_evplist in
     let c = if extra_args = [] then c else app extra_args 1 c in
-    loop (mkLambda (make_annot (mk_evar_name n) Sorts.Relevant, t, c)) (i - 1) evl
+    loop (mkLambda (make_annot (mk_evar_name n) ERelevance.relevant, t, c)) (i - 1) evl
   | [] -> c in
   let res = loop (get evlist 1 c0) 1 evlist in
-  pp(lazy(str"res= " ++ pr_constr res));
   List.length evlist, res
 
 (* Strip all non-essential dependencies from an abstracted term, generating *)
@@ -556,7 +551,7 @@ let nb_evar_deps = function
     let s = Id.to_string id in
     if not (is_tagged evar_tag s) then 0 else
     let m = String.length evar_tag in
-    (try int_of_string (String.sub s m (String.length s - 1 - m)) with _ -> 0)
+    (try int_of_string (String.sub s m (String.length s - 1 - m)) with e when CErrors.noncritical e -> 0)
   | _ -> 0
 
 let type_id env sigma t = Id.of_string (Namegen.hdchar env sigma t)
@@ -624,7 +619,7 @@ let ssrdirpath = DirPath.make [Id.of_string "ssreflect"]
 let ssrqid name = Libnames.make_qualid ssrdirpath (Id.of_string name)
 let mkSsrRef name =
   let qn = Format.sprintf "plugins.ssreflect.%s" name in
-  if Coqlib.has_ref qn then Coqlib.lib_ref qn else
+  if Rocqlib.has_ref qn then Rocqlib.lib_ref qn else
   CErrors.user_err Pp.(str "Small scale reflection library not loaded (" ++ str name ++ str ")")
 let mkSsrRRef name = (DAst.make @@ GRef (mkSsrRef name,None)), None
 let mkSsrConst env sigma name =
@@ -643,7 +638,7 @@ let mkEtaApp c n imin =
   mkApp (c, Array.init nargs mkarg)
 
 let mkRefl env sigma t c =
-  let (sigma, refl) = EConstr.fresh_global env sigma Coqlib.(lib_ref "core.eq.refl") in
+  let (sigma, refl) = EConstr.fresh_global env sigma Rocqlib.(lib_ref "core.eq.refl") in
   sigma, EConstr.mkApp (refl, [|t; c|])
 
 let discharge_hyp (id', (id, mode)) =
@@ -692,8 +687,8 @@ let abs_ssrterm ?(resolve_typeclasses=false) ist env sigma t =
        sigma, Evarutil.nf_evar sigma ct in
   let c, abstracted_away, ucst = abs_evars env sigma0 t in
   let n = List.length abstracted_away in
-  let t = abs_cterm env sigma0 n c in
   let sigma = Evd.merge_universe_context sigma0 ucst in
+  let t = abs_cterm env sigma n c in
   sigma, t, n
 
 let top_id = mk_internal_id "top assumption"
@@ -718,16 +713,16 @@ open Constrexpr
 open Util
 
 (** Constructors for constr_expr *)
-let mkCProp loc = CAst.make ?loc @@ CSort (UNamed (None, [CProp, 0]))
-let mkCType loc = CAst.make ?loc @@ CSort (UAnonymous {rigid=true})
+let mkCProp loc = CAst.make ?loc @@ CSort Constrexpr_ops.expr_Prop_sort
+let mkCType loc = CAst.make ?loc @@ CSort Constrexpr_ops.expr_Type_sort
 let mkCVar ?loc id = CAst.make ?loc @@ CRef (qualid_of_ident ?loc id, None)
 let rec mkCHoles ?loc n =
-  if n <= 0 then [] else (CAst.make ?loc @@ CHole (None, Namegen.IntroAnonymous)) :: mkCHoles ?loc (n - 1)
-let mkCHole loc = CAst.make ?loc @@ CHole (None, Namegen.IntroAnonymous)
+  if n <= 0 then [] else (CAst.make ?loc @@ CHole (None)) :: mkCHoles ?loc (n - 1)
+let mkCHole loc = CAst.make ?loc @@ CHole (None)
 let mkCLambda ?loc name ty t =  CAst.make ?loc @@
-   CLambdaN ([CLocalAssum([CAst.make ?loc name], Default Explicit, ty)], t)
+   CLambdaN ([CLocalAssum([CAst.make ?loc name], None, Default Explicit, ty)], t)
 let mkCArrow ?loc ty t = CAst.make ?loc @@
-   CProdN ([CLocalAssum([CAst.make Anonymous], Default Explicit, ty)], t)
+   CProdN ([CLocalAssum([CAst.make Anonymous], None, Default Explicit, ty)], t)
 let mkCCast ?loc t ty = CAst.make ?loc @@ CCast (t, Some DEFAULTcast, ty)
 
 let rec isCHoles = function { CAst.v = CHole _ } :: cl -> isCHoles cl | cl -> cl = []
@@ -738,14 +733,14 @@ let pf_interp_ty ?(resolve_typeclasses=false) env sigma0 ist ty =
    let ty = match ty with
    | a, (t, None) ->
     let rec force_type ty = DAst.(map (function
-     | GProd (x, k, s, t) -> incr n_binders; GProd (x, k, s, force_type t)
-     | GLetIn (x, v, oty, t) -> incr n_binders; GLetIn (x, v, oty, force_type t)
+     | GProd (x, r, k, s, t) -> incr n_binders; GProd (x, r, k, s, force_type t)
+     | GLetIn (x, r, v, oty, t) -> incr n_binders; GLetIn (x, r, v, oty, force_type t)
      | _ -> DAst.get (mkRCast ty mkRType))) ty in
      a, (force_type t, None)
    | _, (_, Some ty) ->
     let rec force_type ty = CAst.(map (function
      | CProdN (abs, t) ->
-       n_binders := !n_binders + List.length (List.flatten (List.map (function CLocalAssum (nal,_,_) -> nal | CLocalDef (na,_,_) -> [na] | CLocalPattern _ -> (* We count a 'pat for 1; TO BE CHECKED *) [CAst.make Name.Anonymous]) abs));
+       n_binders := !n_binders + List.length (List.flatten (List.map (function CLocalAssum (nal,_,_,_) -> nal | CLocalDef (na,_,_,_) -> [na] | CLocalPattern _ -> (* We count a 'pat for 1; TO BE CHECKED *) [CAst.make Name.Anonymous]) abs));
        CProdN (abs, force_type t)
      | CLetIn (n, v, oty, t) -> incr n_binders; CLetIn (n, v, oty, force_type t)
      | _ -> (mkCCast ty (mkCType None)).v)) ty in
@@ -766,9 +761,9 @@ let pf_interp_ty ?(resolve_typeclasses=false) env sigma0 ist ty =
        sigma, Evarutil.nf_evar sigma cty in
    let c, evs, ucst = abs_evars env sigma0 ty in
    let n = List.length evs in
+   let sigma0 = Evd.merge_universe_context sigma0 ucst in
    let lam_c = abs_cterm env sigma0 n c in
    let ctx, c = EConstr.decompose_lambda_n_assum sigma n lam_c in
-   let sigma0 = Evd.merge_universe_context sigma0 ucst in
    sigma0, n, EConstr.it_mkProd_or_LetIn c ctx, lam_c
 
 (* TASSI: given (c : ty), generates (c ??? : ty[???/...]) with m evars *)
@@ -800,10 +795,9 @@ let saturate ?(beta=false) ?(bi_types=false) env sigma c ?(ty=Retyping.get_type_
    loop ty [] sigma m
 
 let dependent_apply_error =
-  try CErrors.user_err (Pp.str "Could not fill dependent hole in \"apply\"")
-  with err -> err
+  CErrors.UserError (Pp.str "Could not fill dependent hole in \"apply\"")
 
-(* TASSI: Sometimes Coq's apply fails. According to my experience it may be
+(* TASSI: Sometimes Rocq's apply fails. According to my experience it may be
  * related to goals that are products and with beta redexes. In that case it
  * guesses the wrong number of implicit arguments for your lemma. What follows
  * is just like apply, but with a user-provided number n of implicits.
@@ -811,39 +805,55 @@ let dependent_apply_error =
  * Refine.refine function that handles type classes and evars but fails to
  * handle "dependently typed higher order evars".
  *
+ * Assumes that the type of [t] is a telescope with [n] leading product types.
+ * This is always the case as the only caller of applyn uses it with the output
+ * of abs_evars_pirrel which starts with n lambdas generated by abstraction.
+ * It also assumes [t] starts with [n] Lambda nodes.
+ *
  * Refiner.refiner that does not handle metas with a non ground type but works
  * with dependently typed higher order metas. *)
-let applyn ~with_evars ?beta ?(with_shelve=false) ?(first_goes_last=false) n t =
+let applyn ?(beta=false) ~with_evars ?(first_goes_last=false) n t =
+  Proofview.Goal.enter begin fun gl ->
+  let sigma = Proofview.Goal.sigma gl in
+  let env = Proofview.Goal.env gl in
+  let concl = Proofview.Goal.concl gl in
   if with_evars then
     let refine =
-      Proofview.Goal.enter begin fun gl ->
       Refine.refine ~typecheck:false begin fun sigma ->
-      let env = Proofview.Goal.env gl in
-      let concl = Proofview.Goal.concl gl in
-      let t, ty, args, sigma = saturate ?beta ~bi_types:true env sigma t n in
+      let rec saturate c args sigma n =
+        if n = 0 then args, sigma
+        else match EConstr.kind sigma c with
+        | Lambda (_, argty, c) ->
+          let argty = Reductionops.nf_betaiota env sigma (EConstr.Vars.substl args argty) in
+          let (sigma, x) = Evarutil.new_evar env sigma argty in
+          saturate c (x :: args) sigma (n-1)
+        | _ -> assert false
+      in
+      let _, ty = EConstr.decompose_prod_n_decls sigma n (Retyping.get_type_of env sigma t) in
+      let args, sigma = saturate t [] sigma n in
+      let ty = EConstr.Vars.substl args ty in
+      let args = Array.rev_of_list args in
+      let t = EConstr.mkApp (t, args) in
+      let t = if beta then Reductionops.whd_beta env sigma t else t in
       let sigma = unify_HO env sigma ty concl in
       (* Set our own set of goals. In theory saturate generates them in the
          right order, so we could just return sigma directly, but explicit is
          better than implicit. *)
       let sigma = Evd.push_future_goals (snd @@ Evd.pop_future_goals sigma) in
-      let fold sigma (_, e, _) = match EConstr.kind sigma e with
+      let fold sigma e = match EConstr.kind sigma e with
       | Evar (evk, _) -> Evd.declare_future_goal evk sigma
       | _ -> sigma
       in
-      let sigma = List.fold_left fold sigma args in
+      let sigma = Array.fold_left fold sigma args in
       (sigma, t)
-      end
       end
     in
     Tacticals.tclTHENLIST [
       refine;
-      Proofview.(if with_shelve then shelve_unifiable else tclUNIT ());
+      Proofview.shelve_unifiable;
       Proofview.(if first_goes_last then cycle 1 else tclUNIT ())
     ]
   else
-    Proofview.Goal.enter begin fun gl ->
-    let sigma = Proofview.Goal.sigma gl in
-    let env = Proofview.Goal.env gl in
     let sigma = Evd.push_future_goals sigma in
     let hyps = Environ.named_context_val env in
     let inst = EConstr.identity_subst_val hyps in
@@ -855,15 +865,13 @@ let applyn ~with_evars ?beta ?(with_shelve=false) ?(first_goes_last=false) n t =
           | Lambda (_, ty, bo) ->
             let () = if not (EConstr.Vars.closed0 sigma ty) then raise dependent_apply_error in
             let ty = Reductionops.nf_betaiota env sigma ty in
-            let src = Loc.tag Evar_kinds.GoalEvar in
-            let (sigma, evk) = Evarutil.new_pure_evar ~src ~typeclass_candidate:false hyps sigma ty in
+            let (sigma, evk) = Evarutil.new_pure_evar ~typeclass_candidate:false hyps sigma ty in
             loop sigma bo (evk :: args) (n - 1)
           | _ -> assert false
       in
       loop sigma t [] n
     in
     let _, sigma = Evd.pop_future_goals sigma in
-    pp(lazy(str"Refiner.refiner " ++ Printer.pr_econstr_env env sigma t));
 
     let map evk = Proofview.goal_with_state evk (Proofview.Goal.state gl) in
     let sgl = List.rev_map map args in
@@ -886,10 +894,10 @@ let refine_with ?(first_goes_last=false) ?beta ?(with_evars=true) oc =
   Proofview.Goal.enter begin fun gl ->
   let env = Proofview.Goal.env gl in
   let sigma = Proofview.Goal.sigma gl in
-  let uct = Evd.evar_universe_context (fst oc) in
+  let uct = Evd.ustate (fst oc) in
   let n, oc = abs_evars_pirrel env sigma oc in
   Proofview.Unsafe.tclEVARS (Evd.set_universe_context sigma uct) <*>
-  Proofview.tclORELSE (applyn ~with_evars ~first_goes_last ~with_shelve:true ?beta n oc)
+  Proofview.tclORELSE (applyn ~with_evars ~first_goes_last ?beta n oc)
     (fun _ -> Proofview.tclZERO dependent_apply_error)
   end
 
@@ -1009,7 +1017,7 @@ let get_hyp env sigma id =
 (* XXX the k of the redex should percolate out *)
 let pf_interp_gen_aux env sigma ~concl to_ind ((oclr, occ), t) =
   let pat = interp_cpattern env sigma t None in (* UGLY API *)
-  let sigma = Evd.merge_universe_context sigma (Evd.evar_universe_context @@ pat.pat_sigma) in
+  let sigma = Evd.merge_universe_context sigma (Evd.ustate @@ pat.pat_sigma) in
   let sigma, c, cl = fill_rel_occ_pattern env sigma concl pat occ in
   let clr = interp_clr sigma (oclr, (tag_of_cpattern t, c)) in
   if not(occur_existential sigma c) then
@@ -1091,7 +1099,7 @@ let abs_wgen env sigma keep_let f gen (args,c) =
   | _, Some ((x, "@"), Some p) ->
      let x = hoi_id x in
      let cp = interp_cpattern env sigma p None in
-     let sigma = Evd.merge_universe_context sigma (Evd.evar_universe_context cp.pat_sigma) in
+     let sigma = Evd.merge_universe_context sigma (Evd.ustate cp.pat_sigma) in
      let sigma, t, c = fill_rel_occ_pattern env sigma c cp None in
      evar_closed t p;
      let ut = red_product_skip_id env sigma t in
@@ -1100,7 +1108,7 @@ let abs_wgen env sigma keep_let f gen (args,c) =
   | _, Some ((x, _), Some p) ->
      let x = hoi_id x in
      let cp = interp_cpattern env sigma p None in
-     let sigma = Evd.merge_universe_context sigma (Evd.evar_universe_context cp.pat_sigma) in
+     let sigma = Evd.merge_universe_context sigma (Evd.ustate cp.pat_sigma) in
      let sigma, t, c = fill_rel_occ_pattern env sigma c cp None in
      evar_closed t p;
      let sigma, ty, r = pfe_type_relevance_of env sigma t in
@@ -1117,7 +1125,7 @@ let clr_of_wgen gen clrs = match gen with
 let reduct_in_concl ~check t = Tactics.reduct_in_concl ~cast:false ~check (t, DEFAULTcast)
 let unfold cl =
   Proofview.tclEVARMAP >>= fun sigma ->
-  let module R = Reductionops in let module F = CClosure.RedFlags in
+  let module R = Reductionops in let module F = RedFlags in
   let flags = F.mkflags [F.fBETA; F.fMATCH; F.fFIX; F.fCOFIX; F.fDELTA] in
   let fold accu c = F.red_add accu (F.fCONST (fst (EConstr.destConst sigma c))) in
   let flags = List.fold_left fold flags cl in
@@ -1156,14 +1164,14 @@ let tacTYPEOF c = Goal.enter_one ~__LOC__ (fun g ->
     does not check anything. *)
 let unsafe_intro env decl b =
   let open Context.Named.Declaration in
-  Refine.refine ~typecheck:false begin fun sigma ->
+  Refine.refine_with_principal ~typecheck:false begin fun sigma ->
     let ctx = Environ.named_context_val env in
     let nctx = EConstr.push_named_context_val decl ctx in
     let inst = EConstr.identity_subst_val (Environ.named_context_val env) in
     let ninst = SList.cons (EConstr.mkRel 1) inst in
     let nb = EConstr.Vars.subst1 (EConstr.mkVar (get_id decl)) b in
-    let sigma, ev = Evarutil.new_pure_evar ~principal:true nctx sigma nb in
-    sigma, EConstr.mkNamedLambda_or_LetIn sigma decl (EConstr.mkEvar (ev, ninst))
+    let sigma, ev = Evarutil.new_pure_evar nctx sigma nb in
+    sigma, EConstr.mkNamedLambda_or_LetIn sigma decl (EConstr.mkEvar (ev, ninst)), Some ev
   end
 
 let set_decl_id id = let open Context in function
@@ -1194,7 +1202,7 @@ let tclFULL_BETAIOTA = Goal.enter begin fun gl ->
   let r, _ = Redexpr.reduction_of_red_expr (Goal.env gl)
     Genredexpr.(Lazy {
       rBeta=true; rMatch=true; rFix=true; rCofix=true;
-      rZeta=false; rDelta=false; rConst=[]}) in
+      rZeta=false; rDelta=false; rConst=[]; rStrength=Norm}) in
   Tactics.e_reduct_in_concl ~cast:false ~check:false (r,Constr.DEFAULTcast)
 end
 
@@ -1300,7 +1308,7 @@ let tclOPTION o d =
 let tacIS_INJECTION_CASE ?ty t = begin
   tclOPTION ty (tacTYPEOF t) >>= fun ty ->
   tacEVAL_TO_QUANTIFIED_IND ty >>= fun (mind,_) ->
-  tclUNIT (Coqlib.check_ind_ref "core.eq.type" mind)
+  tclUNIT (Rocqlib.check_ref "core.eq.type" (GlobRef.IndRef mind))
 end
 
 let tclWITHTOP tac = Goal.enter begin fun gl ->
@@ -1331,8 +1339,8 @@ let tacDEST_CONST c =
  * to change that behaviour in the standard unfold code *)
 let unprotecttac =
   tacMK_SSR_CONST "protect_term" >>= tacDEST_CONST >>= fun prot ->
-  let open CClosure.RedFlags in
-  let flags = red_add_transparent CClosure.allnolet TransparentState.empty in
+  let open RedFlags in
+  let flags = red_add_transparent allnolet TransparentState.empty in
   let flags = red_add flags (fCONST prot) in
   Tacticals.onClause (fun idopt ->
     let hyploc = Option.map (fun id -> id, InHyp) idopt in
@@ -1344,12 +1352,13 @@ let unprotecttac =
 module type StateType = sig
   type state
   val init : state
+  val name : string
 end
 
 module MakeState(S : StateType) = struct
 
 let state_field : S.state Proofview_monad.StateStore.field =
-  Proofview_monad.StateStore.field ()
+  Proofview_monad.StateStore.field S.name
 
 (* FIXME: should not inject fresh_state, but initialize it at the beginning *)
 let lift_upd_state upd s =

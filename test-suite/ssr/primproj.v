@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -19,7 +19,7 @@ Record foo A := Foo { foo_car : A }.
 
 Definition bar : foo _ := Foo nat 10.
 
-Variable alias : forall A, foo A -> A.
+Parameter alias : forall A, foo A -> A.
 
 Parameter e : @foo_car = alias.
 
@@ -152,7 +152,7 @@ Record foo A := Foo { foo_car : A }.
 
 Definition bar : foo _ := Foo nat 10.
 
-Variable alias : forall A, foo A -> A.
+Parameter alias : forall A, foo A -> A.
 
 Parameter e : @foo_car = alias.
 

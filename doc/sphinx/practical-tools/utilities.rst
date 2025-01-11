@@ -1,34 +1,34 @@
 .. _utilities:
 
-----------------------
- Building Coq Projects
-----------------------
+------------------------
+ Building Rocq Projects
+------------------------
 
 .. _configuration_basics:
 
-Coq configuration basics
-------------------------
+Rocq configuration basics
+-------------------------
 
-Describes the basics of Coq configuration that affect
-running and compiling Coq scripts.  It recommends preferred ways to
-install Coq, manage installed packages and structure your project
+Describes the basics of Rocq configuration that affect
+running and compiling Rocq scripts.  It recommends preferred ways to
+install the Rocq Prover, manage installed packages and structure your project
 directories for ease of use.
 
-Installing Coq and Coq packages with opam
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Installing the Rocq Prover and Rocq packages with opam
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The easiest way to install Coq is with the
+The easiest way to install the Rocq Prover is with the
 `Coq Platform <https://github.com/coq/platform>`_, which relies
 on the `opam package manager <https://coq.inria.fr/opam-using.html>`_.
 
 The Coq platform installation process provides options to automatically install
 some of the most frequently used packages at the
 same time.  While there's currently no guarantee that user-developed packages
-will compile on the current version of Coq, all packages
+will compile on the current version of Rocq, all packages
 that Coq platform installs should compile without difficulty--this is part of
 the Coq platform release process.
 
-Once you've installed Coq, you can search for additional user-developed packages
+Once you've installed Rocq, you can search for additional user-developed packages
 from the `package list <https://coq.inria.fr/opam/www/>`_ or other opam repositories.
 These commands may be helpful:
 
@@ -58,11 +58,11 @@ in :cmd:`Require` commands.  There are a couple ways to do this:
 - If you installed with opam, use :n:`opam show --list-files coq-bignums | head -n1` -
   the last component of the filename is the logical name (`Bignums`).
 
-- On Linux, :n:`ls $(coqtop -where)/user-contrib` shows the logical names of all
+- On Linux, :n:`ls $(rocq c -where)/user-contrib` shows the logical names of all
   installed user-contributed packages.  You should be able to guess which one you
   need.
 
-- Use the :cmd:`Print LoadPath` command when running Coq, which shows the mapping
+- Use the :cmd:`Print LoadPath` command when running Rocq, which shows the mapping
   from :term:`logical path`\s to directories.  Again, you should be able to guess.
 
 The last two methods work even if you didn't install with opam.  Perhaps in the
@@ -79,17 +79,17 @@ Setup for working on your own projects
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The working and master copies of source code for your own projects should
-not be in the directory tree where Coq is installed.  In particular, when you upgrade
-to a new version of Coq, any directories you created in the old version won't
+not be in the directory tree where Rocq is installed.  In particular, when you upgrade
+to a new version of Rocq, any directories you created in the old version won't
 be copied or moved.
 
 We encourage you to use a source code control system for any non-trivial
 project because it makes it easy to track the history of your changes.
-`git <https://git-scm.com/>`_ is the system most used by Coq projects.
+`git <https://git-scm.com/>`_ is the system most used by Rocq projects.
 Typically, each project has its own git repository.
 
 For a project that has only a single file, you can create the file wherever you like
-and then step through it in one of the IDEs for Coq, such as
+and then step through it in one of the IDEs for Rocq, such as
 :ref:`coqintegrateddevelopmentenvironment`,
 `ProofGeneral <https://proofgeneral.github.io/>`_,
 `vsCoq <https://github.com/coq-community/vscoq>`_
@@ -98,11 +98,11 @@ and `Coqtail <https://github.com/whonore/Coqtail>`_.
 If your project has multiple files in a single directory that depend on each
 other through :cmd:`Require` commands, they must be compiled in an order that
 matches their dependencies.
-Scripts in `.v` files must be compiled to `.vo` files using `coqc` before they
+Scripts in `.v` files must be compiled to `.vo` files using `rocq compile` before they
 can be :cmd:`Require`\d in other files.  Currently, the `.vo` file is created in
 the same directory as its `.v` file.  For example,
 if B.v depends on A.v, then you should compile A.v before B.v.  You can do this
-with :n:`coqc A.v` followed by :n:`coqc B.v`, but you may find it tedious to
+with :n:`rocq c A.v` followed by :n:`rocq c B.v`, but you may find it tedious to
 manage the dependencies, particularly as the number of files increases.
 
 If your project files are in multiple directories, you would also need to pass
@@ -120,7 +120,7 @@ The `_CoqProject` file identifies the :term:`logical path` to associate with the
 directories containing your compiled files.  The `_CoqProject` file is normally
 in the top directory of the project.  Occasionally it may be useful to have
 additional `_CoqProject` files in subdirectories, for example in order to pass
-different startup parameters to Coq for particular scripts.
+different startup parameters to Rocq for particular scripts.
 
 .. _building_with_coqproject:
 
@@ -175,17 +175,17 @@ Or you can easily do a global replace, if necessary, on the package name
 before it is (widely) used.  After that, a name change may begin to impact
 a large number of users.  Alas, there's currently no easy way to discover what
 :term:`logical name`\s have already been used.  The :cmd:`Print LoadPath` command helps
-a bit; it shows the logical names defined in the Coq process.
+a bit; it shows the logical names defined in the Rocq process.
 
 Then:
 
 - Generate a makefile from `_CoqProject` with
-  :n:`coq_makefile -f _CoqProject -o CoqMakefile` and
+  :n:`rocq makefile -f _CoqProject -o CoqMakefile` and
 
 - Compile your project with :n:`make -f CoqMakefile` as needed.
 
 If you add more files to your project that are not in directories listed
-in `_CoqProject`, update `_CoqProject` and re-run `coq_makefile` and `make`.
+in `_CoqProject`, update `_CoqProject` and re-run `rocq makefile` and `make`.
 
 .. todo we should use a standard name for the makefile so IDEs can find it.
    Maybe you should be allowed to include "-o MAKEFILENAME" in the `_CoqProject`,
@@ -193,14 +193,14 @@ in `_CoqProject`, update `_CoqProject` and re-run `coq_makefile` and `make`.
    Then mandate that the file be called simply "makefile" so IDEs can find it.
 
 We recommend checking `CoqMakefile` and `CoqMakefile.conf` into your source code
-control system.  Also we recommend updating them with `coq_makefile` when you switch
-to a new version of Coq.
+control system.  Also we recommend updating them with `rocq makefile` when you switch
+to a new version of Rocq.
 
 In CoqIDE, you must explicitly save modified buffers before running `make` and
-restart the Coq interpreter in any buffers in which you're running code.
+restart the Rocq interpreter in any buffers in which you're running code.
 More details :ref:`here <coqide_make_note>`.
 
-See :ref:`coq_makefile` for a complete description of `coq_makefile` and the
+See :ref:`rocq_makefile` for a complete description of `rocq makefile` and the
 files it generates.
 
 .. todo: describe -vos option, a way to do quicker builds with some caveats
@@ -210,7 +210,7 @@ files it generates.
 Logical paths and the load path
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Coq commands such as :cmd:`Require` identify files with :term:`logical paths<logical path>` rather
+Commands such as :cmd:`Require` identify files with :term:`logical paths<logical path>` rather
 than file system paths so that scripts don't have to be modified to run on
 different computers.  The :cmd:`Print LoadPath` command displays the :gdef:`load path`,
 which is a list of (logical path, :term:`physical path`) pairs for directories.
@@ -221,29 +221,29 @@ For example, you may see::
   Bignums /home/jef/coq/lib/coq/user-contrib/Bignums
   Bignums.BigZ /home/jef/coq/lib/coq/user-contrib/Bignums/BigZ
   Ltac2 /home/jef/coq/lib/coq/user-contrib/Ltac2
-  Coq /home/jef/coq/lib/coq/theories
-  Coq.Numbers /home/jef/coq/lib/coq/theories/Numbers
-  Coq.Numbers.Natural /home/jef/coq/lib/coq/theories/Numbers/Natural
-  Coq.Numbers.Natural.Binary /home/jef/coq/lib/coq/theories/Numbers/Natural/Binary
-  Coq.Numbers.Integer /home/jef/coq/lib/coq/theories/Numbers/Integer
-  Coq.Arith /home/jef/coq/lib/coq/theories/Arith
+  Stdlib /home/jef/coq/lib/coq/theories
+  Stdlib.Numbers /home/jef/coq/lib/coq/theories/Numbers
+  Stdlib.Numbers.Natural /home/jef/coq/lib/coq/theories/Numbers/Natural
+  Stdlib.Numbers.Natural.Binary /home/jef/coq/lib/coq/theories/Numbers/Natural/Binary
+  Stdlib.Numbers.Integer /home/jef/coq/lib/coq/theories/Numbers/Integer
+  Stdlib.Arith /home/jef/coq/lib/coq/theories/Arith
   <> /home/jef/myproj
 
 The components of each pair share suffixes, e.g. `Bignums.BigZ` and `Bignums/BigZ` or
-`Coq.Numbers.Natural` and `Numbers/Natural`.  Physical pathnames should
+`Stdlib.Numbers.Natural` and `Numbers/Natural`.  Physical pathnames should
 always use `/` rather than `\\`, even when running on Windows.
 Packages with a physical path containing `user-contrib` were installed
-with the Coq binaries (e.g. `Ltac2`), with the Coq Platform or with opam (e.g. `Bignums`)
+with the Rocq binaries (e.g. `Ltac2`), with the Coq Platform or with opam (e.g. `Bignums`)
 or perhaps by other means.  Note that, for these entries, the entire logical path
 appears in the directory name.
-Packages that begin with `Coq` were installed with the Coq binaries.  Note
-that the :term:`logical name` `Coq` doesn't appear in the physical path.
+Packages that begin with `Stdlib` were installed with the Rocq binaries.  Note
+that the :term:`logical name` `Stdlib` doesn't appear in the physical path.
 
 The `<>` in the final entry represents an empty logical pathname, which
 permits loading files from the
 associated directory with just the basename of the script file,
 e.g. specify `Foo` to load `Foo.vo`.  This entry corresponds to the
-current directory when Coq was started.  Note that the :cmd:`Cd` command
+current directory when Rocq was started.  Note that the :cmd:`Cd` command
 doesn't change the associated directory--you would need to restart CoqIDE.
 
 With some exceptions noted below, the :term:`load path` is generated from files loaded
@@ -252,9 +252,9 @@ associated logical path is determined from the filesystem path, relative to the
 directory, e.g. the file `Foo/Bar/script.vo` becomes `Foo.Bar.script`:
 
 - directories specified with :ref:`-R and -Q command line options <-Q-option>`,
-- the current directory where the Coq process was launched (without
+- the current directory where the Rocq process was launched (without
   including subdirectories),
-- the directories listed in the `COQPATH` environment variable (separated with
+- the directories listed in the `ROCQPATH` environment variable (separated with
   colons, or, on Windows, with semicolons)
 
 .. not working - the ``coq`` subdirectory for each directory  listed in the ``XDG_DATA_DIRS``
@@ -264,22 +264,22 @@ directory, e.g. the file `Foo/Bar/script.vo` becomes `Foo.Bar.script`:
   <http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html>`_).
   However, CoqIDE relies on the default setting; therefore we recommend not
   setting this variable.
-- installed packages from the `user-contrib` directory in the Coq installation,
-- the Coq standard library from the `theories` directory in the Coq installation
-  (with `Coq` prepended to the logical path),
+- installed packages from the `user-contrib` directory in the Rocq installation,
+- the Rocq standard library from the `theories` directory in the Rocq installation
+  (with `Stdlib` prepended to the logical path),
 
 .. todo: XDG* with example(s) and suggest best practices for their use
 
 .. todo: document loadpath for ml files
 
 Each directory may contain multiple `.v`/`.vo` files.  For example,
-:n:`Require Import Coq.Numbers.Natural.Binary.NBinary` loads the file
+:n:`Require Import Stdlib.Numbers.Natural.Binary.NBinary` loads the file
 :n:`NBinary.vo` from the associated directory.  Note that a short name
 is often sufficient in :cmd:`Require` instead of a fully qualified
 name.
 
 In :cmd:`Require` commands referring to the current package (if `_CoqProject`
-uses `-R`) or Coq's standard library can be referenced with a short name without
+uses `-R`) can be referenced with a short name without
 a `From` clause provided that the logical path is unambiguous (as if they are
 available through `-R`).  In contrast, :cmd:`Require` commands that load files from other
 locations such as `user-contrib` must either use an exact logical path
@@ -287,11 +287,11 @@ or include a `From` clause (as if they are available through `-Q`).  This is don
 to reduce the number of ambiguous logical paths.  We encourage using `From`
 clauses.
 
-Note that if you use a `_CoqProject` file, the `COQPATH` environment variable is not helpful.
-If you use `COQPATH` without a `_CoqProject`, a file in `MyPackage/theories/SubDir/File.v` will be
+Note that if you use a `_CoqProject` file, the `ROCQPATH` environment variable is not helpful.
+If you use `ROCQPATH` without a `_CoqProject`, a file in `MyPackage/theories/SubDir/File.v` will be
 loaded with the logical name `MyPackage/theories/SubDir.File`, which may not be what you want.
 
-If you associate the same logical name with more than one directory, Coq
+If you associate the same logical name with more than one directory, Rocq
 looks for the `.vo` file in the most recently added path first (i.e., the one
 that appears earlier in the :cmd:`Print LoadPath` output).
 
@@ -324,7 +324,7 @@ Installed and uninstalled packages
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The directory structure of installed packages (i.e., in the `user-contrib` directory
-of the Coq installation) differs from that generally used for the project source tree.
+of the Rocq installation) differs from that generally used for the project source tree.
 The installed directory structure omits the pathname given in the `-R` and `-Q`
 parameters that aren't part of the logical name of a script.  For example, the `theories`
 pathname used in this `_CoqProject` file is omitted from the installed pathname::
@@ -339,9 +339,7 @@ pathname used in this `_CoqProject` file is omitted from the installed pathname:
 Use :n:`make -f CoqMakefile install` to install a project from a directory.
 
 If you try to step through scripts in installed packages (e.g. to understand
-the proofs therein), you may get unexpected failures for two reasons (which
-don't apply to scripts in the standard library, which have logical paths
-beginning with `Coq`):
+the proofs therein), you may get unexpected failures for two reasons:
 
 * `_CoqProject` files often have at least one `-R` parameter, while
   installed packages are loaded with the less-permissive `-Q` option described in
@@ -351,49 +349,49 @@ beginning with `Coq`):
   need to list all the source files.
 
 * Sometimes, the `_CoqProject` file specifies options that affect the
-  behavior of Coq, such as `-impredicative-set`.  These can similarly be
+  behavior of Rocq, such as `-impredicative-set`.  These can similarly be
   added in `_CoqProject` files in `user-contrib`.
 
 Another way to get around these problems is to download the source tree for the
 project in a new directory and compile it before stepping through its scripts.
 
-Upgrading to a new version of Coq
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Upgrading to a new version of Rocq
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-`.vo` files are specific to the version of Coq that compiled them.  When you
-upgrade to a new version of Coq, you must recompile all the projects
+`.vo` files are specific to the version of Rocq that compiled them.  When you
+upgrade to a new version of Rocq, you must recompile all the projects
 that you want to run in the new version.  This is necessary to assure that
 your proofs still work in the new version.  Once their projects build on the
 new version, most users no longer have a need to run on the old version.
 
 If, however, you want to overlap working on your project on both the old and new
 versions, you'll need to create separate source directories for your project
-for the different Coq versions.  Currently the compiled `.vo` files are kept
+for the different Rocq versions.  Currently the compiled `.vo` files are kept
 in the same directory as their corresponding `.v` file.
 
 .. todo: Making your packages available with opam
 
-.. _coq_makefile:
+.. _rocq_makefile:
 
-Building a Coq project with coq_makefile (details)
---------------------------------------------------
+Building a Rocq project with rocq makefile (details)
+----------------------------------------------------
 
-The ``coq_makefile`` tool is included with Coq and is based on generating a makefile.
+The ``rocq makefile`` tool is included with Rocq and is based on generating a makefile.
 
-The majority of Coq projects are very similar: a collection of ``.v``
-files and possibly some ``.ml`` ones (a Coq plugin). The main piece of
+The majority of Rocq projects are very similar: a collection of ``.v``
+files and possibly some ``.ml`` ones (a Rocq plugin). The main piece of
 metadata needed in order to build the project are the command line
-options to ``coqc`` (e.g. ``-R``, ``-Q``, ``-I``, see :ref:`command
+options to ``rocq compile`` (e.g. ``-R``, ``-Q``, ``-I``, see :ref:`command
 line options <command-line-options>`). Collecting the list of files
 and options is the job of the ``_CoqProject`` file.
 
 A ``_CoqProject`` file may contain the following kinds of entries in any order,
 separated by whitespace:
 
-* Selected options of coqc, which are forwarded directly to it. Currently these
+* Selected options of `rocq compile`, which are forwarded directly to it. Currently these
   are ``-Q``, ``-I``, ``-R`` and ``-native-compiler``.
-* ``-arg`` options for other options of coqc that don’t fall in the above set.
-* Options specific to ``coq_makefile``. Currently there are two options:
+* ``-arg`` options for other options of `rocq compile` that don’t fall in the above set.
+* Options specific to ``rocq makefile``. Currently there are two options:
   ``-generate-meta-for-package`` (see below for details), and ``-docroot``.
 * Directory names, which include all appropriate files in the directory and
   its subdirectories.
@@ -413,7 +411,7 @@ A simple example of a ``_CoqProject`` file follows:
     src
     -generate-meta-for-package my-package
 
-Lines in the form ``-arg foo`` pass the argument ``foo`` to ``coqc``: in the
+Lines in the form ``-arg foo`` pass the argument ``foo`` to ``rocq compile``: in the
 example, this passes the two-word option ``-w all`` (see
 :ref:`command line options <command-line-options>`).
 
@@ -433,7 +431,7 @@ packages) or your project has multiple plugins, then create a file named
 You can use ``ocamlfind lint META.my-package`` to lint the hand written file.
 Typically ``my-package`` is the name of the ``OPAM`` package for your
 project (which conventionally starts with ``coq-``). If the project
-includes a ``.mlg`` file (to be pre-processed by ``coqpp``) that
+includes a ``.mlg`` file (to be pre-processed by ``rocq pp-mlg``) that
 declares a plugin, then the given name must match the ``findlib`` plugin
 name, e.g. ``DECLARE PLUGIN "my-package.plugin"``.
 
@@ -441,15 +439,15 @@ The ``-native-compiler`` option given in the ``_CoqProject`` file overrides
 the global one passed at configure time.
 
 CoqIDE, Proof General, VsCoq and Coqtail all
-understand ``_CoqProject`` files and can be used to invoke Coq with the desired options.
+understand ``_CoqProject`` files and can be used to invoke Rocq with the desired options.
 
-The ``coq_makefile`` utility can be used to set up a build infrastructure
-for the Coq project based on makefiles. We recommend
-invoking ``coq_makefile`` this way:
+The ``rocq makefile`` utility can be used to set up a build infrastructure
+for the Rocq project based on makefiles. We recommend
+invoking ``rocq makefile`` this way:
 
 ::
 
-    coq_makefile -f _CoqProject -o CoqMakefile
+    rocq makefile -f _CoqProject -o CoqMakefile
 
 
 This command generates the following files:
@@ -457,15 +455,15 @@ This command generates the following files:
 CoqMakefile
   is a makefile for ``GNU Make`` with targets to build the project
   (e.g. generate .vo or .html files from .v or compile .ml* files)
-  and install it in the ``user-contrib`` directory where the Coq
+  and install it in the ``user-contrib`` directory where the Rocq
   library is installed.
 
 CoqMakefile.conf
   contains make variables assignments that reflect
   the contents of the ``_CoqProject`` file as well as the path relevant to
-  Coq.
+  Rocq.
 
-Run ``coq_makefile --help`` for a description of command line options.
+Run ``rocq makefile --help`` for a description of command line options.
 
 The recommended approach is to invoke ``CoqMakefile`` from a standard
 ``Makefile`` in the following form:
@@ -485,7 +483,7 @@ The recommended approach is to invoke ``CoqMakefile`` from a standard
       .DEFAULT_GOAL := invoke-coqmakefile
 
       CoqMakefile: Makefile _CoqProject
-              $(COQBIN)coq_makefile -f _CoqProject -o CoqMakefile
+              $(COQBIN)rocq makefile -f _CoqProject -o CoqMakefile
 
       invoke-coqmakefile: CoqMakefile
               $(MAKE) --no-print-directory -f CoqMakefile $(filter-out $(KNOWNTARGETS),$(MAKECMDGOALS))
@@ -502,9 +500,9 @@ The recommended approach is to invoke ``CoqMakefile`` from a standard
 
 The advantage of a wrapper, compared to directly calling the generated
 ``Makefile``, is that it
-provides a target independent of the version of Coq to regenerate a
-``Makefile`` specific to the current version of Coq. Additionally, the
-master ``Makefile`` can be extended with targets not specific to Coq.
+provides a target independent of the version of Rocq to regenerate a
+``Makefile`` specific to the current version of Rocq. Additionally, the
+master ``Makefile`` can be extended with targets not specific to Rocq.
 Including the generated makefile with an include directive is
 discouraged, since the contents of this file, including variable names and
 status of rules, may change in the future.
@@ -513,7 +511,7 @@ Use the optional file ``CoqMakefile.local`` to extend
 ``CoqMakefile``. In particular, you can declare custom actions to run
 before or after the build process. Similarly you can customize the
 install target or even provide new targets. See
-:ref:`coqmakefilelocal` for extension-point documentation. Although
+:ref:`rocqmakefilelocal` for extension-point documentation. Although
 you can use all variables defined in ``CoqMakefile`` in the *recipes*
 of rules that you write and in the definitions of any variables that
 you assign with ``=``, many variables are not available for use if you
@@ -525,14 +523,14 @@ to make use of such variables in the prerequisites of rules. To access
 variables defined in ``CoqMakefile`` in rule target computation,
 top-level conditionals, and ``:=`` variable assignment, for example to
 add new dependencies to compiled outputs, use the optional file
-``CoqMakefile.local-late``.  See :ref:`coqmakefilelocallate` for a
+``CoqMakefile.local-late``.  See :ref:`rocqmakefilelocallate` for a
 non-exhaustive list of variables.
 
 The extensions of files listed in ``_CoqProject`` determine
 how they are built. In particular:
 
 
-+ Coq files must use the ``.v`` extension
++ Rocq files must use the ``.v`` extension
 + OCaml files must use the ``.ml`` or ``.mli`` extension
 + OCaml files that require pre processing for syntax
   extensions (like ``VERNAC EXTEND``) must use the ``.mlg`` extension
@@ -554,32 +552,32 @@ Comments
 ``#`` outside of double quotes starts a comment that continues to the end of the
 line. Comments are ignored.
 
-Quoting arguments to coqc
-+++++++++++++++++++++++++
+Quoting arguments to rocq c
++++++++++++++++++++++++++++
 Any string in a ``_CoqProject`` file may be enclosed in double quotes to include
 whitespace characters or ``#``. For example, use ``-arg "-w all"`` to pass the
-argument ``-w all`` to coqc. If the argument to coqc needs some quotes as well,
+argument ``-w all`` to `rocq compile`. If the argument to `rocq compile` needs some quotes as well,
 use single-quotes inside the double-quotes. For example ``-arg "-set 'Default
-Goal Selector=!'"`` gets passed to coqc as ``-set 'Default Goal Selector=!'``.
+Goal Selector=!'"`` gets passed to `rocq compile` as ``-set 'Default Goal Selector=!'``.
 
 But note, that single-quotes in a ``_CoqProject`` file are only special
 characters if they appear in the string following ``-arg``. And on their own
 they don't quote spaces. For example ``-arg 'foo bar'`` in ``_CoqProject`` is
 equivalent to ``-arg foo "bar'"`` (in ``_CoqProject`` notation). ``-arg "'foo
-bar'"`` behaves differently and passes ``'foo bar'`` to coqc.
+bar'"`` behaves differently and passes ``'foo bar'`` to `rocq compile`.
 
 Forbidden filenames
 +++++++++++++++++++
 The paths of files given in a ``_CoqProject`` file may not contain any of the
 following characters: ``\n``, ``\t``, space, ``\``, ``'``, ``"``, ``#``, ``$``,
 ``%``. These characters have special meaning in Makefiles and
-``coq_makefile`` doesn't support encoding them correctly.
+``rocq makefile`` doesn't support encoding them correctly.
 
 Warning: No common logical root
 +++++++++++++++++++++++++++++++
 When a ``_CoqProject`` file contains something like ``-R theories Foo
 theories/Bar.v``, the ``install-doc`` target installs the documentation
-generated by ``coqdoc`` into ``user-contrib/Foo/``, in the folder where Coq was
+generated by ``rocq doc`` into ``user-contrib/Foo/``, in the folder where Rocq was
 installed.
 
 But if the ``_CoqProject`` file contains something like:
@@ -591,8 +589,8 @@ But if the ``_CoqProject`` file contains something like:
     theories/Foo/Foo.v
     theories/Bar/Bar.v
 
-the Coq files of the project don’t have a :term:`logical path` in common and
-``coq_makefile`` doesn’t know where to install the documentation. It will give
+the Rocq files of the project don’t have a :term:`logical path` in common and
+``rocq makefile`` doesn’t know where to install the documentation. It will give
 a warning: "No common logical root" and generate a Makefile that installs the
 documentation in some folder beginning with "orphan", in the above example,
 it'd be ``user-contrib/orphan_Foo_Bar``.
@@ -600,7 +598,7 @@ it'd be ``user-contrib/orphan_Foo_Bar``.
 In this case, specify the ``-docroot`` option in _CoqProject to override
 the automatically selected logical root.
 
-.. _coqmakefilelocal:
+.. _rocqmakefilelocal:
 
 CoqMakefile.local
 +++++++++++++++++
@@ -623,8 +621,8 @@ section of the generated makefile. These include:
 :OCAMLWARN:
    it contains a default of ``-warn-error +a-3``, useful to modify
    this setting; beware this is not recommended for projects in
-   Coq's CI.
-:COQC, COQDEP, COQDOC:
+   Rocq's CI.
+:ROCQ, COQC, COQDEP, COQDOC:
    can be set in order to use alternative binaries
    (e.g. wrappers)
 :COQ_SRC_SUBDIRS:
@@ -633,23 +631,23 @@ section of the generated makefile. These include:
    lets you build a plugin containing OCaml code that depends on the
    OCaml code of ``Unicoq``
 :COQFLAGS:
-   override the flags passed to ``coqc``. By default ``-q``.
+   override the flags passed to ``rocq compile``. By default ``-q``.
 :COQEXTRAFLAGS:
-   extend the flags passed to ``coqc``
+   extend the flags passed to ``rocq compile``
 :COQCHKFLAGS:
-   override the flags passed to ``coqchk``.  By default ``-silent -o``.
+   override the flags passed to ``rocqchk``.  By default ``-silent -o``.
 :COQCHKEXTRAFLAGS:
-   extend the flags passed to ``coqchk``
+   extend the flags passed to ``rocqchk``
 :COQDOCFLAGS:
-   override the flags passed to ``coqdoc``. By default ``-interpolate -utf8``.
+   override the flags passed to ``rocq doc``. By default ``-interpolate -utf8``.
 :COQDOCEXTRAFLAGS:
-   extend the flags passed to ``coqdoc``
+   extend the flags passed to ``rocq doc``
 :COQLIBINSTALL, COQPLUGININSTALL, COQDOCINSTALL:
-   specify where the Coq libraries, plugins and documentation will be installed.
+   specify where the Rocq libraries, plugins and documentation will be installed.
    By default a combination of ``$(DESTDIR)`` (if defined) with
-   ``$(COQLIB)/user-contrib``, ``$(COQCORELIB)/..`` and ``$(DOCDIR)/coq/user-contrib``.
+   ``$(ROCQLIB)/user-contrib``, ``$(ROCQRUNTIMELIB)/..`` and ``$(DOCDIR)/coq/user-contrib``.
 
-Use :ref:`coqmakefilelocallate` instead to access more variables.
+Use :ref:`rocqmakefilelocallate` instead to access more variables.
 
 **Rule extension**
 
@@ -697,7 +695,7 @@ The following makefile rules can be extended.
   One can append lines to the generated ``.merlin`` file extending this
   target.
 
-.. _coqmakefilelocallate:
+.. _rocqmakefilelocallate:
 
 CoqMakefile.local-late
 ++++++++++++++++++++++
@@ -706,10 +704,10 @@ The optional file ``CoqMakefile.local-late`` is included at the end of the gener
 file ``CoqMakefile``.  The following is a partial list of accessible variables:
 
 :COQ_VERSION:
-   the version of ``coqc`` being used, which can be used to
-   provide different behavior depending on the Coq version
+   the version of ``rocq compile`` being used, which can be used to
+   provide different behavior depending on the Rocq version
 :COQMAKEFILE_VERSION:
-   the version of Coq used to generate the
+   the version of Rocq used to generate the
    Makefile, which can be used to detect version mismatches
 :ALLDFILES:
    the list of generated dependency files, which can be used,
@@ -726,16 +724,18 @@ variables are already accessible in recipes for rules added in
 ``CoqMakefile.local``, but are only accessible from top-level ``$(shell
 ...)`` invocations in ``CoqMakefile.local-late``:
 
-:COQC, COQDEP, COQDOC, CAMLC, CAMLOPTC:
+:ROCQ, COQC, COQDEP, COQDOC, CAMLC, CAMLOPTC:
    compiler binaries
 :COQFLAGS, CAMLFLAGS, COQLIBS, COQDEBUG, OCAMLLIBS:
-   flags passed to the Coq or OCaml compilers
+   flags passed to the Rocq or OCaml compilers
 
 Timing targets and performance testing
 ++++++++++++++++++++++++++++++++++++++
 
-The generated ``Makefile`` supports the generation of two kinds of timing
-data: per-file build-times, and per-line times for an individual file.
+The generated ``Makefile`` supports the generation of three kinds of
+timing data: per-file build-times, per-line times for individual
+files, and profiling data in Google trace format for individual
+files.
 
 The following targets and Makefile variables allow collection of per-
 file timing data:
@@ -756,11 +756,10 @@ file timing data:
 
        ::
 
-          COQDEP Fast.v
-          COQDEP Slow.v
-          COQC Slow.v
+          ROCQ DEP VFILES
+          ROCQ C Slow.v
           Slow.vo (user: 0.34 mem: 395448 ko)
-          COQC Fast.v
+          ROCQ C Fast.v
           Fast.vo (user: 0.01 mem: 45184 ko)
 
 + ``pretty-timed``
@@ -798,10 +797,10 @@ file timing data:
 
       ::
 
-        COQDEP VFILES
-        COQC Slow.v
+        ROCQ DEP VFILES
+        ROCQ C Slow.v
         Slow.vo (real: 0.52, user: 0.39, sys: 0.12, mem: 394648 ko)
-        COQC Fast.v
+        ROCQ C Fast.v
         Fast.vo (real: 0.06, user: 0.02, sys: 0.03, mem: 56980 ko)
             Time |  Peak Mem | File Name
         --------------------------------------------
@@ -875,7 +874,7 @@ line timing data:
 
 
 + ``TIMING=1``
-    passing this variable will cause ``make`` to use ``coqc -time`` to
+    passing this variable will cause ``make`` to use ``rocq c -time-file`` to
     write to a ``.v.timing`` file for each ``.v`` file compiled, which contains
     line-by-line timing information.
 
@@ -885,22 +884,22 @@ line timing data:
 
        ::
 
-          Chars 0 - 26 [Require~Coq.ZArith.BinInt.] 0.157 secs (0.128u,0.028s)
+          Chars 0 - 26 [Require~Stdlib.ZArith.BinInt.] 0.157 secs (0.128u,0.028s)
           Chars 27 - 68 [Declare~Reduction~comp~:=~vm_c...] 0. secs (0.u,0.s)
           Chars 69 - 162 [Definition~foo0~:=~Eval~comp~i...] 0.153 secs (0.136u,0.019s)
           Chars 163 - 208 [Definition~foo1~:=~Eval~comp~i...] 0.239 secs (0.236u,0.s)
 
-+ ``coqtimelog2html``
++ ``rocq timelog2html``
     ::
 
-       coqtimelog2html file.v file.v.time1 [file.v.time2 [file.v.time3]] > file.v.html
+       rocq timelog2html file.v file.v.time1 [file.v.time2 [file.v.time3]] > file.v.html
 
     this command produces a HTML file displaying the original `file.v`
     with highlights for each command indicating how much time the
     command used according to the given timing files. It supports
     between 1 and 3 timing files.
 
-    There is currently no `coq_makefile` target that automatically invokes this tool.
+    There is currently no `rocq makefile` target that automatically invokes this tool.
 
 + ``print-pretty-single-time-diff``
     ::
@@ -953,7 +952,7 @@ line timing data:
           0m00.50s  | Total                                               | 0m04.17s  || -0m03.66s | -87.96%
           ---------------------------------------------------------------------------------------------------
           0m00.145s | Chars 069 - 162 [Definition~foo0~:=~Eval~comp~i...] | 0m00.192s || -0m00.04s | -24.47%
-          0m00.126s | Chars 000 - 026 [Require~Coq.ZArith.BinInt.]        | 0m00.143s || -0m00.01s | -11.88%
+          0m00.126s | Chars 000 - 026 [Require~Stdlib.ZArith.BinInt.]     | 0m00.143s || -0m00.01s | -11.88%
              N/A    | Chars 027 - 068 [Declare~Reduction~comp~:=~nati...] | 0m00.s    || +0m00.00s | N/A
           0m00.s    | Chars 027 - 068 [Declare~Reduction~comp~:=~vm_c...] |    N/A    || +0m00.00s | N/A
           0m00.231s | Chars 163 - 208 [Definition~foo1~:=~Eval~comp~i...] | 0m03.836s || -0m03.60s | -93.97%
@@ -972,26 +971,28 @@ line timing data:
     .. note::
       This target requires python to build the table.
 
++ ``PROFILE=1``
+  passing this variable or setting it in the environment will cause
+  ``make`` to use ``rocq c -profile`` to write to a ``.v.prof.json``
+  file for each ``.v`` file compiled, which contains :ref:`profiling`
+  information.
+
+  The ``.v.prof.json`` is then compressed by ``gzip`` to a ``.v.prof.json.gz``.
 
 Building a subset of the targets with ``-j``
 ++++++++++++++++++++++++++++++++++++++++++++
 
 To build, say, two targets foo.vo and bar.vo in parallel one can use
-``make only TGTS="foo.vo bar.vo" -j``.
-
-.. note::
-
-  ``make foo.vo bar.vo -j`` has a different meaning for the ``make``
-  utility, in particular it may build a shared prerequisite twice.
+``make only TGTS="foo.vo bar.vo" -j`` or ``make foo.vo bar.vo``.
 
 Precompiling for ``native_compute``
 +++++++++++++++++++++++++++++++++++
 
 To compile files for ``native_compute``, one can use the
-``-native-compiler yes`` option of Coq, by putting it in the ``_CoqProject``
+``-native-compiler yes`` option of Rocq, by putting it in the ``_CoqProject``
 file.
 
-The generated installation target of ``CoqMakefile`` will then take care of
+The generated installation target of ``rocq makefile`` will then take care of
 installing the extra ``.coq-native`` directories.
 
 .. note::
@@ -1004,7 +1005,7 @@ installing the extra ``.coq-native`` directories.
       COQEXTRAFLAGS="-native-compiler yes" make
 
    This can be useful when files cannot be modified, for instance when
-   installing via OPAM a package built with ``coq_makefile``:
+   installing via OPAM a package built with ``rocq makefile``:
 
    ::
 
@@ -1039,49 +1040,49 @@ The parser produces a list of strings in the same order as they were
 encountered in ``_CoqProject``. Blanks and comments are removed
 and the double quotes of :n:`@quoted_string` tokens are removed as
 well. The list is then treated as a list of command-line arguments of
-``coq_makefile``.
+``rocq makefile``.
 
 The semantics of ``-arg`` are as follows: the string given as argument is split
 on whitespace, but single quotes prevent splitting. The resulting list of
-strings is then passed to coqc.
+strings is then passed to `rocq compile`.
 
 The current approach has a few limitations: Double quotes in a ``_CoqProject``
 file are only special characters at the start of a string. For lack of an
 escaping mechanism, it is currently impossible to pass the following kinds of
-strings to ``coq_makefile`` using a ``_CoqProject`` file:
+strings to ``rocq makefile`` using a ``_CoqProject`` file:
 
 * strings starting with ``"``
 * strings starting with ``#`` and containing ``"``
 * strings containing both whitespace and ``"``
 
-In addition, it is impossible to pass strings containing ``'`` to coqc via
+In addition, it is impossible to pass strings containing ``'`` to `rocq compile` via
 ``-arg``.
 
 .. _building_dune:
 
-Building a Coq project with Dune
---------------------------------
+Building a Rocq project with Dune
+---------------------------------
 
-Dune, the standard OCaml build tool, has supported building Coq libraries since version 1.9.
+Dune, the standard OCaml build tool, has supported building Rocq libraries since version 1.9.
 
 .. note::
 
-   Dune's Coq support is still experimental; we strongly recommend
+   Dune's Rocq support is still experimental; we strongly recommend
    using Dune 3.2 or later.
 
 .. note::
 
-   The canonical documentation for the Coq Dune extension is
+   The canonical documentation for the Rocq Dune extension is
    maintained upstream; please refer to the `Dune manual
    <https://dune.readthedocs.io/>`_ for up-to-date information. The
    documentation below is up to date for Dune 3.2
 
-Building a Coq project with Dune requires setting up a Dune project
+Building a Rocq project with Dune requires setting up a Dune project
 for your files. This involves adding a ``dune-project`` and
 ``pkg.opam`` file to the root (``pkg.opam`` can be empty or generated
 by Dune itself), and then providing ``dune`` files in the directories
 your ``.v`` files are placed. For the experimental version "0.3" of
-the Coq Dune language, Coq library stanzas look like:
+the Coq Dune language, Rocq library stanzas look like:
 
 .. code:: scheme
 
@@ -1098,12 +1099,12 @@ the library under ``<module_prefix>``. If you declare an
 ``<opam_package>``, an ``.install`` file for the library will be
 generated; the optional ``(modules <ordered_set_lang>)`` field allows
 you to filter the list of modules, and ``(libraries
-<ocaml_libraries>)`` allows the Coq theory depend on ML plugins. For
-the moment, Dune relies on Coq's standard mechanisms (such as
-``COQPATH``) to locate installed Coq libraries.
+<ocaml_libraries>)`` allows the Rocq theory depend on ML plugins. For
+the moment, Dune relies on Rocq's standard mechanisms (such as
+``ROCQPATH``) to locate installed Rocq libraries.
 
 By default Dune will skip ``.v`` files present in subdirectories. In
-order to enable the usual recursive organization of Coq projects add
+order to enable the usual recursive organization of Rocq projects add
 
 .. code:: scheme
 
@@ -1120,7 +1121,7 @@ syntax for `Declare ML Module`, see example below:
 
 .. example::
 
-   A typical stanza for a Coq plugin is split into two parts. An OCaml build directive, which is standard Dune:
+   A typical stanza for a Rocq plugin is split into two parts. An OCaml build directive, which is standard Dune:
 
    .. code:: scheme
 
@@ -1132,7 +1133,7 @@ syntax for `Declare ML Module`, see example below:
 
        (coq.pp (modules g_equations))
 
-   And a Coq-specific part that depends on it via the ``libraries`` field:
+   And a Rocq-specific part that depends on it via the ``libraries`` field:
 
    .. code:: scheme
 
@@ -1153,107 +1154,109 @@ syntax for `Declare ML Module`, see example below:
 
        Declare ML Module "equations_plugin:equations.plugin".
 
-.. _coqdep:
+.. _rocqdep:
 
-coqdep: Computing Module dependencies
--------------------------------------
+rocq dep: Computing Module dependencies
+---------------------------------------
 
 In order to compute module dependencies (to be used by ``make`` or
-``dune``), Coq provides the ``coqdep`` tool.
+``dune``), Rocq provides the ``rocq dep`` tool.
 
-``coqdep`` computes inter-module dependencies for Coq
+``rocq dep`` computes inter-module dependencies for Rocq
 programs, and prints the dependencies on the standard output in a
 format readable by make. When a directory is given as argument, it is
 recursively looked at.
 
-Dependencies of Coq modules are computed by looking at :cmd:`Require`
+Dependencies of Rocq modules are computed by looking at :cmd:`Require`
 and :cmd:`Declare ML Module` commands.
 
-See the man page of ``coqdep`` for more details and options.
+See the man page of ``rocq dep`` for more details and options.
 
-Both Dune and ``coq_makefile`` use ``coqdep`` to compute the
-dependencies among the files part of a Coq project.
+Both Dune and ``rocq makefile`` use ``rocq dep`` to compute the
+dependencies among the files part of a Rocq project.
 
-.. _coqnative:
+.. _rocqnative:
 
 Split compilation of native computation files
 ---------------------------------------------
 
-Coq features a :tacn:`native_compute` tactic to provide fast computation in the
-kernel. This process performs compilation of Coq terms to OCaml programs using
+Rocq features a :tacn:`native_compute` tactic to provide fast computation in the
+kernel. This process performs compilation of Rocq terms to OCaml programs using
 the OCaml compiler, which may cause an important overhead. Hence native
 compilation is an opt-in configure flag.
 
-When native compilation is activated, Coq generates the compiled files upfront,
-i.e. during the ``coqc`` invocation on the corresponding ``.v`` file. This is
+When native compilation is activated, Rocq generates the compiled files upfront,
+i.e. during the ``rocq compile`` invocation on the corresponding ``.v`` file. This is
 impractical because it means one must chose in advance whether they will use
-a native-capable Coq installation. In particular, activating native compilation
-forces the recompilation of the whole Coq installation. See
+a native-capable Rocq installation. In particular, activating native compilation
+forces the recompilation of the whole Rocq installation. See
 :ref:`command line options <command-line-options>` for more details.
 
-Starting from Coq 8.14, a new binary ``coqnative`` is available. It allows
+A command ``rocq native-precompile`` is available. It allows
 performing split native compilation by generating the native compute files out
 of the compiled ``.vo`` file rather than out of the source ``.v`` file.
 
-The ``coqnative`` command takes a name *file.vo* as argument and tries to
-perform native compilation on it. It assumes that the Coq libraries on which
+The ``rocq native-precompile`` command takes a name *file.vo* as argument and tries to
+perform native compilation on it. It assumes that the Rocq libraries on which
 *file.vo* depends have been first compiled to their native files, and will fail
 otherwise. It accepts the ``-R``, ``-Q``, ``-I`` and ``-nI`` arguments with the
 same semantics as if the native compilation process had been performed through
-``coqc``. In particular, it means that:
+``rocq compile``. In particular, it means that:
 
 + ``-R`` and ``-Q`` are equivalent
 
 + ``-I`` is a no-op that is accepted only for scripting convenience
 
-Using Coq as a library
+Using Rocq as a library
 ------------------------
 
-In previous versions, ``coqmktop`` was used to build custom
-toplevels - for example for better debugging or custom static
-linking. Nowadays, the preferred method is to use ``ocamlfind``.
+It is possible to build custom Rocq executables - for example for
+better debugging or custom static linking.
 
-The most basic custom toplevel is built using:
-
-::
-
-   % ocamlfind ocamlopt -thread -linkall -linkpkg \
-                 -package coq.toplevel \
-                 topbin/coqtop_bin.ml -o my_toplevel.native
-
-
-For example, to statically link |Ltac|, you can just do:
+The preferred method is to use ``dune``:
 
 ::
 
-   % ocamlfind ocamlopt -thread -linkall -linkpkg \
-                 -package coq.toplevel,coq.plugins.ltac \
-                 topbin/coqtop_bin.ml -o my_toplevel.native
+   (executable
+    (name my_toplevel)
+    (libraries rocq-runtime.toplevel))
+
+in a directory with `my_toplevel.ml` containing the main loop entry
+point `Coqc.main()` or `Coqtop.(start_coq coqtop_toplevel)` (depending
+on if you want `rocq compile` or `rocq repl` behaviour).
+
+For example, to statically link |Ltac|, you can do:
+
+::
+
+   (executable
+    (name my_toplevel)
+    (libraries rocq-runtime.toplevel rocq-runtime.plugins.ltac))
 
 and similarly for other plugins.
 
-Embedded Coq phrases inside |Latex| documents
+Embedded Rocq phrases inside |Latex| documents
 -----------------------------------------------
 
 When writing documentation about a proof development, one may want
-to insert Coq phrases inside a |Latex| document, possibly together
+to insert Rocq phrases inside a |Latex| document, possibly together
 with the corresponding answers of the system. We provide a mechanical
-way to process such Coq phrases embedded in |Latex| files: the ``coq-tex``
-filter. This filter extracts Coq phrases embedded in |Latex| files,
+way to process such Rocq phrases embedded in |Latex| files: the ``rocq tex``
+filter. This filter extracts Rocq phrases embedded in |Latex| files,
 evaluates them, and insert the outcome of the evaluation after each
 phrase.
 
-Starting with a file ``file.tex`` containing Coq phrases, the ``coq-tex``
-filter produces a file named ``file.v.tex`` with the Coq outcome.
+Starting with a file ``file.tex`` containing Rocq phrases, the ``rocq tex``
+filter produces a file named ``file.v.tex`` with the Rocq outcome.
 
-There are options to produce the Coq parts in smaller font, italic,
-between horizontal rules, etc. See the man page of ``coq-tex`` for more
+There are options to produce the Rocq parts in smaller font, italic,
+between horizontal rules, etc. See the man page of ``rocq tex`` for more
 details.
 
 
 Man pages
 ---------
 
-There are man pages for the commands ``coqdep`` and ``coq-tex``. Man
+There are man pages for the commands ``rocq dep`` and ``rocq tex``. Man
 pages are installed at installation time (see installation
 instructions in file ``INSTALL``, step 6).

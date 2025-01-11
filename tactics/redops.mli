@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -17,4 +17,4 @@ val all_flags : 'a glob_red_flag
 (** Mapping [red_expr_gen] *)
 
 val map_red_expr_gen : ('a -> 'd) -> ('b -> 'e) -> ('c -> 'f) ->
-  ('a,'b,'c) red_expr_gen -> ('d,'e,'f) red_expr_gen
+  ('a,'b,'c,'occvar) red_expr_gen -> ('d,'e,'f,'occvar) red_expr_gen

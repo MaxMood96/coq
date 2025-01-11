@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -304,7 +304,7 @@ object(self)
 
 end
 
-class script_view (tv : source_view) (ct : Coq.coqtop) =
+class script_view (tv : source_view) (ct : RocqDriver.rocqtop) =
 
 let view = new GSourceView3.source_view (Gobject.unsafe_cast tv) in
 let provider = new Wg_Completion.completion_provider view#buffer ct in
@@ -360,6 +360,10 @@ object (self)
       conv = Gobject.Data.boolean;
     } in
     Gobject.set prop obj show
+
+  method select_all () =
+    if self#is_focus then
+      self#buffer#select_range self#buffer#start_iter self#buffer#end_iter;
 
   method comment () =
     let rec get_line_start iter =

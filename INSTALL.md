@@ -18,9 +18,11 @@ Build Requirements
 To compile Coq yourself, you need:
 
 - [OCaml](https://ocaml.org/) (version >= 4.09.0)
-  (This version of Coq has been tested up to OCaml 4.14.0)
+  (This version of Coq has been tested up to OCaml 4.14.1, for the 4.x series)
 
-- The [Dune OCaml build system](https://github.com/ocaml/dune/) >= 2.9.1
+  Support for OCaml 5.x remains experimental.
+
+- The [Dune OCaml build system](https://github.com/ocaml/dune/) >= 3.8
 
 - The [ZArith library](https://github.com/ocaml/Zarith) >= 1.11
 
@@ -60,7 +62,7 @@ CoqIDE with:
 Opam (https://opam.ocaml.org/) is recommended to install OCaml and
 the corresponding packages.
 
-    $ opam switch create coq --packages="ocaml-variants.4.12.0+options,ocaml-option-flambda"
+    $ opam switch create coq --packages="ocaml-variants.4.14.1+options,ocaml-option-flambda"
     $ eval $(opam env)
     $ opam install dune ocamlfind zarith lablgtk3-sourceview3
 
@@ -89,8 +91,8 @@ To build and install Coq (and CoqIDE if desired) do:
 
     $ ./configure -prefix <install_prefix> $options
     $ make dunestrap
-    $ dune build -p coq-core,coq-stdlib,coq,coqide-server,coqide
-    $ dune install --prefix=<install_prefix> coq-core coq-stdlib coq coqide-server coqide
+    $ dune build -p rocq-runtime,coq-core,rocq-core,coq,coqide-server,coqide
+    $ dune install --prefix=<install_prefix> rocq-runtime coq-core rocq-core coq coqide-server coqide
 
 You can drop the `coqide` packages if not needed.
 
@@ -112,18 +114,10 @@ implementation mismatch on ...`.
 
 coq_environment.txt
 -------------------
-Coq binaries which honor environment variables, such as `COQLIB`, can
+Coq binaries which honor environment variables, such as `ROCQLIB`, can
 be seeded values for these variables by placing a text file named
 `coq_environment.txt` next to them. The file can contain assignments
-like `COQLIB="some path"`, that is a variable name followed by `=` and
+like `ROCQLIB="some path"`, that is a variable name followed by `=` and
 a string that follows OCaml's escaping conventions. This feature can be
 used by installers of binary package to make Coq aware of its installation
 path.
-
-Known problems
---------------
-
-- On OSX, when using Opam with sandboxing and Dune < 3.0 with caching
-  enabled, Coq may fail to install, due to Opam's sandboxing
-  restricting the permissions needed for the Dune 2.x caching
-  daemon. See https://github.com/coq/coq/issues/15138 more details.

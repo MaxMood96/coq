@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -13,8 +13,8 @@ open Libnames
 open Miniml
 open Declarations
 
-module Refset' : CSig.SetS with type elt = GlobRef.t
-module Refmap' : CSig.MapS with type key = GlobRef.t
+module Refset' : CSig.USetS with type elt = GlobRef.t
+module Refmap' : CSig.UMapS with type key = GlobRef.t
 
 val safe_basename_of_global : GlobRef.t -> Id.t
 
@@ -30,12 +30,11 @@ val error_inductive : ?loc:Loc.t -> GlobRef.t -> 'a
 val error_nb_cons : unit -> 'a
 val error_module_clash : ModPath.t -> ModPath.t -> 'a
 val error_no_module_expr : ModPath.t -> 'a
-val error_singleton_become_prop : Id.t -> GlobRef.t option -> 'a
+val error_singleton_become_prop : inductive -> 'a
 val error_unknown_module : ?loc:Loc.t -> qualid -> 'a
 val error_scheme : unit -> 'a
 val error_not_visible : GlobRef.t -> 'a
 val error_MPfile_as_mod : ModPath.t -> bool -> 'a
-val check_inside_module : unit -> unit
 val check_inside_section : unit -> unit
 val check_loaded_modfile : ModPath.t -> unit
 val msg_of_implicit : kill_reason -> string
@@ -100,11 +99,17 @@ val projection_info : GlobRef.t -> inductive * int (* arity *)
 val add_info_axiom : GlobRef.t -> unit
 val remove_info_axiom : GlobRef.t -> unit
 val add_log_axiom : GlobRef.t -> unit
+val add_symbol : GlobRef.t -> unit
+val add_symbol_rule : GlobRef.t -> Label.t -> unit
 
 val add_opaque : GlobRef.t -> unit
 val remove_opaque : GlobRef.t -> unit
 
 val reset_tables : unit -> unit
+
+(*s Output Directory parameter *)
+
+val output_directory : unit -> string
 
 (*s AccessOpaque parameter *)
 
@@ -185,6 +190,8 @@ val type_scheme_nb_args_hook : (Environ.env -> Constr.t -> int) Hook.t
 
 val is_custom : GlobRef.t -> bool
 val is_inline_custom : GlobRef.t -> bool
+val is_foreign_custom : GlobRef.t -> bool
+val find_callback : GlobRef.t -> string option
 val find_custom : GlobRef.t -> string
 val find_type_custom : GlobRef.t -> string list * string
 
@@ -196,9 +203,16 @@ val find_custom_match : ml_branch array -> string
 val extraction_language : lang -> unit
 val extraction_inline : bool -> qualid list -> unit
 val print_extraction_inline : unit -> Pp.t
+val print_extraction_foreign : unit -> Pp.t
+val print_extraction_callback : unit -> Pp.t
 val reset_extraction_inline : unit -> unit
+val reset_extraction_foreign : unit -> unit
+val reset_extraction_callback : unit -> unit
+val extract_callback : string option -> qualid -> unit
 val extract_constant_inline :
   bool -> qualid -> string list -> string -> unit
+val extract_constant_foreign :
+  qualid -> string -> unit
 val extract_inductive :
   qualid -> string -> string list -> string option -> unit
 

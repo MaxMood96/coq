@@ -17,13 +17,17 @@ homepage: "https://coq.inria.fr/"
 doc: "https://coq.github.io/doc/"
 bug-reports: "https://github.com/coq/coq/issues"
 depends: [
-  "dune" {>= "2.9"}
+  "dune" {>= "3.8"}
+  "ocamlfind" {build}
+  "conf-findutils" {build}
+  "conf-adwaita-icon-theme"
   "coqide-server" {= version}
-  "lablgtk3-sourceview3" {>= "3.1.2"}
+  "cairo2" {>= "0.6.4"}
+  "lablgtk3-sourceview3" {>= "3.1.2" & (>= "3.1.5" | os != "windows")}
+  "odoc" {with-doc}
 ]
 build: [
-  # Requires dune 2.8 due to https://github.com/ocaml/dune/issues/3219
-  # ["dune" "subst"] {pinned}
+  ["dune" "subst"] {dev}
   [
     "dune"
     "build"

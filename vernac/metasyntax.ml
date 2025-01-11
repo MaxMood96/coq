@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -27,27 +27,27 @@ open Libnames
 open Notation
 open Nameops
 
-(**********************************************************************)
-(* Printing grammar entries                                           *)
+(** **************************************************************** **)
+(** Printing grammar entries                                         **)
 
 let entry_buf = Buffer.create 64
 
 let pr_entry e =
   let () = Buffer.clear entry_buf in
   let ft = Format.formatter_of_buffer entry_buf in
-  let () = Pcoq.Entry.print ft e in
+  let () = Procq.Entry.print ft e in
   str (Buffer.contents entry_buf)
 
 let error_unknown_entry ?loc name =
   user_err ?loc Pp.(str "Unknown or unprintable grammar entry " ++ str name ++ str".")
 
 let pr_registered_grammar name =
-  let gram = Pcoq.find_grammars_by_name name in
+  let gram = Procq.find_grammars_by_name name in
   match gram with
   | [] -> error_unknown_entry name
   | entries ->
-    let pr_one (Pcoq.Entry.Any e) =
-      str "Entry " ++ str (Pcoq.Entry.name e) ++ str " is" ++ fnl () ++
+    let pr_one (Procq.Entry.Any e) =
+      str "Entry " ++ str (Procq.Entry.name e) ++ str " is" ++ fnl () ++
       pr_entry e
     in
     prlist pr_one entries
@@ -58,19 +58,19 @@ let pr_grammar_subset grammar =
       | entries ->
         str "Entry " ++ str name ++ str " is" ++ fnl() ++
         prlist_with_sep (fun () -> str "or" ++ fnl())
-          (fun (Pcoq.Entry.Any e) -> pr_entry e)
+          (fun (Procq.Entry.Any e) -> pr_entry e)
           entries)
       grammar
   in
   let pp = CString.Map.bindings pp in
   prlist_with_sep fnl (fun (_,pp) -> pp) pp
 
-let is_known = let open Pcoq.Entry in function
+let is_known = let open Procq.Entry in function
   | "constr" | "term" | "binder_constr" ->
-    Some [ Any Pcoq.Constr.constr;
-      Any Pcoq.Constr.lconstr;
-      Any Pcoq.Constr.binder_constr;
-      Any Pcoq.Constr.term;
+    Some [ Any Procq.Constr.constr;
+      Any Procq.Constr.lconstr;
+      Any Procq.Constr.binder_constr;
+      Any Procq.Constr.term;
     ]
   | "vernac" ->
     Some Pvernac.Vernac_.[
@@ -83,14 +83,21 @@ let is_known = let open Pcoq.Entry in function
         Any gallina_ext;
     ]
   | name ->
-    let gram = Pcoq.find_grammars_by_name name in
+    let gram = Procq.find_grammars_by_name name in
     match gram with
     | [] -> None
     | entries -> Some entries
 
-let full_grammar () = Pcoq.Entry.accumulate_in Pvernac.Vernac_.vernac_control
+let full_grammar () =
+  let open Pvernac.Vernac_ in
+  let open Procq.Entry in
+  let proof_modes = List.map (fun (_,e) -> Any e)
+      (CString.Map.bindings (Pvernac.list_proof_modes()))
+  in
+  let entries = (Any vernac_control) :: (Any noedit_mode) :: proof_modes in
+  Procq.Entry.accumulate_in entries
 
-let same_entry (Pcoq.Entry.Any e) (Pcoq.Entry.Any e') = (Obj.magic e) == (Obj.magic e')
+let same_entry (Procq.Entry.Any e) (Procq.Entry.Any e') = (Obj.magic e) == (Obj.magic e')
 
 let pr_grammar = function
   | [] ->
@@ -112,8 +119,8 @@ let pr_grammar = function
     in
     let other = String.Set.of_list other in
     let grammar = String.Map.filter (fun name _ -> String.Set.mem name other) grammar in
-    let grammar = List.fold_left (fun grammar (Pcoq.Entry.Any e as any) ->
-        String.Map.update (Pcoq.Entry.name e) (function
+    let grammar = List.fold_left (fun grammar (Procq.Entry.Any e as any) ->
+        String.Map.update (Procq.Entry.name e) (function
             | None -> Some [any]
             | Some vl as v ->
               if List.mem_f same_entry any vl
@@ -126,11 +133,11 @@ let pr_grammar = function
 let pr_custom_grammar name = pr_registered_grammar ("custom:"^name)
 
 let pr_keywords () =
-  Pp.prlist_with_sep Pp.fnl Pp.str (CString.Set.elements (CLexer.keywords (Pcoq.get_keyword_state())))
+  Pp.prlist_with_sep Pp.fnl Pp.str (CString.Set.elements (CLexer.keywords (Procq.get_keyword_state())))
 
-(**********************************************************************)
-(* Parse a format (every terminal starting with a letter or a single
-   quote (except a single quote alone) must be quoted) *)
+(** **************************************************************** **)
+(** Parse a format (every terminal starting with a letter or a single
+    quote (except a single quote alone) must be quoted) **)
 
 let parse_format ({CAst.loc;v=str} : lstring) =
   let len = String.length str in
@@ -232,8 +239,8 @@ let parse_format ({CAst.loc;v=str} : lstring) =
   else
     []
 
-(***********************)
-(* Analyzing notations *)
+(** **************************************************************** **)
+(** Analyzing notations                                              **)
 
 (* Find non-terminal tokens of notation *)
 
@@ -243,13 +250,6 @@ let quote_notation_token x =
   let norm = CLexer.is_ident x in
   if (n > 0 && norm) || (n > 2 && x.[0] == '\'') then "'"^x^"'"
   else x
-
-let is_numeral_in_constr entry symbs =
-  match entry, List.filter (function Break _ -> false | _ -> true) symbs with
-  | InConstrEntry, ([Terminal "-"; Terminal x] | [Terminal x]) ->
-      NumTok.Unsigned.parse_string x <> None
-  | _ ->
-      false
 
 let analyze_notation_tokens ~onlyprinting ~infix entry df =
   let df = if infix then quote_notation_token df else df in
@@ -261,8 +261,8 @@ let analyze_notation_tokens ~onlyprinting ~infix entry df =
         user_err
           (str "Variable " ++ Id.print id ++ str " occurs more than once.")
     | _ -> ());
-  let isnumeral = is_numeral_in_constr entry symbols in
-  res, isnumeral
+  let is_prim_token = is_prim_token_constant_in_constr (entry, symbols) in
+  res, is_prim_token
 
 let adjust_symbols vars notation_symbols =
   let x = Namegen.next_ident_away (Id.of_string "x") vars in
@@ -289,7 +289,7 @@ let adjust_infix_notation df notation_symbols c =
 
 let warn_unexpected_primitive_token_modifier =
   CWarnings.create ~name:"primitive-token-modifier" ~category:CWarnings.CoreCategories.parsing
-         (fun () -> str "Notations for numbers are primitive; skipping this modifier.")
+         (fun () -> str "Notations for numbers or strings are primitive; skipping this modifier.")
 
 let check_no_syntax_modifiers_for_numeral = function
   | [] -> ()
@@ -299,30 +299,36 @@ let error_not_same_scope x y =
   user_err
     (str "Variables " ++ Id.print x ++ str " and " ++ Id.print y ++ str " must be in the same scope.")
 
-(**********************************************************************)
-(* Build pretty-printing rules                                        *)
+(** **************************************************************** **)
+(** Build pretty-printing rules                                      **)
 
 let pr_notation_entry = function
   | InConstrEntry -> str "constr"
   | InCustomEntry s -> str "custom " ++ str s
 
+let side = function
+  | BorderProd (b,_) -> Some b
+  | _ -> None
+
 let precedence_of_position_and_level from_level = function
   | NumLevel n, BorderProd (b,Some a) ->
-    (let open Gramlib.Gramext in
+    let prec =
+     let open Gramlib.Gramext in
      match a, b with
      | RightA, Left -> LevelLt n
      | RightA, Right -> LevelLe n
      | LeftA, Left -> LevelLe n
      | LeftA, Right -> LevelLt n
-     | NonA, _ -> LevelLt n), Some b
-  | NumLevel n, _ -> LevelLe n, None
-  | NextLevel, _ -> LevelLt from_level, None
-  | DefaultLevel, _ -> LevelSome, None
+     | NonA, _ -> LevelLt n in
+    {notation_subentry = InConstrEntry; notation_relative_level = prec; notation_position = Some b}
+  | NumLevel n, b -> {notation_subentry = InConstrEntry; notation_relative_level = LevelLe n; notation_position = side b}
+  | NextLevel, b -> {notation_subentry = InConstrEntry; notation_relative_level = LevelLt from_level; notation_position = side b}
+  | DefaultLevel, b -> {notation_subentry = InConstrEntry; notation_relative_level = LevelSome; notation_position = side b}
 
 (** Computing precedences of non-terminals for parsing *)
-let precedence_of_entry_type (from_custom,from_level) = function
+let precedence_of_entry_type { notation_entry = from_custom; notation_level = from_level } = function
   | ETConstr (custom,_,x) when notation_entry_eq custom from_custom ->
-    fst (precedence_of_position_and_level from_level x)
+    (precedence_of_position_and_level from_level x).notation_relative_level
   | ETConstr (custom,_,(NumLevel n,_)) -> LevelLe n
   | ETConstr (custom,_,(NextLevel,_)) ->
     user_err (strbrk "\"next level\" is only for sub-expressions in the same entry as where the notation is (" ++
@@ -341,13 +347,17 @@ let unparsing_precedence_of_entry_type from_level = function
        with precedence in a constr entry is managed using [prec_less]
        in [ppconstr.ml] *)
     precedence_of_position_and_level from_level x
-  | ETConstr (custom,_,_) ->
+  | ETConstr (custom,_,(_,b)) ->
     (* Precedence of printing for a custom entry is managed using
        explicit insertion of entry coercions at the time of building
        a [constr_expr] *)
-    LevelSome, None
-  | ETPattern (_,n) -> (* in constr *) LevelLe (pattern_entry_level n), None
-  | _ -> LevelSome, None (* should not matter *)
+    {notation_subentry = custom; notation_relative_level = LevelSome; notation_position = side b}
+  | ETPattern (_,n) -> (* in constr *)
+    {notation_subentry = InConstrEntry; notation_relative_level = LevelLe (pattern_entry_level n); notation_position = None}
+  | _ -> (* should not matter *)
+    {notation_subentry = InConstrEntry; notation_relative_level = LevelSome; notation_position = None}
+
+(** Utilities for building default printing rules *)
 
 (* Some breaking examples *)
 (* "x = y" : "x /1 = y" (breaks before any symbol) *)
@@ -414,16 +424,16 @@ let check_open_binder isopen sl m =
 
 let unparsing_metavar i from typs =
   let x = List.nth typs (i-1) in
-  let prec,side = unparsing_precedence_of_entry_type from x in
+  let subentry = unparsing_precedence_of_entry_type from x in
   match x with
   | ETConstr _ | ETGlobal | ETBigint ->
-     UnpMetaVar (prec,side)
+     UnpMetaVar subentry
   | ETPattern _ | ETName | ETIdent ->
-     UnpBinderMetaVar (prec,NotQuotedPattern)
+     UnpBinderMetaVar (subentry,NotQuotedPattern)
   | ETBinder isopen ->
-     UnpBinderMetaVar (prec,QuotedPattern)
+     UnpBinderMetaVar (subentry,QuotedPattern)
 
-(* Heuristics for building default printing rules *)
+(** Heuristics for building default printing rules *)
 
 let index_id id l = List.index Id.equal id l
 
@@ -466,14 +476,14 @@ let make_hunks etyps symbols from_level =
     | SProdList (m,sl) :: prods ->
         let i = index_id m vars in
         let typ = List.nth typs (i-1) in
-        let prec,side = unparsing_precedence_of_entry_type from_level typ in
+        let subentry = unparsing_precedence_of_entry_type from_level typ in
         let sl' =
           (* If no separator: add a break *)
           if List.is_empty sl then add_break 1 []
           (* We add NonTerminal for simulation but remove it afterwards *)
           else make true sl in
         let hunk = match typ with
-          | ETConstr _ -> UnpListMetaVar (prec,List.map snd sl',side)
+          | ETConstr _ -> UnpListMetaVar (subentry,List.map snd sl')
           | ETBinder isopen ->
               check_open_binder isopen sl m;
               UnpBinderListMetaVar (isopen,true,List.map snd sl')
@@ -510,7 +520,7 @@ let make_hunks etyps symbols from_level =
 
   in make false symbols
 
-(* Build default printing rules from explicit format *)
+(** Build default printing rules from explicit format *)
 
 let error_format ?loc () = user_err ?loc Pp.(str "The format does not match the notation.")
 
@@ -613,13 +623,13 @@ let hunks_of_format (from_level,(vars,typs)) symfmt =
   | SProdList (m,sl) :: symbs, fmt when has_ldots fmt ->
       let i = index_id m vars in
       let typ = List.nth typs (i-1) in
-      let prec,side = unparsing_precedence_of_entry_type from_level typ in
+      let subentry = unparsing_precedence_of_entry_type from_level typ in
       let loc_slfmt,rfmt = read_recursive_format sl fmt in
       let sl, slfmt = aux (sl,loc_slfmt) in
       if not (List.is_empty sl) then error_format ?loc:(find_prod_list_loc loc_slfmt fmt) ();
       let symbs, l = aux (symbs,rfmt) in
       let hunk = match typ with
-        | ETConstr _ -> UnpListMetaVar (prec,slfmt,side)
+        | ETConstr _ -> UnpListMetaVar (subentry,slfmt)
         | ETBinder isopen ->
             check_open_binder isopen sl m;
             UnpBinderListMetaVar (isopen,true,slfmt)
@@ -641,10 +651,10 @@ let hunks_of_format (from_level,(vars,typs)) symfmt =
   | [], l -> l
   | _ -> error_format ()
 
-(**********************************************************************)
-(* Build parsing rules                                                *)
+(** **************************************************************** **)
+(** Build parsing rules                                              **)
 
-let assoc_of_type from n (_,typ) = precedence_of_entry_type (from,n) typ
+let assoc_of_type from n (_,typ) = precedence_of_entry_type {notation_entry = from; notation_level = n} typ
 
 let is_not_small_constr = function
     ETProdConstr _ -> true
@@ -708,7 +718,7 @@ let prod_entry_type = function
 
 let keyword_needed need s =
   (* Ensure that IDENT articulation terminal symbols are keywords *)
-  match Pcoq.terminal s with
+  match Procq.terminal s with
   | Tok.PIDENT (Some k) ->
     if need then
       Flags.if_verbose Feedback.msg_info (str "Identifier '" ++ str k ++ str "' now a keyword");
@@ -719,9 +729,15 @@ let keyword_needed need s =
     if need then
       Flags.if_verbose Feedback.msg_info (str "Number '" ++ NumTok.Unsigned.print n ++ str "' now a keyword");
     need
+  | None ->
+  match String.unquote_coq_string s with
+  | Some _ ->
+    if need then
+      Flags.if_verbose Feedback.msg_info (str "String '" ++ str s ++ str "' now a keyword");
+    need
   | _ -> true
 
-let make_production (_,lev,_) etyps symbols =
+let make_production ({notation_level = lev}, _) etyps symbols =
   let rec aux need = function
     | [] -> [[]]
     | NonTerminal m :: l ->
@@ -782,8 +798,9 @@ let recompute_assoc typs = let open Gramlib.Gramext in
     | _, Some RightA -> Some RightA
     | _ -> None
 
-(**************************************************************************)
-(* Registration of syntax extensions (parsing/printing, no interpretation)*)
+(** ******************************************************************** **)
+(** Registration of syntax extensions                                    **)
+(** (parsing/printing, no interpretation)                                **)
 
 let pr_arg_level from (lev,typ) =
   let pplev = function
@@ -793,10 +810,12 @@ let pr_arg_level from (lev,typ) =
   | LevelSome -> mt () in
   Ppvernac.pr_set_entry_type (fun _ -> (*TO CHECK*) mt()) typ ++ pplev lev
 
-let pr_level ntn (from,fromlevel,args) typs =
+let pr_level ntn ({notation_entry = from; notation_level = fromlevel}, args) typs =
   (match from with InConstrEntry -> mt () | InCustomEntry s -> str "in " ++ str s ++ spc()) ++
-  str "at level " ++ int fromlevel ++ spc () ++ str "with arguments" ++ spc() ++
-  prlist_with_sep pr_comma (pr_arg_level fromlevel) (List.combine args typs)
+  str "at level " ++ int fromlevel ++
+  (match args with | [] -> mt () | _ :: _ ->
+     spc () ++ str "with arguments" ++ spc()
+     ++ prlist_with_sep pr_comma (pr_arg_level fromlevel) (List.combine args typs))
 
 let error_incompatible_level ntn oldprec oldtyps prec typs =
   user_err
@@ -875,7 +894,36 @@ let check_and_extend_constr_grammar ntn rule =
       error_parsing_incompatible_level ntn ntn_for_grammar oldprec oldtyps prec typs;
     if oldparsing = None then raise Not_found
   with Not_found ->
-    Egramcoq.extend_constr_grammar rule
+    Egramrocq.extend_constr_grammar rule
+
+let warn_prefix_incompatible_level =
+  CWarnings.create ~name:"notation-incompatible-prefix"
+    ~category:CWarnings.CoreCategories.parsing
+    (fun (pref, ntn, pref_prec, pref_nottyps, prec, nottyps) ->
+      str "Notations " ++ pr_notation pref
+      ++ spc () ++ str "defined " ++ pr_level pref pref_prec pref_nottyps
+      ++ spc () ++ str "and " ++ pr_notation ntn
+      ++ spc () ++ str "defined " ++ pr_level ntn prec nottyps
+      ++ spc () ++ str "have incompatible prefixes."
+      ++ spc () ++ str "One of them will likely not work.")
+
+let level_firstn k (lvl, lvls) =
+  lvl, try CList.firstn k lvls with Failure _ -> []
+
+let check_prefix_incompatible_level ntn prec nottyps =
+  match Notgram_ops.longest_common_prefix ntn with
+  | None -> ()
+  | Some (pref, k) ->
+     try
+       let pref_prec = Notation.level_of_notation pref in
+       let pref_prec = level_firstn k pref_prec in
+       let prec = level_firstn k prec in
+       let pref_nottyps = Notgram_ops.non_terminals_of_notation pref in
+       let pref_nottyps = CList.firstn k pref_nottyps in
+       let nottyps = CList.firstn k nottyps in
+       if not (level_eq prec pref_prec && List.for_all2 Extend.constr_entry_key_eq_ignore_binder_kind nottyps pref_nottyps) then
+         warn_prefix_incompatible_level (pref, ntn, pref_prec, pref_nottyps, prec, nottyps);
+     with Not_found | Failure _ -> ()
 
 let cache_one_syntax_extension (ntn,synext) =
   let prec = synext.synext_level in
@@ -894,6 +942,7 @@ let cache_one_syntax_extension (ntn,synext) =
         error_incompatible_level ntn oldprec oldtyps prec synext.synext_nottyps;
       oldparsing
     with Not_found ->
+      check_prefix_incompatible_level ntn prec synext.synext_nottyps;
       (* Declare the level and the precomputed parsing rule *)
       let () = Notation.declare_notation_level ntn prec in
       let () = Notgram_ops.declare_notation_non_terminals ntn synext.synext_nottyps in
@@ -928,8 +977,8 @@ let inSyntaxExtension : syntax_extension_obj -> obj =
      subst_function = subst_syntax_extension;
      classify_function = classify_syntax_definition}
 
-(**************************************************************************)
-(* Precedences                                                            *)
+(** ******************************************************************** **)
+(** Precedences                                                          **)
 
 (* Interpreting user-provided modifiers *)
 
@@ -962,7 +1011,7 @@ let () = CErrors.register_handler @@ function
   | _ -> None
 
 let check_custom_entry entry =
-  if not (Egramcoq.exists_custom_entry entry) then
+  if not (Egramrocq.exists_custom_entry entry) then
     raise @@ UnknownCustomEntry entry
 
 let check_entry_type = function
@@ -971,8 +1020,8 @@ let check_entry_type = function
   | ETIdent | ETGlobal | ETBigint | ETName | ETBinder _-> ()
 
 let interp_modifiers entry modl = let open NotationMods in
-  let rec interp subtyps acc = function
-  | [] -> subtyps, acc
+  let rec interp acc = function
+  | [] -> acc
   | CAst.{loc;v} :: l -> match v with
     | SetEntryType (s,typ) ->
         let id = Id.of_string s in
@@ -980,15 +1029,15 @@ let interp_modifiers entry modl = let open NotationMods in
         if Id.List.mem_assoc id acc.etyps then
           user_err ?loc
             (str s ++ str " is already assigned to an entry or constr level.");
-        interp subtyps { acc with etyps = (id,typ) :: acc.etyps; } l
+        interp { acc with etyps = (id,typ) :: acc.etyps; } l
     | SetItemLevel ([],bko,n) ->
-        interp subtyps acc l
+        interp acc l
     | SetItemLevel (s::idl,bko,n) ->
         let id = Id.of_string s in
         if Id.List.mem_assoc id acc.etyps then
           user_err ?loc
             (str s ++ str " is already assigned to an entry or constr level.");
-        interp ((id,bko,n)::subtyps) acc ((CAst.make ?loc @@ SetItemLevel (idl,bko,n))::l)
+        interp { acc with etyps = (id,ETConstr (entry,bko,n)) :: acc.etyps } ((CAst.make ?loc @@ SetItemLevel (idl,bko,n))::l)
     | SetLevel n ->
         (match entry with
         | InCustomEntry s ->
@@ -1002,24 +1051,20 @@ let interp_modifiers entry modl = let open NotationMods in
         | InConstrEntry ->
           if acc.level <> None then
             user_err ?loc (str "A level is already assigned.");
-          interp subtyps { acc with level = Some n; } l)
+          interp { acc with level = Some n; } l)
     | SetCustomEntry (s,Some n) ->
         (* Note: name of entry already registered in interp_non_syntax_modifiers *)
         if acc.level <> None then
           user_err ?loc (str ("isolated \"at level " ^ string_of_int (Option.get acc.level) ^ "\" unexpected."));
-        interp subtyps { acc with level = Some n } l
+        interp { acc with level = Some n } l
     | SetAssoc a ->
         if not (Option.is_empty acc.assoc) then user_err ?loc Pp.(str "An associativity is given more than once.");
-        interp subtyps { acc with assoc = Some a; } l
+        interp { acc with assoc = Some a; } l
     | SetOnlyParsing | SetOnlyPrinting | SetCustomEntry (_,None) | SetFormat _ | SetItemScope _ ->
         (* interpreted in interp_non_syntax_modifiers *)
         assert false
   in
-  let subtyps, mods = interp [] default modl in
-  (* interpret item levels wrt to main entry *)
-  let extra_etyps = List.map (fun (id,bko,n) -> (id,ETConstr (entry,bko,n))) subtyps in
-  (* Temporary hack: "ETName false" (i.e. "ident" in deprecation phase) means "ETIdent" for custom entries *)
-  { mods with etyps = extra_etyps@mods.etyps }
+  interp default modl
 
 let check_useless_entry_types recvars mainvars etyps =
   let vars = let (l1,l2) = List.split recvars in l1@l2@mainvars in
@@ -1031,7 +1076,7 @@ let check_useless_entry_types recvars mainvars etyps =
 type notation_main_data = {
   onlyparsing  : bool;
   onlyprinting : bool;
-  deprecation  : Deprecation.t option;
+  user_warns   : Globnames.extended_global_reference UserWarn.with_qf option;
   entry        : notation_entry;
   format       : unparsing Loc.located list option;
   itemscopes  : (Id.t * scope_name) list;
@@ -1083,7 +1128,7 @@ let set_item_scope ?loc main_data ids sc =
   | (id,_)::_ -> user_err ?loc (str "Notation scope for argument " ++ Id.print id ++ str " can be specified only once.")
   | [] -> { main_data with itemscopes }
 
-let interp_non_syntax_modifiers ~reserved ~infix ~abbrev deprecation mods =
+let interp_non_syntax_modifiers ~reserved ~infix ~abbrev user_warns mods =
   let set (main_data,rest) = CAst.with_loc_val (fun ?loc -> function
     | SetOnlyParsing ->
        if not (Option.is_empty main_data.format) then
@@ -1101,18 +1146,12 @@ let interp_non_syntax_modifiers ~reserved ~infix ~abbrev deprecation mods =
   in
   let main_data =
     {
-      onlyparsing = false; onlyprinting = false; deprecation;
+      onlyparsing = false; onlyprinting = false; user_warns;
       entry = InConstrEntry; format = None; itemscopes = []
     }
   in
-  List.fold_left set (main_data,[]) mods
-
-(* Check if an interpretation can be used for printing a cases printing *)
-let has_no_binders_type =
-  List.for_all (fun (_,(_,typ)) ->
-  match typ with
-  | NtnTypeBinder _ | NtnTypeBinderList _ -> false
-  | NtnTypeConstr | NtnTypeConstrList -> true)
+  let main_data, rest = List.fold_left set (main_data,[]) mods in
+  main_data, List.rev rest
 
 (* Compute precedences from modifiers (or find default ones) *)
 
@@ -1189,28 +1228,32 @@ let make_interpretation_type isrec isbinding default_if_binding typ =
 let entry_relative_level_of_constr_prod_entry from_level = function
   | ETConstr (entry,_,(_,y)) as x ->
      let side = match y with BorderProd (side,_) -> Some side | _ -> None in
-     (entry,(precedence_of_entry_type from_level x,side))
-  | _ -> InConstrEntry,(LevelSome,None) (*??*)
+     { notation_subentry = entry; notation_relative_level = precedence_of_entry_type from_level x; notation_position = side }
+  | _ -> constr_some_level
 
 let make_interpretation_vars
   (* For binders, default is to parse only as an ident *) ?(default_if_binding=AsName)
-   recvars allvars (from,level,_) typs =
+   recvars allvars (entry,_) typs =
   let eq_subscope (sc1, l1) (sc2, l2) =
     List.equal String.equal sc1 sc2 &&
     List.equal String.equal l1 l2
   in
   let check (x, y) =
-    let (_,scope1) = Id.Map.find x allvars in
-    let (_,scope2) = Id.Map.find y allvars in
+    let (_,scope1,_ntn_binding_ids1) = Id.Map.find x allvars in
+    let (_,scope2,_ntn_binding_ids2) = Id.Map.find y allvars in
     if not (eq_subscope scope1 scope2) then error_not_same_scope x y
+    (* Note: binding_ids should currently be the same, and even with
+      eventually more complex notations, such as e.g.
+        Notation "!! x .. y , P .. Q" := (fun x => (P, .. (fun y => (Q, True)) ..)).
+      each occurrence of the recursive notation variables may have its own binders *)
   in
   let () = List.iter check recvars in
   let useless_recvars = List.map snd recvars in
   let mainvars =
     Id.Map.filter (fun x _ -> not (Id.List.mem x useless_recvars)) allvars in
-  Id.Map.mapi (fun x (isonlybinding, sc) ->
+  Id.Map.mapi (fun x (isonlybinding, sc, ntn_binding_ids) ->
     let typ = Id.List.assoc x typs in
-    ((entry_relative_level_of_constr_prod_entry (from,level) typ,sc),
+    ((entry_relative_level_of_constr_prod_entry entry typ, sc), ntn_binding_ids,
      make_interpretation_type (Id.List.mem_assoc x recvars) isonlybinding default_if_binding typ)) mainvars
 
 let check_rule_productivity l =
@@ -1226,10 +1269,18 @@ let warn_notation_bound_to_variable =
 
 let warn_non_reversible_notation =
   CWarnings.create ~name:"non-reversible-notation" ~category:CWarnings.CoreCategories.parsing
-         (function
+         (function[@warning "+9"]
           | APrioriReversible -> assert false
-          | HasLtac ->
-             strbrk "This notation contains Ltac expressions: it will not be used for printing."
+          | Forgetful {
+              forget_ltac=ltac;
+              forget_volatile_cast=cast;
+            } ->
+            let what = (if ltac then ["Ltac expressions"] else [])
+                       @ (if cast then ["volatile casts"] else [])
+            in
+            strbrk "This notation contains " ++
+            prlist_with_sep (fun () -> strbrk " and ") str what ++ str ":" ++ spc() ++
+            str "it will not be used for printing."
           | NonInjective ids ->
              let n = List.length ids in
              strbrk (String.plural n "Variable") ++ spc () ++ pr_enum Id.print ids ++ spc () ++
@@ -1239,10 +1290,9 @@ let warn_non_reversible_notation =
 
 let is_coercion level typs =
   match level, typs with
-  | Some (custom,n,_), [_,e] ->
+  | Some ({notation_entry = custom; notation_level = n} as entry,_), [_,e] ->
      (match e, custom with
      | ETConstr _, _ ->
-         let entry = (custom,n) in
          let entry_relative = entry_relative_level_of_constr_prod_entry entry e in
          if is_coercion entry entry_relative then
            Some (IsEntryCoercion (entry,entry_relative))
@@ -1268,6 +1318,18 @@ let printability level typs vars onlyparsing reversibility = function
      (warn_non_reversible_notation reversibility; true)
     else onlyparsing),None
 
+let warn_closed_notation_not_level_0 =
+  CWarnings.create ~name:"closed-notation-not-level-0" ~category:CWarnings.CoreCategories.parsing
+    (fun () -> strbrk "Closed notations (i.e. starting and ending with a \
+                       terminal symbol) should usually be at level 0 \
+                       (default).")
+
+let warn_postfix_notation_not_level_1 =
+  CWarnings.create ~name:"postfix-notation-not-level-1" ~category:CWarnings.CoreCategories.parsing
+    (fun () -> strbrk "Postfix notations (i.e. starting with a \
+                       nonterminal symbol and ending with a terminal \
+                       symbol) should usually be at level 1 (default).")
+
 let find_precedence custom lev etyps symbols onlyprint =
   let first_symbol =
     let rec aux = function
@@ -1285,11 +1347,16 @@ let find_precedence custom lev etyps symbols onlyprint =
   match first_symbol with
   | None -> [],0
   | Some (NonTerminal x) ->
+      let msgs, lev = match last_is_terminal (), lev with
+        | false, _ -> [], lev
+        | true, None -> [fun () -> Flags.if_verbose (Feedback.msg_info ?loc:None) (strbrk "Setting postfix notation at level 1.")], Some 1
+        | true, Some 1 -> [], Some 1
+        | true, Some n -> [fun () -> warn_postfix_notation_not_level_1 ()], Some n in
       let test () =
         if onlyprint then
           if Option.is_empty lev then
             user_err Pp.(str "Explicit level needed in only-printing mode when the level of the leftmost non-terminal is given.")
-          else [],Option.get lev
+          else msgs,Option.get lev
         else
           user_err Pp.(str "The level of the leftmost non-terminal cannot be changed.") in
       (try match List.assoc x etyps, custom with
@@ -1299,7 +1366,7 @@ let find_precedence custom lev etyps symbols onlyprint =
             | None ->
               ([fun () -> Flags.if_verbose (Feedback.msg_info ?loc:None) (strbrk "Setting notation at level 0.")],0)
             | Some 0 ->
-              ([],0)
+              (msgs,0)
             | _ ->
               user_err Pp.(str "A notation starting with an atomic expression must be at level 0.")
             end
@@ -1310,15 +1377,17 @@ let find_precedence custom lev etyps symbols onlyprint =
             (* Give a default ? *)
             if Option.is_empty lev then
               user_err Pp.(str "Need an explicit level.")
-            else [],Option.get lev
+            else msgs,Option.get lev
       with Not_found ->
         if Option.is_empty lev then
           user_err Pp.(str "A left-recursive notation must have an explicit level.")
-        else [],Option.get lev)
+        else msgs,Option.get lev)
   | Some (Terminal _) when last_is_terminal () ->
-      if Option.is_empty lev then
-        ([fun () -> Flags.if_verbose (Feedback.msg_info ?loc:None) (strbrk "Setting notation at level 0.")], 0)
-      else [],Option.get lev
+      begin match lev with
+      | None -> [fun () -> Flags.if_verbose (Feedback.msg_info ?loc:None) (strbrk "Setting notation at level 0.")], 0
+      | Some 0 -> [], 0
+      | Some n -> [fun () -> warn_closed_notation_not_level_0 ()], n
+      end
   | Some _ ->
       if Option.is_empty lev then user_err Pp.(str "Cannot determine the level.");
       [],Option.get lev
@@ -1401,10 +1470,58 @@ let check_locality_compatibility local custom i_typs =
     let subcustom = List.map_filter (function _,ETConstr (InCustomEntry s,_,_) -> Some s | _ -> None) i_typs in
     let allcustoms = match custom with InCustomEntry s -> s::subcustom | _ -> subcustom in
     List.iter (fun s ->
-        if Egramcoq.locality_of_custom_entry s then
+        if Egramrocq.locality_of_custom_entry s then
           user_err (strbrk "Notation has to be declared local as it depends on custom entry " ++ str s ++
                     strbrk " which is local."))
       (List.uniquize allcustoms)
+
+let longest_common_prefix_level ntn =
+  Notgram_ops.longest_common_prefix ntn
+  |> Option.map (fun (ntn, sz) ->
+         let level, levels = level_firstn sz (Notation.level_of_notation ntn) in
+         ntn, level.notation_level, levels)
+
+let default_prefix_level ntn_prefix =
+  let with_prefix prefix level =
+    Flags.if_verbose Feedback.msg_info
+      (strbrk "Setting notation at level " ++ int level ++ spc ()
+       ++ str "to match previous notation with longest common prefix:"
+       ++ spc () ++ str "\"" ++ str (snd prefix) ++ str "\".");
+    level in
+  function Some n -> Some n | None ->
+    Option.map (fun (prefix, level, _) -> with_prefix prefix level) ntn_prefix
+
+let default_prefix_level_subentries ntn ntn_prefix symbols etyps =
+  let with_prefix prefix from_level levels =
+    let default_entry etyps (x, l) =
+      let l' = match l with
+        | LevelLt n when Int.equal n from_level -> NextLevel
+        | LevelLe n | LevelLt n -> NumLevel n
+        | LevelSome -> DefaultLevel in
+      let e = List.assoc_opt x etyps
+        |> Option.default (ETConstr (fst ntn, None, DefaultLevel)) in
+      match l', e with
+      | (NumLevel _ | NextLevel), ETConstr (n, b, DefaultLevel) ->
+         Flags.if_verbose Feedback.msg_info
+           (strbrk "Setting " ++ Id.print x ++ str " "
+            ++ pr_arg_level from_level (l, e) ++ spc ()
+            ++ str "to match previous notation with longest common prefix:"
+            ++ spc () ++ str "\"" ++ str (snd prefix) ++ str "\".");
+         (x, ETConstr (n, b, l')) :: List.remove_assoc x etyps
+      | _ -> etyps in
+    let levels =
+      let rec aux levs symbs = match levs, symbs with
+        | [], _ | _, [] | _, SProdList _ :: _ -> []
+        (* not handling recursive notations *)
+        | _, (Terminal _ | Break _) :: symbs -> aux levs symbs
+        | l :: levs, NonTerminal x :: symbs -> (x, l) :: aux levs symbs in
+      match levels, symbols with
+      (* don't mess up with level of left border terminal *)
+      | _ :: levs, NonTerminal _ :: symbs | levs, symbs -> aux levs symbs in
+    List.fold_left default_entry etyps levels in
+  match ntn_prefix with
+  | None -> etyps
+  | Some (prefix, from_level, levels) -> with_prefix prefix from_level levels
 
 let compute_syntax_data ~local main_data notation_symbols ntn mods =
   let open SynData in
@@ -1415,14 +1532,17 @@ let compute_syntax_data ~local main_data notation_symbols ntn mods =
   let _ = check_useless_entry_types recvars mainvars mods.etyps in
 
   (* Notations for interp and grammar  *)
-  let msgs,n = find_precedence main_data.entry mods.level mods.etyps symbols main_data.onlyprinting in
+  let ntn_prefix = longest_common_prefix_level ntn in
+  let level = default_prefix_level ntn_prefix mods.level in
+  let msgs,n = find_precedence main_data.entry level mods.etyps symbols main_data.onlyprinting in
   let symbols_for_grammar =
     if main_data.entry = InConstrEntry then remove_curly_brackets symbols else symbols in
   let need_squash = not (List.equal Notation.symbol_eq symbols symbols_for_grammar) in
   let ntn_for_grammar = if need_squash then make_notation_key main_data.entry symbols_for_grammar else ntn in
   if main_data.entry = InConstrEntry && not main_data.onlyprinting then check_rule_productivity symbols_for_grammar;
   (* To globalize... *)
-  let etyps = join_auxiliary_recursive_types recvars mods.etyps in
+  let etyps = default_prefix_level_subentries ntn ntn_prefix symbols mods.etyps in
+  let etyps = join_auxiliary_recursive_types recvars etyps in
   let sy_typs, prec =
     find_subentry_types main_data.entry n assoc etyps symbols in
   let sy_typs_for_grammar, prec_for_grammar =
@@ -1435,7 +1555,7 @@ let compute_syntax_data ~local main_data notation_symbols ntn mods =
   let pp_sy_data = (sy_typs,symbols) in
   let sy_fulldata = {
       ntn_for_grammar;
-      prec_for_grammar = (main_data.entry,n,prec_for_grammar);
+      prec_for_grammar = ({notation_entry = main_data.entry; notation_level = n}, prec_for_grammar);
       typs_for_grammar = List.map snd sy_typs_for_grammar;
       need_squash
     } in
@@ -1443,15 +1563,15 @@ let compute_syntax_data ~local main_data notation_symbols ntn mods =
   (* Return relevant data for interpretation and for parsing/printing *)
   {
     msgs;
-    level  = (main_data.entry,n,prec);
+    level = ({notation_entry = main_data.entry; notation_level = n}, prec);
     subentries = sy_typs;
     pa_syntax_data = pa_sy_data;
     pp_syntax_data = pp_sy_data;
     not_data    = sy_fulldata;
   }
 
-(**********************************************************************)
-(* Registration of notations interpretation                            *)
+(** **************************************************************** **)
+(** Registration of notation interpretation                          **)
 
 type notation_obj = {
   notobj_local : bool;
@@ -1459,10 +1579,9 @@ type notation_obj = {
   notobj_interp : interpretation;
   notobj_coercion : entry_coercion_kind option;
   notobj_use : notation_use option;
-  notobj_deprecation : Deprecation.t option;
+  notobj_user_warns : UserWarn.t option;
   notobj_notation : notation * notation_location;
   notobj_specific_pp_rules : notation_printing_rules option;
-  notobj_also_in_cases_pattern : bool;
 }
 
 let load_notation_common silently_define_scope_if_undefined _ nobj =
@@ -1483,12 +1602,11 @@ let open_notation i nobj =
     let scope = nobj.notobj_scope in
     let (ntn, df) = nobj.notobj_notation in
     let pat = nobj.notobj_interp in
-    let deprecation = nobj.notobj_deprecation in
+    let user_warns = nobj.notobj_user_warns in
     let scope = match scope with None -> LastLonelyNotation | Some sc -> NotationInScope sc in
-    let also_in_cases_pattern = nobj.notobj_also_in_cases_pattern in
     (* Declare the notation *)
     (match nobj.notobj_use with
-    | Some use -> Notation.declare_notation (scope,ntn) pat df ~use ~also_in_cases_pattern nobj.notobj_coercion deprecation
+    | Some use -> Notation.declare_notation (scope,ntn) pat df ~use nobj.notobj_coercion user_warns
     | None -> ());
     (* Declare specific format if any *)
     (match nobj.notobj_specific_pp_rules with
@@ -1557,11 +1675,11 @@ let with_lib_stk_protection f x =
 
 let with_syntax_protection f x =
   with_lib_stk_protection
-    (Pcoq.with_grammar_rule_protection
+    (Procq.with_grammar_rule_protection
        (with_notation_protection f)) x
 
-(**********************************************************************)
-(* Recovering existing syntax                                         *)
+(** **************************************************************** **)
+(** Recovering existing syntax                                       **)
 
 exception NoSyntaxRule
 
@@ -1586,8 +1704,8 @@ let recover_squash_syntax sy =
   | Some gram -> sy :: gram
   | None -> raise NoSyntaxRule
 
-(**********************************************************************)
-(* Main entry point for building parsing and printing rules           *)
+(** **************************************************************** **)
+(** Main entry point for building parsing and printing rules         **)
 
 let make_pa_rule (typs,symbols) parsing_data =
   let { ntn_for_grammar; prec_for_grammar; typs_for_grammar; need_squash } = parsing_data in
@@ -1622,9 +1740,12 @@ let make_parsing_rules main_data (sd : SynData.syn_data) =
   if main_data.onlyprinting then None
   else Some (make_pa_rule sd.pa_syntax_data sd.not_data)
 
+(** **************************************************************** **)
+(** Main functions about notations                                   **)
+
 let make_generic_printing_rules reserved main_data ntn sd =
   let open SynData in
-  let custom,level,_ = sd.level in
+  let {notation_entry = custom; notation_level = level},_ = sd.level in
   let make_rule rule =
     {
       notation_printing_reserved = reserved;
@@ -1642,9 +1763,13 @@ let make_generic_printing_rules reserved main_data ntn sd =
       (* No intent to define a format, we reuse the existing generic rules *)
       Some rules
     | _ ->
-      let rules' = make_rule (make_pp_rule level sd.pp_syntax_data main_data.format) in
-      check_reserved_format ntn rules rules'.notation_printing_rules;
-      Some rules'
+      if not reserved && main_data.onlyprinting then
+        (* No intent to define a generic format *)
+        Some rules
+      else
+        let rules' = make_rule (make_pp_rule level sd.pp_syntax_data main_data.format) in
+        let () = check_reserved_format ntn rules rules'.notation_printing_rules in
+        Some rules'
   with Not_found ->
     Some (make_rule (make_pp_rule level sd.pp_syntax_data main_data.format))
 
@@ -1666,7 +1791,7 @@ let make_syntax_rules reserved main_data ntn sd =
 let make_specific_printing_rules etyps symbols level pp_rule format =
   match level with
   | None -> None
-  | Some (_,level,_) ->
+  | Some ({ notation_level = level},_) ->
   match format, pp_rule with
     | None, Some _ when not (has_implicit_format symbols) -> None
     | _ ->
@@ -1717,11 +1842,10 @@ let make_notation_interpretation ~local main_data notation_symbols ntn syntax_ru
     ninterp_rec_vars = Id.Map.of_list recvars;
   } in
   let (acvars, ac, reversibility) = interp_notation_constr env ~impls nenv c in
-  let plevel = match level with Some (from,level,l) -> (from,level,l) | None (* numeral: irrelevant )*) -> (InConstrEntry,0,[]) in
+  let plevel = match level with Some (entry,l) -> (entry,l) | None (* numeral: irrelevant )*) -> (constr_lowest_level,[]) in
   let interp = make_interpretation_vars recvars acvars plevel i_typs in
   let map (x, _) = try Some (x, Id.Map.find x interp) with Not_found -> None in
   let vars = List.map_filter map i_vars in (* Order of elements is important here! *)
-  let also_in_cases_pattern = has_no_binders_type vars in
   let onlyparsing,coe = printability level i_typs vars main_data.onlyparsing reversibility ac in
   let main_data = { main_data with onlyparsing } in
   let use = make_use false onlyparsing main_data.onlyprinting in
@@ -1731,10 +1855,9 @@ let make_notation_interpretation ~local main_data notation_symbols ntn syntax_ru
     notobj_use = use;
     notobj_interp = (vars, ac);
     notobj_coercion = coe;
-    notobj_deprecation = main_data.deprecation;
+    notobj_user_warns = main_data.user_warns |> Option.map UserWarn.drop_qf;
     notobj_notation = df';
     notobj_specific_pp_rules = sy_pp_rules;
-    notobj_also_in_cases_pattern = also_in_cases_pattern;
   }
 
 (* Notations without interpretation (Reserved Notation) *)
@@ -1743,10 +1866,10 @@ let add_reserved_notation ~local ~infix ({CAst.loc;v=df},mods) =
   let open SynData in
   let (main_data,mods) = interp_non_syntax_modifiers ~reserved:true ~infix ~abbrev:false None mods in
   let mods = interp_modifiers main_data.entry mods in
-  let notation_symbols, isnumeral = analyze_notation_tokens ~onlyprinting:main_data.onlyprinting ~infix main_data.entry df in
+  let notation_symbols, is_prim_token = analyze_notation_tokens ~onlyprinting:main_data.onlyprinting ~infix main_data.entry df in
   let notation_symbols = if infix then adjust_reserved_infix_notation notation_symbols else notation_symbols in
   let ntn = make_notation_key main_data.entry notation_symbols.symbols in
-  if isnumeral then user_err ?loc (str "Notations for numbers are primitive and need not be reserved.");
+  if is_prim_token then user_err ?loc (str "Notations for numbers or strings are primitive and need not be reserved.");
   let sd = compute_syntax_data ~local main_data notation_symbols ntn mods in
   let synext = make_syntax_rules true main_data ntn sd in
   List.iter (fun f -> f ()) sd.msgs;
@@ -1768,10 +1891,10 @@ let prepare_where_notation ntn_decl =
   match mods with
   | _::_ -> CErrors.user_err (str"Only modifiers not affecting parsing are supported here.")
   | [] ->
-    let notation_symbols, isnumeral = analyze_notation_tokens ~onlyprinting:main_data.onlyprinting ~infix:false main_data.entry df in
+    let notation_symbols, is_prim_token = analyze_notation_tokens ~onlyprinting:main_data.onlyprinting ~infix:false main_data.entry df in
     let ntn = make_notation_key main_data.entry notation_symbols.symbols in
     let syntax_rules =
-      if isnumeral then PrimTokenSyntax else
+      if is_prim_token then PrimTokenSyntax else
       try SpecificSyntax (recover_notation_syntax ntn)
       with NoSyntaxRule ->
         user_err Pp.(str "Parsing rule for this notation has to be previously declared.") in
@@ -1790,17 +1913,18 @@ let set_notation_for_interpretation env impls (ntn_decl, main_data, notation_sym
   Lib.add_leaf (inNotation notation);
   Option.iter (fun sc -> Lib.add_leaf (inScope (false,true,sc))) sc
 
-let build_notation_syntax ~local ~infix deprecation ntn_decl =
+let build_notation_syntax ~local ~infix user_warns ntn_decl =
   let { ntn_decl_string = {CAst.loc;v=df}; ntn_decl_modifiers = modifiers; ntn_decl_interp = c } = ntn_decl in
   (* Extract the modifiers not affecting the parsing rule *)
-  let (main_data,syntax_modifiers) = interp_non_syntax_modifiers ~reserved:false ~infix ~abbrev:false deprecation modifiers in
+  let user_warns = Option.map UserWarn.with_empty_qf user_warns in
+  let (main_data,syntax_modifiers) = interp_non_syntax_modifiers ~reserved:false ~infix ~abbrev:false user_warns modifiers in
   (* Extract the modifiers not affecting the parsing rule *)
-  let notation_symbols, isnumeral = analyze_notation_tokens ~onlyprinting:main_data.onlyprinting ~infix main_data.entry df in
+  let notation_symbols, is_prim_token = analyze_notation_tokens ~onlyprinting:main_data.onlyprinting ~infix main_data.entry df in
   (* Add variables on both sides if an infix notation *)
   let df, notation_symbols, c = if infix then adjust_infix_notation df notation_symbols c else df, notation_symbols, c in
   (* Build the canonical identifier of the syntactic part of the notation *)
   let ntn = make_notation_key main_data.entry notation_symbols.symbols in
-  let syntax_rules = if isnumeral then (check_no_syntax_modifiers_for_numeral syntax_modifiers; PrimTokenSyntax) else
+  let syntax_rules = if is_prim_token then (check_no_syntax_modifiers_for_numeral syntax_modifiers; PrimTokenSyntax) else
   match syntax_modifiers with
   | [] ->
     (* No syntax data: try to rely on a previously declared rule *)
@@ -1817,17 +1941,17 @@ let build_notation_syntax ~local ~infix deprecation ntn_decl =
   in
   main_data, notation_symbols, ntn, syntax_rules, c, df
 
-let add_notation_syntax ~local ~infix deprecation ntn_decl =
+let add_notation_syntax ~local ~infix user_warns ntn_decl =
   (* Build or rebuild the syntax rules *)
-  let main_data, notation_symbols, ntn, syntax_rules, c, df = build_notation_syntax ~local ~infix deprecation ntn_decl in
+  let main_data, notation_symbols, ntn, syntax_rules, c, df = build_notation_syntax ~local ~infix user_warns ntn_decl in
   (* Declare syntax *)
   syntax_rules_iter (fun sy -> Lib.add_leaf (inSyntaxExtension (local,(ntn,sy)))) syntax_rules;
   let ntn_decl_string = CAst.make ?loc:ntn_decl.ntn_decl_string.CAst.loc df in
   let ntn_decl = { ntn_decl with ntn_decl_interp = c; ntn_decl_string } in
   ntn_decl, main_data, notation_symbols, ntn, syntax_rules
 
-(**********************************************************************)
-(* Scopes, delimiters and classes bound to scopes                     *)
+(** **************************************************************** **)
+(** Scopes, delimiters and classes bound to scopes                   **)
 
 type scope_command =
   | ScopeDeclare
@@ -1850,30 +1974,32 @@ let load_scope_command_common silently_define_scope_if_undefined _ (local,scope,
 let load_scope_command =
   load_scope_command_common true
 
-let open_scope_command i (local,scope,o) =
+let open_scope_command i (noexport,scope,o) =
   if Int.equal i 1 then
     match o with
     | ScopeDeclare -> ()
     | ScopeDelimAdd dlm -> Notation.declare_delimiters scope dlm
     | ScopeDelimRemove -> Notation.remove_delimiters scope
-    | ScopeClasses (where, cl) -> List.iter (Notation.declare_scope_class scope ?where) cl
+    | ScopeClasses (where, cl) ->
+      let local = Lib.sections_are_opened () in
+      List.iter (Notation.declare_scope_class local scope ?where) cl
 
 let cache_scope_command o =
   load_scope_command_common false 1 o;
   open_scope_command 1 o
 
-let subst_scope_command (subst,(local,scope,o as x)) = match o with
+let subst_scope_command (subst,(noexport,scope,o as x)) = match o with
   | ScopeClasses (where, cl) ->
       let env = Global.env () in
       let cl' = List.map_filter (subst_scope_class env subst) cl in
       let cl' =
         if List.for_all2eq (==) cl cl' then cl
         else cl' in
-      local, scope, ScopeClasses (where, cl')
+      noexport, scope, ScopeClasses (where, cl')
   | _ -> x
 
-let classify_scope_command (local, _, _) =
-  if local then Dispose else Substitute
+let classify_scope_command (noexport, _, _) =
+  if noexport then Dispose else Substitute
 
 let inScopeCommand : locality_flag * scope_name * scope_command -> obj =
   declare_object {(default_object "DELIMITERS") with
@@ -1895,15 +2021,15 @@ let remove_delimiters local scope =
 let add_class_scope local scope where cl =
   Lib.add_leaf (inScopeCommand(local,scope,ScopeClasses (where, cl)))
 
-let interp_abbreviation_modifiers deprecation modl =
-  let mods, skipped = interp_non_syntax_modifiers ~reserved:false ~infix:false ~abbrev:true deprecation modl in
+let interp_abbreviation_modifiers user_warns modl =
+  let mods, skipped = interp_non_syntax_modifiers ~reserved:false ~infix:false ~abbrev:true user_warns modl in
   if skipped <> [] then
     (let modifier = List.hd skipped in
     user_err ?loc:modifier.CAst.loc (str "Abbreviations don't support " ++ Ppvernac.pr_syntax_modifier modifier));
   (mods.onlyparsing, mods.itemscopes)
 
-let add_abbreviation ~local deprecation env ident (vars,c) modl =
-  let (only_parsing, scopes) = interp_abbreviation_modifiers deprecation modl in
+let add_abbreviation ~local user_warns env ident (vars,c) modl =
+  let (only_parsing, scopes) = interp_abbreviation_modifiers user_warns modl in
   let vars = List.map (fun v -> v, List.assoc_opt v scopes) vars in
   let acvars,pat,reversibility =
     match vars, intern_name_alias c with
@@ -1922,12 +2048,11 @@ let add_abbreviation ~local deprecation env ident (vars,c) modl =
   in
   let level_arg = NumLevel 9 (* level of arguments of an application *) in
   let in_pat (id,_) = (id,ETConstr (Constrexpr.InConstrEntry,None,(level_arg,InternalProd))) in
-  let level = (InConstrEntry,0,[]) in
+  let level = (* not relevant *) (constr_lowest_level,[]) in
   let interp = make_interpretation_vars ~default_if_binding:AsAnyPattern [] acvars level (List.map in_pat vars) in
   let vars = List.map (fun (x,_) -> (x, Id.Map.find x interp)) vars in
-  let also_in_cases_pattern = has_no_binders_type vars in
   let onlyparsing = only_parsing || fst (printability None [] vars false reversibility pat) in
-  Abbreviation.declare_abbreviation ~local ~also_in_cases_pattern deprecation ident ~onlyparsing (vars,pat)
+  Abbreviation.declare_abbreviation ~local user_warns ident ~onlyparsing (vars,pat)
 
 (**********************************************************************)
 (* Activating/deactivating notations                                  *)
@@ -1937,7 +2062,7 @@ let load_notation_toggle _ _ = ()
 let open_notation_toggle _ (local,(on,all,pat)) =
   let env = Global.env () in
   let sigma = Evd.from_env env in
-  toggle_notations ~on ~all (Constrextern.without_symbols (Printer.pr_glob_constr_env env sigma)) pat
+  toggle_notations ~on ~all ~verbose:(not !Flags.quiet) (Constrextern.without_symbols (Printer.pr_glob_constr_env env sigma)) pat
 
 let cache_notation_toggle o =
   load_notation_toggle 1 o;
@@ -1965,8 +2090,8 @@ let inNotationActivation : locality_flag * (bool * bool * notation_query_pattern
 let declare_notation_toggle local ~on ~all s =
   Lib.add_leaf (inNotationActivation (local,(on,all,s)))
 
-(**********************************************************************)
-(* Declaration of custom entry                                        *)
+(** **************************************************************** **)
+(** Declaration of custom entries                                    **)
 
 let warn_custom_entry =
   CWarnings.create ~name:"custom-entry-overridden" ~category:CWarnings.CoreCategories.parsing
@@ -1974,8 +2099,8 @@ let warn_custom_entry =
           strbrk "Custom entry " ++ str s ++ strbrk " has been overridden.")
 
 let load_custom_entry _ (local,s) =
-  if Egramcoq.exists_custom_entry s then warn_custom_entry s
-  else Egramcoq.create_custom_entry ~local s
+  if Egramrocq.exists_custom_entry s then warn_custom_entry s
+  else Egramrocq.create_custom_entry ~local s
 
 let cache_custom_entry o = load_custom_entry 1 o
 
@@ -1993,7 +2118,7 @@ let inCustomEntry : locality_flag * string -> obj =
       classify_function = classify_custom_entry}
 
 let declare_custom_entry local s =
-  if Egramcoq.exists_custom_entry s then
+  if Egramrocq.exists_custom_entry s then
     user_err Pp.(str "Custom entry " ++ str s ++ str " already exists.")
   else
     Lib.add_leaf (inCustomEntry (local,s))

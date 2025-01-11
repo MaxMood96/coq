@@ -1,6 +1,5 @@
-From Coq Require Import ssreflect ssrbool.
-From Coq Require Import Lists.List.
-Import ListNotations.
+From Corelib Require Import ssreflect ssrbool.
+From Corelib Require Import ListDef.
 
 Fixpoint contains {X: Type} (eqt: X -> X -> bool) (l: list X) (x: X): bool := true.
 

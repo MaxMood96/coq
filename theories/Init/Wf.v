@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -160,7 +160,11 @@ Notation Acc_iter_2 := Fix_F_2 (only parsing). (* compatibility *)
 
 
 
-(* Added by Julien Forest on 13/11/20 *)
+(* Added by Julien Forest on 13/11/20
+
+This construction is originally by Georges Gonthier, see
+https://sympa.inria.fr/sympa/arc/coq-club/2007-07/msg00013.html *)
+
 Section Acc_generator.
   Variable A : Type.
   Variable R : A -> A -> Prop.

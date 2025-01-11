@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -26,6 +26,7 @@ class type proof_view =
     inherit GObj.widget
     method source_buffer : GSourceView3.source_buffer
     method buffer : GText.buffer
+    method select_all : unit -> unit
     method refresh : force:bool -> unit
     method clear : unit -> unit
     method set_goals : goals -> unit
@@ -126,7 +127,7 @@ let mode_tactic sel_cb (proof : #GText.view_skel) goals ~unfoc_goals hints = mat
       let () = Util.List.fold_left_i (fold_goal ~shownum:true) 2 () rem_goals in
       (* show unfocused goal if option set *)
       (* Insert remaining goals (no hypotheses) *)
-      if Coq.PrintOpt.printing_unfocused () then
+      if RocqDriver.PrintOpt.printing_unfocused () then
         begin
           ignore(proof#buffer#place_cursor ~where:(proof#buffer#end_iter));
           if unfoc_goals<>[] then
@@ -151,10 +152,10 @@ let display mode (view : #GText.view_skel) goals hints =
   | NoFocusGoals { bg; shelved; given_up } ->
     begin match (bg, shelved, given_up) with
     | [], [], [] ->
-      view#buffer#insert "No more goals."
+      view#buffer#insert "All goals completed."
     | [], [], _ ->
       (* The proof is finished, with the exception of given up goals. *)
-      view#buffer#insert "No more goals, but there are some goals you gave up:\n\n";
+      view#buffer#insert "All goals completed except some admitted goals:\n\n";
       let iter goal =
         insert_xml view#buffer (Richpp.richpp_of_pp ~width goal.Interface.goal_ccl);
         view#buffer#insert "\n"
@@ -218,6 +219,10 @@ let proof_view () =
     method source_buffer = buffer
 
     method buffer = text_buffer
+
+    method select_all () =
+      if self#is_focus then
+        self#buffer#select_range self#buffer#start_iter self#buffer#end_iter;
 
     method clear () = buffer#set_text ""
 

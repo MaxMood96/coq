@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -108,7 +108,7 @@ let get_polymorphic_positions env sigma f =
     let mib,oib = Inductive.lookup_mind_specif env ind in
       (match mib.mind_template with
       | None -> assert false
-      | Some templ -> templ.template_param_levels)
+      | Some templ -> templ.template_param_arguments)
   | _ -> assert false
 
 let refresh_universes ?(status=univ_rigid) ?(onlyalg=false) ?(refreshset=false)
@@ -117,7 +117,10 @@ let refresh_universes ?(status=univ_rigid) ?(onlyalg=false) ?(refreshset=false)
   (* direction: true for fresh universes lower than the existing ones *)
   let refresh_sort status ~direction s =
     let sigma, l = new_univ_level_variable status !evdref in
-    let s' = Sorts.sort_of_univ @@ Univ.Universe.make l in (* FIXME *)
+    let s' = match ESorts.kind sigma s with
+      | QSort (q, _) -> Sorts.qsort q (Univ.Universe.make l)
+      | _ -> Sorts.sort_of_univ @@ Univ.Universe.make l
+    in
     let s' = ESorts.make s' in
     evdref := sigma;
     let evd =
@@ -136,7 +139,8 @@ let refresh_universes ?(status=univ_rigid) ?(onlyalg=false) ?(refreshset=false)
         | Some l ->
            (match Evd.universe_rigidity !evdref l with
             | UnivRigid ->
-               if not onlyalg then refresh_sort status ~direction s
+              if not onlyalg && (not (Univ.Level.is_set l) || (refreshset && not direction))
+              then refresh_sort status ~direction s
                else t
             | UnivFlexible alg ->
                (if alg then
@@ -156,7 +160,7 @@ let refresh_universes ?(status=univ_rigid) ?(onlyalg=false) ?(refreshset=false)
   (* Refresh the types of evars under template polymorphic references *)
   let rec refresh_term_evars ~onevars ~top t =
     match EConstr.kind !evdref t with
-    | App (f, args) when Termops.is_template_polymorphic_ind env !evdref f ->
+    | App (f, args) when Termops.is_template_polymorphic_ref env !evdref f ->
       let pos = get_polymorphic_positions env !evdref f in
         refresh_polymorphic_positions args pos; t
     | App (f, args) when top && isEvar !evdref f ->
@@ -178,11 +182,11 @@ let refresh_universes ?(status=univ_rigid) ?(onlyalg=false) ?(refreshset=false)
     | _ -> EConstr.map !evdref (refresh_term_evars ~onevars ~top:false) t
   and refresh_polymorphic_positions args pos =
     let rec aux i = function
-      | Some l :: ls ->
+      | true :: ls ->
         if i < Array.length args then
           ignore(refresh_term_evars ~onevars:true ~top:false args.(i));
         aux (succ i) ls
-      | None :: ls ->
+      | false :: ls ->
         if i < Array.length args then
           ignore(refresh_term_evars ~onevars:false ~top:false args.(i));
         aux (succ i) ls
@@ -199,7 +203,7 @@ let refresh_universes ?(status=univ_rigid) ?(onlyalg=false) ?(refreshset=false)
     else refresh_term_evars ~onevars:false ~top:true t
   in !evdref, t'
 
-let get_type_of_refresh  ?(polyprop=true) ?(lax=false) env evars t =
+let get_type_of_refresh ?(lax=false) env evars t =
   let tty = Retyping.get_type_of env evars t in
   let evars', tty = refresh_universes ~onlyalg:true
     ~status:(Evd.UnivFlexible false) (Some false) env evars tty in
@@ -212,31 +216,29 @@ let add_conv_oriented_pb ?(tail=true) (pbty,env,t1,t2) evd =
   | None -> add_conv_pb ~tail (Conversion.CONV,env,t1,t2) evd
 
 (* We retype applications to ensure the universe constraints are collected *)
-
 exception IllTypedInstance of env * evar_map * EConstr.types * EConstr.types
 exception IllTypedInstanceFun of env * evar_map * EConstr.constr * EConstr.types
 
+let checked_appvect, checked_appvect_hook = Hook.make ()
+
 let recheck_applications unify flags env evdref t =
   let rec aux env t =
+    (* the order matters: if the sub-applications are incorrect, checked_appvect may fail badly *)
+    iter_with_full_binders env !evdref (fun d env -> push_rel d env) aux env t;
     match EConstr.kind !evdref t with
     | App (f, args) ->
-       let () = aux env f in
-       let fty = Retyping.get_type_of env !evdref f in
-       let argsty = Array.map (fun x -> aux env x; Retyping.get_type_of env !evdref x) args in
-       let rec aux i ty =
-         if i < Array.length argsty then
-         match EConstr.kind !evdref (whd_all env !evdref ty) with
-         | Prod (na, dom, codom) ->
-            (match unify flags TypeUnification env !evdref Conversion.CUMUL argsty.(i) dom with
-             | Success evd -> evdref := evd;
-                             aux (succ i) (subst1 args.(i) codom)
-             | UnifFailure (evd, reason) -> raise (IllTypedInstance (env, evd, argsty.(i), dom)))
-         | _ -> raise (IllTypedInstanceFun (env, !evdref, f, ty))
-       else ()
-     in aux 0 fty
-    | _ ->
-       iter_with_full_binders env !evdref (fun d env -> push_rel d env) aux env t
-  in aux env t
+      let evd, _ = Hook.get checked_appvect env !evdref f args in
+      evdref := evd
+    | _ -> ()
+  in
+  try aux env t
+  with PretypeError (env,sigma,e) ->
+  match e with
+  | CantApplyBadTypeExplained (((_,expected,argty),_,_),_) ->
+    raise (IllTypedInstance (env,sigma,argty, expected))
+  | TypingError (CantApplyNonFunctional (fj,_)) ->
+    raise (IllTypedInstanceFun (env,sigma,fj.uj_val,fj.uj_type))
+  | _ -> assert false
 
 
 (*------------------------------------*
@@ -306,7 +308,7 @@ let noccur_evar env evd evk c =
        (match decl with
         | LocalAssum _ -> ()
         | LocalDef (_,b,_) -> cache := Int.Set.add (i-k) !cache; occur_rec false acc (lift i (EConstr.of_constr b)))
-  | Proj (p,c) -> occur_rec true acc c
+  | Proj (p,_,c) -> occur_rec true acc c
   | _ -> iter_with_full_binders env evd (fun rd (k,env) -> (succ k, push_rel rd env))
     (occur_rec check_types) acc c
   in
@@ -1731,6 +1733,8 @@ let rec invert_definition unify flags choose imitate_defs
           let evd =
              (* Try now to invert args in terms of args' *)
             try
+              if not @@ is_evar_allowed flags evk' then
+                raise (CannotProject (evd, ev''));
               let evd,body = project_evar_on_evar false unify flags env' evd aliases 0 None ev'' ev' in
               let evi = Evd.find_undefined evd evk' in
               let evd = Evd.define evk' body evd in
@@ -1742,6 +1746,13 @@ let rec invert_definition unify flags choose imitate_defs
               add_conv_oriented_pb (None,env',mkEvar ev'',mkEvar ev') evd in
           evdref := evd;
           evar'')
+    | App (f, args) when EConstr.isLambda !evdref f ->
+        let p = !progress in
+        progress := true;
+        (try
+          map_constr_with_full_binders env' !evdref (fun d (env,k) -> push_rel d env, k+1)
+                                        imitate envk t
+        with _ -> progress := p; imitate envk (whd_beta env' !evdref t))
     | _ ->
         progress := true;
         match
@@ -1794,7 +1805,7 @@ let rec invert_definition unify flags choose imitate_defs
 
 and evar_define unify flags ?(choose=false) ?(imitate_defs=true) env evd pbty (evk,argsv as ev) rhs =
   match EConstr.kind evd rhs with
-  | Evar (evk2,argsv2 as ev2) ->
+  | Evar (evk2,argsv2 as ev2) when is_evar_allowed flags evk2 ->
       if Evar.equal evk evk2 then
         solve_refl ~can_drop:choose
           (test_success unify) flags env evd pbty evk argsv argsv2
@@ -1858,12 +1869,8 @@ and evar_define unify flags ?(choose=false) ?(imitate_defs=true) env evd pbty (e
  * ass.
  *)
 
-let status_changed evd lev (pbty,_,t1,t2) =
-  (try Evar.Set.mem (head_evar evd t1) lev with NoHeadEvar -> false) ||
-  (try Evar.Set.mem (head_evar evd t2) lev with NoHeadEvar -> false)
-
 let reconsider_unif_constraints unify flags evd =
-  let (evd,pbs) = extract_changed_conv_pbs evd (status_changed evd) in
+  let (evd,pbs) = extract_changed_conv_pbs evd in
   List.fold_left
     (fun p (pbty,env,t1,t2 as x) ->
        match p with

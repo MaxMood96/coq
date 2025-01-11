@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -104,21 +104,19 @@ type visibility = Until of int | Exactly of int
 
 val map_visibility : (int -> int) -> visibility -> visibility
 
-val push : ?deprecated:Deprecation.t -> visibility -> full_path -> GlobRef.t -> unit
+val push : ?user_warns:Globnames.extended_global_reference UserWarn.with_qf -> visibility -> full_path -> GlobRef.t -> unit
 val push_modtype : visibility -> full_path -> ModPath.t -> unit
 val push_module : visibility -> DirPath.t -> ModPath.t -> unit
 val push_dir : visibility -> DirPath.t -> GlobDirRef.t -> unit
-val push_abbreviation : ?deprecated:Deprecation.t -> visibility -> full_path -> Globnames.abbreviation -> unit
-
-module UnivIdMap : CMap.ExtS with type key = Univ.UGlobal.t
+val push_abbreviation : ?user_warns:Globnames.extended_global_reference UserWarn.with_qf -> visibility -> full_path -> Globnames.abbreviation -> unit
 
 val push_universe : visibility -> full_path -> Univ.UGlobal.t -> unit
 
-(** Deprecation info *)
+(** Deprecation and user warn info *)
 
-val is_deprecated_xref : Globnames.extended_global_reference -> Deprecation.t option
+val is_warned_xref : Globnames.extended_global_reference -> Globnames.extended_global_reference UserWarn.with_qf option
 
-val warn_deprecated_xref : ?loc:Loc.t -> Deprecation.t -> Globnames.extended_global_reference -> unit
+val warn_user_warn_xref : ?loc:Loc.t -> Globnames.extended_global_reference UserWarn.with_qf -> Globnames.extended_global_reference -> unit
 
 (** {6 The following functions perform globalization of qualified names } *)
 
@@ -135,7 +133,7 @@ val locate_module : qualid -> ModPath.t
 val locate_section : qualid -> DirPath.t
 val locate_universe : qualid -> Univ.UGlobal.t
 
-val locate_extended_nowarn : qualid -> Globnames.extended_global_reference * Deprecation.t option
+val locate_extended_nowarn : qualid -> Globnames.extended_global_reference
 
 (** Remove the binding to an abbreviation *)
 
@@ -175,6 +173,11 @@ val exists_modtype : full_path -> bool
 val exists_module : DirPath.t -> bool
 val exists_dir : DirPath.t -> bool
 val exists_universe : full_path -> bool
+
+(** {6 These functions declare (resp. return) the source location of the object if known } *)
+
+val set_cci_src_loc : Globnames.extended_global_reference -> Loc.t -> unit
+val cci_src_loc : Globnames.extended_global_reference -> Loc.t option
 
 (** {6 These functions locate qualids into full user names } *)
 
@@ -220,6 +223,8 @@ val shortest_qualid_of_module : ?loc:Loc.t -> ModPath.t -> qualid
 
 (** In general we have a [UnivNames.universe_binders] around rather than a [Id.Set.t] *)
 val shortest_qualid_of_universe : ?loc:Loc.t -> 'u Id.Map.t -> Univ.UGlobal.t -> qualid
+
+val pr_depr_xref : Globnames.extended_global_reference -> Pp.t
 
 (** {5 Generic name handling} *)
 

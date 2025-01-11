@@ -1,5 +1,5 @@
 Require Import TestSuite.admit.
-Require Coq.Setoids.Setoid.
+Require Corelib.Setoids.Setoid.
 
 Axiom BITS : nat -> Set.
 Definition n7 := 7.
@@ -17,7 +17,7 @@ Ltac subst_body :=
   repeat match goal with
            | [ H := _ |- _ ] => subst H
          end.
-Import Coq.Setoids.Setoid.
+Import Corelib.Setoids.Setoid.
 Class Equiv (A : Type) := equiv : relation A.
 Infix "===" := equiv (at level 70, no associativity).
 Class type (A : Type) {e : Equiv A} := eq_equiv : Equivalence equiv.
@@ -266,7 +266,7 @@ Notation "'Exists' x .. y , p" :=
   (lexists (fun x => .. (lexists (fun y => p)) .. )) (at level 78, x binder, y binder, right associativity).
 
 Class ILogic Frm {ILOps: ILogicOps Frm} := {
-                                            lentailsPre:> PreOrder lentails;
+                                            lentailsPre :: PreOrder lentails;
                                             ltrueR: forall C, C |-- ltrue;
                                             lfalseL: forall C, lfalse |-- C;
                                             lforallL: forall T x (P: T -> Frm) C, P x |-- C -> lforall P |-- C;

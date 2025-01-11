@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -28,7 +28,7 @@ module NamedDecl = Context.Named.Declaration
 (* Calcul de la forme normal d'un terme    *)
 (*******************************************)
 
-let e_whd_all = Reductionops.clos_whd_flags CClosure.all
+let e_whd_all = Reductionops.clos_whd_flags RedFlags.all
 
 let crazy_type =  mkSet
 
@@ -113,8 +113,8 @@ let build_branches_type env sigma (mind,_ as _ind) mib mip u params (pctx, p) =
   let p = it_mkLambda_or_LetIn p pctx in (* TODO: prevent useless cut? *)
   let build_one_branch i cty =
     let typi = type_constructor mind mib u cty params in
-    let decl,indapp = Reductionops.hnf_decompose_prod env sigma (EConstr.of_constr typi) in
-    let decl = List.map (on_snd EConstr.Unsafe.to_constr) decl in
+    let decl,indapp = Reductionops.whd_decompose_prod env sigma (EConstr.of_constr typi) in
+    let decl = List.map EConstr.Unsafe.(fun (na,c) -> to_binder_annot na, to_constr c) decl in
     let ((ind,u),cargs) = find_rectype_a env sigma indapp in
     let nparams = Array.length params in
     let carity = snd (rtbl.(i)) in
@@ -155,6 +155,7 @@ and nf_whd env sigma whd typ =
       let name = Name (Id.of_string "x") in
       let vc = reduce_fun (nb_rel env) (codom p) in
       let r = Retyping.relevance_of_type env sigma (EConstr.of_constr dom) in
+      let r = EConstr.Unsafe.to_relevance r in
       let name = make_annot name r in
       let codom = nf_vtype (push_rel (LocalAssum (name,dom)) env) sigma vc  in
       mkProd(name,dom,codom)
@@ -183,13 +184,14 @@ and nf_whd env sigma whd typ =
       mkApp(capp,args)
   | Vint64 i -> i |> Uint63.of_int64 |> mkInt
   | Vfloat64 f -> f |> Float64.of_float |> mkFloat
+  | Vstring s -> s |> mkString
   | Varray t -> nf_array env sigma t typ
   | Vaccu (Aid idkey, stk) ->
       constr_type_of_idkey env sigma idkey stk
   | Vaccu (Aind ((mi, i) as ind), stk) ->
      let mib = Environ.lookup_mind mi env in
      let nb_univs =
-       Univ.AbstractContext.size (Declareops.inductive_polymorphic_context mib)
+       UVars.AbstractContext.size (Declareops.inductive_polymorphic_context mib)
      in
      let mk u =
        let pind = (ind, u) in (mkIndU pind, type_of_ind env pind)
@@ -200,17 +202,18 @@ and nf_whd env sigma whd typ =
 
 and nf_univ_args ~nb_univs mk env sigma stk =
   let u =
-    if Int.equal nb_univs 0 then Univ.Instance.empty
+    if UVars.eq_sizes nb_univs (0,0) then UVars.Instance.empty
     else match stk with
     | Zapp args :: _ ->
-       let inst =
-         Array.init nb_univs (fun i -> uni_lvl_val (arg args i))
-       in
-       Univ.Instance.of_array inst
+      let inst = arg args 0 in
+      let inst = uni_instance inst in
+      let () = assert (UVars.eq_sizes (UVars.Instance.length inst) nb_univs) in
+      inst
     | _ -> assert false
   in
   let (t,ty) = mk u in
-  nf_stk ~from:nb_univs env sigma t ty stk
+  let from = if UVars.Instance.is_empty u then 0 else 1 in
+  nf_stk ~from env sigma t ty stk
 
 and nf_evar env sigma evk stk =
   let evi = try Evd.find_undefined sigma evk with Not_found -> assert false in
@@ -244,7 +247,7 @@ and constr_type_of_idkey env sigma (idkey : Vmvalues.id_key) stk =
   | ConstKey cst ->
      let cbody = Environ.lookup_constant cst env in
      let nb_univs =
-       Univ.AbstractContext.size (Declareops.constant_polymorphic_context cbody)
+       UVars.AbstractContext.size (Declareops.constant_polymorphic_context cbody)
      in
      let mk u =
        let pcst = (cst, u) in (mkConstU pcst, Typeops.type_of_constant_in env pcst)
@@ -301,12 +304,12 @@ and nf_stk ?from:(from=0) env sigma c t stk  =
       let branchs = Array.mapi mkbranch bsw in
       let tcase = build_case_type (pctx, p) realargs c in
       let p = (get_case_annot pctx, p) in
-      let ci = Inductiveops.make_case_info env ind relevance RegularStyle in
-      let iv = if Typeops.should_invert_case env ci then
+      let ci = Inductiveops.make_case_info env ind RegularStyle in
+      let iv = if Typeops.should_invert_case env relevance ci then
           CaseInvert {indices=realargs}
         else NoInvert
       in
-      nf_stk env sigma (mkCase (ci, u, params, p, iv, c, branchs)) tcase stk
+      nf_stk env sigma (mkCase (ci, u, params, (p,relevance), iv, c, branchs)) tcase stk
   | Zproj p :: stk ->
     let () = assert (from = 0) in
     let ((ind, u), args) = Inductiveops.find_mrectype env sigma (EConstr.of_constr t) in
@@ -319,9 +322,10 @@ and nf_stk ?from:(from=0) env sigma c t stk  =
       let ty = Vars.subst_instance_constr (EConstr.Unsafe.to_instance u) tys.(p) in
       substl (c :: List.rev_map EConstr.Unsafe.to_constr pars) ty
     in
-    let p = Declareops.inductive_make_projection ind mib ~proj_arg:p in
+    let p, r = Declareops.inductive_make_projection ind mib ~proj_arg:p in
     let p = Projection.make p true in
-    nf_stk env sigma (mkProj (p, c)) ty stk
+    let r = UVars.subst_instance_relevance (EConstr.Unsafe.to_instance u) r in
+    nf_stk env sigma (mkProj (p, r, c)) ty stk
 
 and nf_predicate env sigma ind mip params v pctx =
   (* TODO: we should expose some variant of Vm.mkrel_vstack *)
@@ -336,29 +340,38 @@ and nf_predicate env sigma ind mip params v pctx =
   let env = push_rel_context pctx env in
   let body = nf_vtype env sigma v in
   let rel = Retyping.relevance_of_type env sigma (EConstr.of_constr body) in
-  body, rel
+  body, EConstr.Unsafe.to_relevance rel
+
+and nf_telescope env sigma len f typ =
+  let open CClosure in
+  let t = ref (inject typ) in
+  let infos = Evarutil.create_clos_infos env sigma RedFlags.all in
+  let tab = create_tab () in
+  let init i =
+    let typ, stk = whd_stack infos tab !t [] in
+    let typ = zip typ stk in
+    match fterm_of typ with
+    | FProd (na, dom, codom, e) ->
+      let arg = f i in
+      let dom = term_of_fconstr dom in
+      let arg = nf_val env sigma arg dom in
+      let () = t := mk_clos (CClosure.usubs_cons (inject arg) e) codom in
+      arg
+    | _ -> assert false
+  in
+  let args = Array.init len init in
+  !t, args
 
 and nf_args env sigma vargs ?from:(f=0) t =
-  let t = ref t in
   let len = nargs vargs - f in
-  let args =
-    Array.init len
-      (fun i ->
-        let _,dom,codom = decompose_prod env sigma !t in
-        let c = nf_val env sigma (arg vargs (f+i)) dom in
-        t := subst1 c codom; c) in
-  !t,args
+  let fargs i = arg vargs (f + i) in
+  let typ, args = nf_telescope env sigma len fargs t in
+  CClosure.term_of_fconstr typ, args
 
 and nf_bargs env sigma b ofs t =
-  let t = ref t in
   let len = bsize b - ofs in
-  let args =
-    Array.init len
-      (fun i ->
-        let _,dom,codom = decompose_prod env sigma !t in
-        let c = nf_val env sigma (bfield b (i+ofs)) dom in
-        t := subst1 c codom; c) in
-  args
+  let fargs i = bfield b (i + ofs) in
+  snd @@ nf_telescope env sigma len fargs t
 
 and nf_fun env sigma f typ =
   let k = nb_rel env in
@@ -383,6 +396,7 @@ and nf_fix env sigma f =
   let name = Name (Id.of_string "Ffix") in
   let names = Array.map (fun t ->
       make_annot name @@
+      EConstr.Unsafe.to_relevance @@
       Retyping.relevance_of_type env sigma (EConstr.of_constr t)) ft in
   (* Body argument of the tuple is ignored by push_rec_types *)
   let env = push_rec_types (names,ft,ft) env in
@@ -407,6 +421,7 @@ and nf_cofix env sigma cf =
   let name = Name (Id.of_string "Fcofix") in
   let names = Array.map (fun t ->
       make_annot name @@
+      EConstr.Unsafe.to_relevance @@
       Retyping.relevance_of_type env sigma (EConstr.of_constr t)) cft in
   let env = push_rec_types (names,cft,cft) env in
   let cfb = Util.Array.map2 (fun v t -> nf_val env sigma v t) vb cft in

@@ -1,12 +1,16 @@
-(lang dune 2.9)
-(name coq)
-(using coq 0.3)
+(lang dune 3.8)
+(name rocq)
+
+; We use directory targets in documentation
+(using directory-targets 0.1)
+
+; We need this for when we use the dune.disabled files instead of our rule_gen
+(using coq 0.8)
 
 (formatting
  (enabled_for ocaml))
 
-; After Dune 2.8 we can use this, but let's wait for the build consolidation PR
-; (generate_opam_files true)
+(generate_opam_files true)
 
 (license LGPL-2.1-only)
 (maintainers "The Coq development team <coqdev@inria.fr>")
@@ -20,13 +24,13 @@
 ; Note that we use coq.opam.template to have dune add the correct opam
 ; prefix for configure
 (package
- (name coq-core)
+ (name rocq-runtime)
  (depends
   (ocaml (>= 4.09.0))
   (ocamlfind (>= 1.8.1))
   (zarith (>= 1.11))
-  (ounit2 :with-test))
- (depopts coq-native)
+  (conf-linux-libc-dev (= :os "linux")))
+ (depopts rocq-native memprof-limits memtrace)
  (synopsis "The Coq Proof Assistant -- Core Binaries and Tools")
  (description "Coq is a formal proof management system. It provides
 a formal language to write mathematical definitions, executable
@@ -44,14 +48,19 @@ not the vernacular standard library.
 
 Note that in this setup, Coq needs to be started with the -boot and
 -noinit options, as will otherwise fail to find the regular Coq
-prelude, now living in the coq-stdlib package."))
+prelude, now living in the rocq-core package."))
 
 (package
- (name coq-stdlib)
+ (name coq-core)
  (depends
-  (coq-core (= :version)))
- (depopts coq-native)
- (synopsis "The Coq Proof Assistant -- Standard Library")
+  (rocq-runtime (= :version)))
+ (synopsis "Compatibility binaries for Coq after the Rocq renaming"))
+
+(package
+ (name rocq-core)
+ (depends
+  (rocq-runtime (= :version)))
+ (synopsis "The Coq Proof Assistant with its prelude")
  (description "Coq is a formal proof management system. It provides
 a formal language to write mathematical definitions, executable
 algorithms and theorems together with an environment for
@@ -63,13 +72,14 @@ project, or the Bedrock verified low-level programming library), the
 formalization of mathematics (e.g. the full formalization of the
 Feit-Thompson theorem or homotopy type theory) and teaching.
 
-This package includes the Coq Standard Library, that is to say, the
-set of modules usually bound to the Coq.* namespace."))
+This package includes the Rocq prelude, that is loaded automatically
+by Rocq in every .v file, as well as other modules bound to the
+Corelib.* and Ltac2.* namespaces."))
 
 (package
  (name coqide-server)
  (depends
-  (coq-core (= :version)))
+  (rocq-runtime (= :version)))
  (synopsis "The Coq Proof Assistant, XML protocol server")
  (description "Coq is a formal proof management system. It provides
 a formal language to write mathematical definitions, executable
@@ -84,8 +94,12 @@ structured way."))
 (package
  (name coqide)
  (depends
+  (ocamlfind :build)
+  (conf-findutils :build)
+  conf-adwaita-icon-theme
   (coqide-server (= :version))
-  (lablgtk3-sourceview3 (>= 3.1.2)))
+  (cairo2 (>= 0.6.4))
+  (lablgtk3-sourceview3 (and (>= 3.1.2) (or (>= 3.1.5) (<> :os "windows")))))
  (synopsis "The Coq Proof Assistant --- GTK3 IDE")
  (description "Coq is a formal proof management system. It provides
 a formal language to write mathematical definitions, executable
@@ -110,13 +124,16 @@ semi-interactive development of machine-checked proofs.
 This package provides the Coq Reference Manual."))
 
 (package
- (name coq)
+ (name rocq)
+ (allow_empty)
  (depends
-  (coq-core (= :version))
-  (coq-stdlib (= :version))
-  (coqide-server (= :version)))
- (synopsis "The Coq Proof Assistant")
- (description "Coq is a formal proof management system. It provides
+  (rocq-core (= :version))
+  rocq-stdlib
+  (ounit2 :with-test)
+  (conf-python-3 :with-test)
+  (conf-time :with-test))
+ (synopsis "The Rocq Proof Assistant with Stdlib")
+ (description "Rocq is a formal proof management system. It provides
 a formal language to write mathematical definitions, executable
 algorithms and theorems together with an environment for
 semi-interactive development of machine-checked proofs.
@@ -125,4 +142,16 @@ Typical applications include the certification of properties of
 programming languages (e.g. the CompCert compiler certification
 project, or the Bedrock verified low-level programming library), the
 formalization of mathematics (e.g. the full formalization of the
-Feit-Thompson theorem or homotopy type theory) and teaching."))
+Feit-Thompson theorem or homotopy type theory) and teaching.
+
+This package is a virtual package gathering the rocq-core and rocq-stdlib packages."))
+
+(package
+ (name coq)
+ (allow_empty)
+ (depends
+  (rocq (= :version))
+  (coq-core (= :version))
+  coq-stdlib
+  (coqide-server (= :version)))
+ (synopsis "Compatibility metapackage for Coq after the Rocq renaming"))

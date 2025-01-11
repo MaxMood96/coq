@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -16,9 +16,9 @@ object
   inherit GPack.notebook
   method append_term : 'a -> int
   method prepend_term : 'a -> int
+  method insert_term : ?pos:int -> 'a -> int
   method set_term : 'a -> unit
   method get_nth_term : int -> 'a
-  method term_num : ('a -> 'a -> bool) -> 'a -> int
   method pages : 'a list
   method remove_page : int -> unit
   method current_term : 'a

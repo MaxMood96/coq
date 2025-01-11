@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,6 +11,7 @@
 (* This module manages customization parameters at the vernacular level     *)
 
 open Util
+open Summary.Stage
 
 type option_name = string list
 type option_value =
@@ -25,7 +26,7 @@ type table_value =
 
 (** Summary of an option status *)
 type option_state = {
-  opt_depr  : bool;
+  opt_depr  : Deprecation.t option;
   opt_value : option_value;
 }
 
@@ -48,21 +49,25 @@ let error_undeclared_key key =
 (* 1- Tables                                                                *)
 
 type 'a table_of_A =  {
-  add : Environ.env -> 'a -> unit;
-  remove : Environ.env -> 'a -> unit;
+  add : Environ.env -> Libobject.locality -> 'a -> unit;
+  remove : Environ.env -> Libobject.locality -> 'a -> unit;
   mem : Environ.env -> 'a -> unit;
   print : unit -> unit;
 }
+
+let opts_cat = Libobject.create_category "options"
 
 module MakeTable =
   functor
    (A : sig
           type t
           type key
-          module Set : CSig.SetS with type elt = t
+          module Set : CSig.USetS with type elt = t
           val table : (string * key table_of_A) list ref
           val encode : Environ.env -> key -> t
           val subst : Mod_subst.substitution -> t -> t
+          val check_local : Libobject.locality -> t -> unit
+          val discharge : t -> t
           val printer : t -> Pp.t
           val key : option_name
           val title : string
@@ -77,48 +82,48 @@ module MakeTable =
 
     let () =
       if String.List.mem_assoc nick !A.table then
-        CErrors.user_err
+        CErrors.anomaly
           Pp.(strbrk "Sorry, this table name (" ++ str nick
             ++ strbrk ") is already used.")
 
     module MySet = A.Set
 
-    let t = Summary.ref ~stage:Summary.Stage.Synterp MySet.empty ~name:nick
+    let t = Summary.ref ~stage:Interp MySet.empty ~name:nick
 
-    let (add_option,remove_option) =
-        let cache_options (f,p) = match f with
-          | GOadd -> t := MySet.add p !t
-          | GOrmv -> t := MySet.remove p !t in
-        let load_options i o = if Int.equal i 1 then cache_options o in
-        let subst_options (subst,(f,p as obj)) =
-          let p' = A.subst subst p in
-            if p' == p then obj else
-              (f,p')
-        in
-        let inGo : option_mark * A.t -> Libobject.obj =
-          Libobject.declare_object {(Libobject.default_object nick) with
-                Libobject.object_stage = Summary.Stage.Synterp;
-                Libobject.load_function = load_options;
-                Libobject.open_function = Libobject.simple_open load_options;
-                Libobject.cache_function = cache_options;
-                Libobject.subst_function = subst_options;
-                Libobject.classify_function = (fun x -> Substitute)}
-        in
-        ((fun c -> Lib.add_leaf (inGo (GOadd, c))),
-         (fun c -> Lib.add_leaf (inGo (GOrmv, c))))
+    let inGo : Libobject.locality * (option_mark * A.t) -> Libobject.obj =
+      let cache (f,p) = match f with
+        | GOadd -> t := MySet.add p !t
+        | GOrmv -> t := MySet.remove p !t in
+      let subst (subst,(f,p as obj)) =
+        let p' = A.subst subst p in
+        if p' == p then obj else
+          (f,p')
+      in
+      Libobject.declare_object @@
+      Libobject.object_with_locality ~cat:opts_cat nick
+        ~cache ~subst:(Some subst) ~discharge:(on_snd A.discharge)
+
+    let add_option local c =
+      A.check_local local c;
+      Lib.add_leaf (inGo (local,(GOadd, c)))
+
+    let remove_option local c =
+      A.check_local local c;
+      Lib.add_leaf (inGo (local,(GOrmv, c)))
 
     let print_table table_name printer table =
-      Feedback.msg_notice
-        Pp.(str table_name ++
-           (hov 0
-              (if MySet.is_empty table then str " None" ++ fnl ()
-               else MySet.fold
-                 (fun a b -> spc () ++ printer a ++ b)
-                 table (mt ()) ++ str "." ++ fnl ())))
+      let open Pp in
+      let pp = if MySet.is_empty table then str table_name ++ str " is empty."
+        else
+          str table_name ++ str ":" ++ spc() ++
+          (hov 0 (prlist_with_sep spc printer (MySet.elements table))) ++
+          str "."
+      in
+      Feedback.msg_notice pp
 
     let table_of_A = {
-       add = (fun env x -> add_option (A.encode env x));
-       remove = (fun env x -> remove_option (A.encode env x));
+       add = (fun env local x -> add_option local (A.encode env x));
+       remove = (fun env local x -> remove_option local (A.encode env x));
        mem = (fun env x ->
         let y = A.encode env x in
         let answer = MySet.mem y !t in
@@ -126,11 +131,11 @@ module MakeTable =
        print = (fun () -> print_table A.title A.printer !t);
      }
 
-    let _ = A.table := (nick, table_of_A)::!A.table
+    let () = A.table := (nick, table_of_A)::!A.table
 
     let v () = !t
     let active x = A.Set.mem x !t
-    let set x b = if b then add_option x else remove_option x
+    let set local x b = if b then add_option local x else remove_option local x
   end
 
 let string_table = ref []
@@ -152,6 +157,8 @@ struct
   let table = string_table
   let encode _env x = x
   let subst _ x = x
+  let check_local _ _ = ()
+  let discharge x = x
   let printer = Pp.str
   let key = A.key
   let title = A.title
@@ -168,9 +175,11 @@ let get_ref_table k = String.List.assoc (nickname k) !ref_table
 module type RefConvertArg =
 sig
   type t
-  module Set : CSig.SetS with type elt = t
+  module Set : CSig.USetS with type elt = t
   val encode : Environ.env -> Libnames.qualid -> t
   val subst : Mod_subst.substitution -> t -> t
+  val check_local : Libobject.locality -> t -> unit
+  val discharge : t -> t
   val printer : t -> Pp.t
   val key : option_name
   val title : string
@@ -185,6 +194,8 @@ struct
   let table = ref_table
   let encode = A.encode
   let subst = A.subst
+  let check_local = A.check_local
+  let discharge = A.discharge
   let printer = A.printer
   let key = A.key
   let title = A.title
@@ -216,7 +227,7 @@ let iter_table env f key lv =
 
 type 'a option_sig = {
   optstage : Summary.Stage.t;
-  optdepr  : bool;
+  optdepr  : Deprecation.t option;
   optkey   : option_name;
   optread  : unit -> 'a;
   optwrite : 'a -> unit }
@@ -252,17 +263,17 @@ with Not_found ->
 open Libobject
 
 let warn_deprecated_option =
-  CWarnings.create ~name:"deprecated-option" ~category:CWarnings.CoreCategories.deprecated (fun key ->
-    Pp.(str "Option" ++ spc () ++ str (nickname key) ++ strbrk " is deprecated"))
+  Deprecation.create_warning ~object_name:"Option" ~warning_name_if_no_since:"deprecated-option"
+    (fun key -> Pp.str (nickname key))
 
 let declare_option cast uncast append ?(preprocess = fun x -> x)
   { optstage=stage; optdepr=depr; optkey=key; optread=read; optwrite=write } =
   check_key key;
   let default = read() in
   let change =
-      let _ = Summary.declare_summary (nickname key)
+      let () = Summary.declare_summary (nickname key)
         { stage;
-          Summary.freeze_function = (fun ~marshallable -> read ());
+          Summary.freeze_function = read;
           Summary.unfreeze_function = write;
           Summary.init_function = (fun () -> write default) } in
       let cache_options (l,m,v) =
@@ -293,14 +304,14 @@ let declare_option cast uncast append ?(preprocess = fun x -> x)
           { (default_object (nickname key)) with
             object_stage = stage;
             load_function = load_options;
-            open_function = simple_open open_options;
+            open_function = simple_open ~cat:opts_cat open_options;
             cache_function = cache_options;
             subst_function = subst_options;
             discharge_function = discharge_options;
             classify_function = classify_options } in
       (fun l m v -> let v = preprocess v in Lib.add_leaf (options (l, m, v)))
   in
-  let warn () = if depr then warn_deprecated_option key in
+  let warn () = depr |> Option.iter (fun depr -> warn_deprecated_option (key,depr)) in
   let cread () = cast (read ()) in
   let cwrite l v = warn (); change l OptSet (uncast v) in
   let cappend l v = warn (); change l OptAppend (uncast v) in
@@ -328,34 +339,36 @@ let declare_stringopt_option =
     (function StringOptValue v -> v | _ -> CErrors.anomaly (Pp.str "async_option."))
     (fun _ _ -> CErrors.anomaly (Pp.str "async_option."))
 
+type 'a getter = { get : unit -> 'a }
 
-type 'a opt_decl = stage:Summary.Stage.t -> depr:bool -> key:option_name -> 'a
+type 'a opt_decl = ?stage:Summary.Stage.t -> ?depr:Deprecation.t -> key:option_name -> value:'a -> unit -> 'a getter
 
-let declare_int_option_and_ref ~stage ~depr ~key ~(value:int) =
+let declare_int_option_and_ref ?(stage=Interp) ?depr ~key ~(value:int) () =
   let r_opt = ref value in
   let optwrite v = r_opt := Option.default value v in
   let optread () = Some !r_opt in
-  let _ = declare_int_option {
+  let () = declare_int_option {
       optstage = stage;
       optdepr = depr;
       optkey = key;
-      optread; optwrite
+      optread;
+      optwrite;
     } in
-  fun () -> !r_opt
+  { get = fun () -> !r_opt }
 
-let declare_intopt_option_and_ref ~stage ~depr ~key =
-  let r_opt = ref None in
+let declare_intopt_option_and_ref ?(stage=Interp) ?depr ~key ~value () =
+  let r_opt = ref value in
   let optwrite v = r_opt := v in
   let optread () = !r_opt in
-  let _ = declare_int_option {
+  let () = declare_int_option {
       optstage = stage;
       optdepr = depr;
       optkey = key;
       optread; optwrite
     } in
-  optread
+  { get = optread }
 
-let declare_nat_option_and_ref ~stage ~depr ~key ~(value:int) =
+let declare_nat_option_and_ref ?(stage=Interp) ?depr ~key ~(value:int) () =
   assert (value >= 0);
   let r_opt = ref value in
   let optwrite v =
@@ -365,61 +378,61 @@ let declare_nat_option_and_ref ~stage ~depr ~key ~(value:int) =
     r_opt := v
   in
   let optread () = Some !r_opt in
-  let _ = declare_int_option {
+  let () = declare_int_option {
       optstage = stage;
       optdepr = depr;
       optkey = key;
       optread; optwrite
     } in
-  fun () -> !r_opt
+  { get = fun () -> !r_opt }
 
-let declare_bool_option_and_ref ~stage ~depr ~key ~(value:bool) =
+let declare_bool_option_and_ref ?(stage=Interp) ?depr ~key ~(value:bool) () =
   let r_opt = ref value in
   let optwrite v = r_opt := v in
   let optread () = !r_opt in
-  let _ = declare_bool_option {
+  let () = declare_bool_option {
       optstage = stage;
       optdepr = depr;
       optkey = key;
       optread; optwrite
     } in
-  optread
+  { get = optread }
 
-let declare_string_option_and_ref ~stage ~depr ~key ~(value:string) =
+let declare_string_option_and_ref ?(stage=Interp) ?depr ~key ~(value:string) () =
   let r_opt = ref value in
   let optwrite v = r_opt := Option.default value v in
   let optread () = Some !r_opt in
-  let _ = declare_stringopt_option {
+  let () = declare_stringopt_option {
       optstage = stage;
       optdepr = depr;
       optkey = key;
       optread; optwrite
     } in
-  fun () -> !r_opt
+  { get = fun () -> !r_opt }
 
-let declare_stringopt_option_and_ref ~stage ~depr ~key =
-  let r_opt = ref None in
+let declare_stringopt_option_and_ref ?(stage=Interp) ?depr ~key ~value () =
+  let r_opt = ref value in
   let optwrite v = r_opt := v in
   let optread () = !r_opt in
-  let _ = declare_stringopt_option {
+  let () = declare_stringopt_option {
       optstage = stage;
       optdepr = depr;
       optkey = key;
       optread; optwrite
     } in
-  optread
+  { get = optread }
 
-let declare_interpreted_string_option_and_ref ~stage ~depr ~key ~(value:'a) from_string to_string =
+let declare_interpreted_string_option_and_ref from_string to_string ?(stage=Interp) ?depr ~key ~(value:'a) () =
   let r_opt = ref value in
   let optwrite v = r_opt := Option.default value @@ Option.map from_string v in
   let optread () = Some (to_string !r_opt) in
-  let _ = declare_stringopt_option {
+  let () = declare_stringopt_option {
       optstage = stage;
       optdepr = depr;
       optkey = key;
       optread; optwrite
     } in
-  fun () -> !r_opt
+  { get = fun () -> !r_opt }
 
 (* 3- User accessible commands *)
 
@@ -543,8 +556,15 @@ let print_tables () =
   let open Pp in
   let print_option key value depr =
     let msg = str "  " ++ str (nickname key) ++ str ": " ++ msg_option_value value in
-    if depr then msg ++ str " [DEPRECATED]" ++ fnl ()
-    else msg ++ fnl ()
+    let depr = pr_opt (fun depr ->
+        hov 2
+          (str "[DEPRECATED" ++
+           pr_opt (fun since -> str "since " ++ str since) depr.Deprecation.since ++
+           pr_opt str depr.Deprecation.note ++
+           str "]"))
+        depr
+    in
+    msg ++ depr ++ fnl()
   in
   str "Options:" ++ fnl () ++
     OptionMap.fold
