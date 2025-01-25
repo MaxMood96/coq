@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -23,15 +23,15 @@ open Rewrite
 open ComRewrite
 open Stdarg
 open Tactypes
-open Pcoq.Prim
-open Pcoq.Constr
+open Procq.Prim
+open Procq.Constr
 open Pvernac.Vernac_
 open Pltac
 open Vernacextend
 
 }
 
-DECLARE PLUGIN "coq-core.plugins.ltac"
+DECLARE PLUGIN "rocq-runtime.plugins.ltac"
 
 {
 
@@ -66,63 +66,74 @@ END
 
 {
 
-type raw_strategy = (constr_expr, Tacexpr.raw_red_expr) strategy_ast
-type glob_strategy = (glob_constr_and_expr, Tacexpr.glob_red_expr) strategy_ast
-
-let interp_strategy ist env sigma s =
-  let interp_redexpr r = fun env sigma -> Tacinterp.interp_red_expr ist env sigma r in
-  let interp_constr c = (fst c, fun env sigma -> Tacinterp.interp_open_constr ist env sigma c) in
-  let s = map_strategy interp_constr interp_redexpr s in
-  strategy_of_ast s
-
-let glob_strategy ist s = map_strategy (Tacintern.intern_constr ist) (Tacintern.intern_red_expr ist) s
-let subst_strategy s str = str
+let subst_strategy sub = map_strategy
+    (Tacsubst.subst_glob_constr_and_expr sub)
+    (Tacsubst.subst_glob_red_expr sub)
+    (fun x -> x)
 
 let pr_strategy _ _ _ (s : strategy) = Pp.str "<strategy>"
-let pr_raw_strategy env sigma prc prlc _ (s : raw_strategy) =
-  let prr = Pptactic.pr_red_expr env sigma (prc, prlc, Pputils.pr_or_by_notation Libnames.pr_qualid, prc) in
-  Rewrite.pr_strategy (prc env sigma) prr s
-let pr_glob_strategy env sigma prc prlc _ (s : glob_strategy) =
-  let prpat env sigma (_,c,_) = prc env sigma c in
+let pr_raw_strategy env sigma prc prlc _ (s : Tacexpr.raw_strategy) =
+  let prr = Pptactic.pr_red_expr env sigma (prc, prlc, Pputils.pr_or_by_notation Libnames.pr_qualid, prc,Pputils.pr_or_var Pp.int) in
+  Rewrite.pr_strategy (prc env sigma) prr Pputils.pr_lident s
+let pr_glob_strategy env sigma prc prlc _ (s : Tacexpr.glob_strategy) =
   let prcst = Pputils.pr_or_var Pptactic.(pr_and_short_name (pr_evaluable_reference_env env)) in
-  let prr = Pptactic.pr_red_expr env sigma (prc, prlc, prcst, prpat) in
-  Rewrite.pr_strategy (prc env sigma) prr s
+  let prr = Pptactic.pr_red_expr env sigma (prc, prlc, prcst, prc, Pputils.pr_or_var Pp.int) in
+  Rewrite.pr_strategy (prc env sigma) prr Id.print s
 
 }
 
 ARGUMENT EXTEND rewstrategy
     PRINTED BY { pr_strategy }
 
-    INTERPRETED BY { interp_strategy }
-    GLOBALIZED BY { glob_strategy }
+    INTERPRETED BY { Tacinterp.interp_strategy }
+    GLOBALIZED BY { Tacintern.intern_strategy }
     SUBSTITUTED BY { subst_strategy }
 
     RAW_PRINTED BY { pr_raw_strategy env sigma }
     GLOB_PRINTED BY { pr_glob_strategy env sigma }
+END
 
-  | [ glob(c) ] -> { StratConstr (c, true) }
-  | [ "<-" constr(c) ] -> { StratConstr (c, false) }
-  | [ "subterms" rewstrategy(h) ] -> { StratUnary (Subterms, h) }
-  | [ "subterm" rewstrategy(h) ] -> { StratUnary (Subterm, h) }
-  | [ "innermost" rewstrategy(h) ] -> { StratUnary(Innermost, h) }
-  | [ "outermost" rewstrategy(h) ] -> { StratUnary(Outermost, h) }
-  | [ "bottomup" rewstrategy(h) ] -> { StratUnary(Bottomup, h) }
-  | [ "topdown" rewstrategy(h) ] -> { StratUnary(Topdown, h) }
-  | [ "id" ] -> { StratId }
-  | [ "fail" ] -> { StratFail }
-  | [ "refl" ] -> { StratRefl }
-  | [ "progress" rewstrategy(h) ] -> { StratUnary (Progress, h) }
-  | [ "try" rewstrategy(h) ] -> { StratUnary (Try, h) }
-  | [ "any" rewstrategy(h) ] -> { StratUnary (Any, h) }
-  | [ "repeat" rewstrategy(h) ] -> { StratUnary (Repeat, h) }
-  | [ rewstrategy(h) ";" rewstrategy(h') ] -> { StratBinary (Compose, h, h') }
-  | [ "(" rewstrategy(h) ")" ] -> { h }
-  | [ "choice" ne_rewstrategy_list(h) ] -> { StratNAry (Choice, h) }
-  | [ "old_hints" preident(h) ] -> { StratHints (true, h) }
-  | [ "hints" preident(h) ] -> { StratHints (false, h) }
-  | [ "terms" constr_list(h) ] -> { StratTerms h }
-  | [ "eval" red_expr(r) ] -> { StratEval r }
-  | [ "fold" constr(c) ] -> { StratFold c }
+GRAMMAR EXTEND Gram
+  GLOBAL: rewstrategy;
+  rewstrategy:
+    [ NONA
+      [ IDENT "fix"; id = identref; ":="; s = rewstrategy1 -> { StratFix (id, s) }
+      | h = ne_rewstrategy1_list_sep_semicolon -> { h } ] ]
+  ;
+  ne_rewstrategy1_list_sep_semicolon:
+    [ LEFTA
+      [ h = SELF; ";"; h' = rewstrategy1 -> { StratBinary (Compose, h, h') }
+      | h = rewstrategy1 -> { h } ] ]
+  ;
+  rewstrategy1:
+    [ RIGHTA
+      [ "<-"; c = constr -> { StratConstr (c, false) }
+      | IDENT "subterms"; h = SELF -> { StratUnary (Subterms, h) }
+      | IDENT "subterm"; h = SELF -> { StratUnary (Subterm, h) }
+      | IDENT "innermost"; h = SELF -> { StratUnary(Innermost, h) }
+      | IDENT "outermost"; h = SELF -> { StratUnary(Outermost, h) }
+      | IDENT "bottomup"; h = SELF -> { StratUnary(Bottomup, h) }
+      | IDENT "topdown"; h = SELF -> { StratUnary(Topdown, h) }
+      | IDENT "progress"; h = SELF -> { StratUnary (Progress, h) }
+      | IDENT "try"; h = SELF -> { StratUnary (Try, h) }
+      | IDENT "any"; h = SELF -> { StratUnary (Any, h) }
+      | IDENT "repeat"; h = SELF -> { StratUnary (Repeat, h) }
+      | IDENT "choice"; h = LIST1 rewstrategy0 -> { StratNAry (Choice, h) }
+      | IDENT "old_hints"; h = preident -> { StratHints (true, h) }
+      | IDENT "hints"; h = preident -> { StratHints (false, h) }
+      | IDENT "terms"; h = LIST0 constr -> { StratTerms h }
+      | IDENT "eval"; r = red_expr -> { StratEval r }
+      | IDENT "fold"; c = constr -> { StratFold c }
+      | h = rewstrategy0 -> { h } ] ]
+  ;
+  rewstrategy0:
+    [ NONA
+      [ c = constr -> { StratConstr (c, true) }
+      | IDENT "id" -> { StratId }
+      | IDENT "fail" -> { StratFail }
+      | IDENT "refl" -> { StratRefl }
+      | "("; h = rewstrategy; ")" -> { h } ] ]
+  ;
 END
 
 (* By default the strategy for "rewrite_db" is top-down *)
@@ -226,20 +237,20 @@ END
 type binders_argtype = local_binder_expr list
 
 let wit_binders =
- (Genarg.create_arg "binders" : binders_argtype Genarg.uniform_genarg_type)
+ (Genarg.create_arg "binders" : binders_argtype Genarg.vernac_genarg_type)
 
-let binders = Pcoq.create_generic_entry2 "binders" (Genarg.rawwit wit_binders)
+let binders = Procq.create_generic_entry2 "binders" (Genarg.rawwit wit_binders)
 
 let () =
-  let raw_printer env sigma _ _ _ l = Pp.pr_non_empty_arg (Ppconstr.pr_binders env sigma) l in
-  Pptactic.declare_extra_vernac_genarg_pprule wit_binders raw_printer
+  let raw_printer l = Genprint.PrinterBasic (fun env sigma -> Pp.pr_non_empty_arg (Ppconstr.pr_binders env sigma) l) in
+  Genprint.register_vernac_print0 wit_binders raw_printer
 
 }
 
 GRAMMAR EXTEND Gram
   GLOBAL: binders;
     binders:
-    [ [ b = Pcoq.Constr.binders -> { b } ] ];
+    [ [ b = Procq.Constr.binders -> { b } ] ];
 END
 
 VERNAC COMMAND EXTEND AddParametricRelation CLASSIFIED AS SIDEFF
@@ -283,7 +294,7 @@ let add_setoid atts binders a aeq t n =
 
 let morphism_tactic =
   let open Tacexpr in
-  let name = "Coq.Classes.SetoidTactics.add_morphism_tactic" in
+  let name = "Corelib.Classes.SetoidTactics.add_morphism_tactic" in
   let tacqid = Libnames.qualid_of_string name in
   let tac = CAst.make @@ TacArg (TacCall (CAst.make (tacqid, []))) in
   Tacinterp.interp tac

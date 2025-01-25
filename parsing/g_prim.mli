@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,5 +8,5 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-val test_pipe_closedcurly : unit Pcoq.Entry.t
-val test_minus_nat : unit Pcoq.Entry.t
+val test_pipe_closedcurly : unit Procq.Entry.t
+val test_minus_nat : unit Procq.Entry.t

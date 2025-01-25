@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,6 +11,7 @@
 open Miniml
 open Constr
 open Declarations
+open Mod_declarations
 open Names
 open ModPath
 open Libnames
@@ -22,20 +23,21 @@ open Extraction
 open Modutil
 open Common
 
-(***************************************)
-(*S Part I: computing Coq environment. *)
-(***************************************)
+(****************************************)
+(*S Part I: computing Rocq environment. *)
+(****************************************)
 
 let toplevel_env () =
-  List.rev (Safe_typing.structure_body_of_safe_env (Global.safe_env ()))
+  let mp, struc = Safe_typing.flatten_env (Global.safe_env ()) in
+  mp, List.rev struc
 
 let environment_until dir_opt =
   let rec parse = function
-    | [] when Option.is_empty dir_opt -> [Lib.current_mp (), toplevel_env ()]
+    | [] when Option.is_empty dir_opt -> [toplevel_env ()]
     | [] -> []
     | d :: l ->
       let meb =
-        Modops.destr_nofunctor (MPfile d) (Global.lookup_module (MPfile d)).mod_type
+        Modops.destr_nofunctor (MPfile d) (mod_type @@ Global.lookup_module (MPfile d))
       in
       match dir_opt with
       | Some d' when DirPath.equal d d' -> [MPfile d, meb]
@@ -101,7 +103,7 @@ module Visit : VISIT = struct
 end
 
 let add_field_label mp = function
-  | (lab, (SFBconst _|SFBmind _)) -> Visit.add_kn (KerName.make mp lab)
+  | (lab, (SFBconst _|SFBmind _ | SFBrules _)) -> Visit.add_kn (KerName.make mp lab)
   | (lab, (SFBmodule _|SFBmodtype _)) -> Visit.add_mp_all (MPdot (mp,lab))
 
 let rec add_labels mp = function
@@ -124,10 +126,10 @@ let check_fix env sg cb i =
           | Fix ((_,j),recd) when Int.equal i j -> check_arity env cb; (true,recd)
           | CoFix (j,recd) when Int.equal i j -> check_arity env cb; (false,recd)
           | _ -> raise Impossible)
-    | Undef _ | OpaqueDef _ | Primitive _ -> raise Impossible
+    | Undef _ | OpaqueDef _ | Primitive _ | Symbol _ -> raise Impossible
 
 let prec_declaration_equal sg (na1, ca1, ta1) (na2, ca2, ta2) =
-  Array.equal (Context.eq_annot Name.equal) na1 na2 &&
+  Array.equal (Context.eq_annot Name.equal (EConstr.ERelevance.equal sg)) na1 na2 &&
   Array.equal (EConstr.eq_constr sg) ca1 ca2 &&
   Array.equal (EConstr.eq_constr sg) ta1 ta2
 
@@ -157,16 +159,21 @@ let factor_fix env sg l cb msb =
     (hack proposed by Elie)
 *)
 
+let vm_state =
+  (* VM bytecode is not needed here *)
+  let vm_handler _ _ _ () = (), None in
+  ((), { Mod_typing.vm_handler })
+
 let expand_mexpr env mp me =
   let inl = Some (Flags.get_inline_level()) in
   let state = ((Environ.universes env, Univ.Constraints.empty), Reductionops.inferred_universes) in
-  let mb, (_, cst) = Mod_typing.translate_module state env mp inl (MExpr ([], me, None)) in
-  mb.mod_type, mb.mod_delta
+  let mb, (_, cst), _ = Mod_typing.translate_module state vm_state env mp inl (MExpr ([], me, None)) in
+  mod_type mb, mod_delta mb
 
 let expand_modtype env mp me =
   let inl = Some (Flags.get_inline_level()) in
   let state = ((Environ.universes env, Univ.Constraints.empty), Reductionops.inferred_universes) in
-  let mtb, _cst = Mod_typing.translate_modtype state env mp inl ([],me) in
+  let mtb, _cst, _ = Mod_typing.translate_modtype state vm_state env mp inl ([],me) in
   mtb
 
 let no_delta = Mod_subst.empty_delta_resolver
@@ -176,7 +183,7 @@ let flatten_modtype env mp me_alg struc_opt =
   | Some me -> me, no_delta
   | None ->
      let mtb = expand_modtype env mp me_alg in
-     mtb.mod_type, mtb.mod_delta
+     mod_type mtb, mod_delta mtb
 
 (** Ad-hoc update of environment, inspired by [Mod_typing.check_with_aux_def].
 *)
@@ -211,13 +218,18 @@ let rec extract_structure_spec env mp reso = function
       let specs = extract_structure_spec env mp reso msig in
       if logical_spec s then specs
       else begin Visit.add_spec_deps s; (l,Spec s) :: specs end
+  | (l, SFBrules _) :: msig ->
+      let specs = extract_structure_spec env mp reso msig in
+      specs
   | (l,SFBmodule mb) :: msig ->
       let specs = extract_structure_spec env mp reso msig in
-      let spec = extract_mbody_spec env mb.mod_mp mb in
+      let mp = MPdot (mp, l) in
+      let spec = extract_mbody_spec env mp mb in
       (l,Smodule spec) :: specs
   | (l,SFBmodtype mtb) :: msig ->
       let specs = extract_structure_spec env mp reso msig in
-      let spec = extract_mbody_spec env mtb.mod_mp mtb in
+      let mp = MPdot (mp, l) in
+      let spec = extract_mbody_spec env mp mtb in
       (l,Smodtype spec) :: specs
 
 (* From [module_expression] to specifications *)
@@ -270,9 +282,9 @@ and extract_msignature_spec env mp1 reso = function
                 extract_msignature_spec env' mp1 reso me)
 
 and extract_mbody_spec : 'a. _ -> _ -> 'a generic_module_body -> _ =
-  fun env mp mb -> match mb.mod_type_alg with
-  | Some ty -> extract_mexpression_spec env mp (mb.mod_type,ty)
-  | None -> extract_msignature_spec env mp mb.mod_delta mb.mod_type
+  fun env mp mb -> match mod_type_alg mb with
+  | Some ty -> extract_mexpression_spec env mp (mod_type mb, ty)
+  | None -> extract_msignature_spec env mp (mod_delta mb) (mod_type mb)
 
 (* From a [structure_body] (i.e. a list of [structure_field_body])
    to implementations.
@@ -281,14 +293,14 @@ and extract_mbody_spec : 'a. _ -> _ -> 'a generic_module_body -> _ =
    important: last to first ensures correct dependencies.
 *)
 
-let rec extract_structure env mp reso ~all = function
+let rec extract_structure access env mp reso ~all = function
   | [] -> []
   | (l,SFBconst cb) :: struc ->
       (try
          let sg = Evd.from_env env in
          let vl,recd,struc = factor_fix env sg l cb struc in
          let vc = Array.map (make_cst reso mp) vl in
-         let ms = extract_structure env mp reso ~all struc in
+         let ms = extract_structure access env mp reso ~all struc in
          let b = Array.exists Visit.needed_cst vc in
          if all || b then
            let d = extract_fixpoint env sg vc recd in
@@ -296,16 +308,16 @@ let rec extract_structure env mp reso ~all = function
            else begin Visit.add_decl_deps d; (l,SEdecl d) :: ms end
          else ms
        with Impossible ->
-         let ms = extract_structure env mp reso ~all struc in
+         let ms = extract_structure access env mp reso ~all struc in
          let c = make_cst reso mp l in
          let b = Visit.needed_cst c in
          if all || b then
-           let d = extract_constant env c cb in
+           let d = extract_constant access env c cb in
            if (not b) && (logical_decl d) then ms
            else begin Visit.add_decl_deps d; (l,SEdecl d) :: ms end
          else ms)
   | (l,SFBmind mib) :: struc ->
-      let ms = extract_structure env mp reso ~all struc in
+      let ms = extract_structure access env mp reso ~all struc in
       let mind = make_mind reso mp l in
       let b = Visit.needed_ind mind in
       if all || b then
@@ -313,15 +325,22 @@ let rec extract_structure env mp reso ~all = function
         if (not b) && (logical_decl d) then ms
         else begin Visit.add_decl_deps d; (l,SEdecl d) :: ms end
       else ms
+  | (l, SFBrules rrb) :: struc ->
+      let b = List.exists (fun (cst, _) -> Visit.needed_cst cst) rrb.rewrules_rules in
+      let ms = extract_structure access env mp reso ~all struc in
+      if all || b then begin
+        List.iter (fun (cst, _) -> Table.add_symbol_rule (ConstRef cst) l) rrb.rewrules_rules;
+        ms
+      end else ms
   | (l,SFBmodule mb) :: struc ->
-      let ms = extract_structure env mp reso ~all struc in
+      let ms = extract_structure access env mp reso ~all struc in
       let mp = MPdot (mp,l) in
       let all' = all || Visit.needed_mp_all mp in
       if all' || Visit.needed_mp mp then
-        (l,SEmodule (extract_module env mp ~all:all' mb)) :: ms
+        (l,SEmodule (extract_module access env mp ~all:all' mb)) :: ms
       else ms
   | (l,SFBmodtype mtb) :: struc ->
-      let ms = extract_structure env mp reso ~all struc in
+      let ms = extract_structure access env mp reso ~all struc in
       let mp = MPdot (mp,l) in
       if all || Visit.needed_mp mp then
         (l,SEmodtype (extract_mbody_spec env mp mtb)) :: ms
@@ -329,23 +348,23 @@ let rec extract_structure env mp reso ~all = function
 
 (* From [module_expr] and [module_expression] to implementations *)
 
-and extract_mexpr env mp = function
+and extract_mexpr access env mp = function
   | MEwith _ -> assert false (* no 'with' syntax for modules *)
   | me when lang () != Ocaml || Table.is_extrcompute () ->
       (* In Haskell/Scheme, we expand everything.
          For now, we also extract everything, dead code will be removed later
          (see [Modutil.optimize_struct]. *)
       let sign, delta = expand_mexpr env mp me in
-      extract_msignature env mp delta ~all:true sign
+      extract_msignature access env mp delta ~all:true sign
   | MEident mp ->
       if is_modfile mp && not (modular ()) then error_MPfile_as_mod mp false;
       Visit.add_mp_all mp; Miniml.MEident mp
   | MEapply (me, arg) ->
-      Miniml.MEapply (extract_mexpr env mp me,
-                      extract_mexpr env mp (MEident arg))
+      Miniml.MEapply (extract_mexpr access env mp me,
+                      extract_mexpr access env mp (MEident arg))
 
-and extract_mexpression env mp mty = function
-  | MENoFunctor me -> extract_mexpr env mp me
+and extract_mexpression access env mp mty = function
+  | MENoFunctor me -> extract_mexpr access env mp me
   | MEMoreFunctor me ->
       let (mbid, mtb, mty) = match mty with
       | MoreFunctor (mbid, mtb, mty) -> (mbid, mtb, mty)
@@ -356,51 +375,51 @@ and extract_mexpression env mp mty = function
       Miniml.MEfunctor
         (mbid,
          extract_mbody_spec env mp1 mtb,
-         extract_mexpression env' mp mty me)
+         extract_mexpression access env' mp mty me)
 
-and extract_msignature env mp reso ~all = function
+and extract_msignature access env mp reso ~all = function
   | NoFunctor struc ->
       let env' = Modops.add_structure mp struc reso env in
-      Miniml.MEstruct (mp,extract_structure env' mp reso ~all struc)
+      Miniml.MEstruct (mp,extract_structure access env' mp reso ~all struc)
   | MoreFunctor (mbid, mtb, me) ->
       let mp1 = MPbound mbid in
       let env' = Modops.add_module_type mp1 mtb	env in
       Miniml.MEfunctor
         (mbid,
          extract_mbody_spec env mp1 mtb,
-         extract_msignature env' mp reso ~all me)
+         extract_msignature access env' mp reso ~all me)
 
-and extract_module env mp ~all mb =
+and extract_module access env mp ~all mb =
   (* A module has an empty [mod_expr] when :
      - it is a module variable (for instance X inside a Module F [X:SIG])
      - it is a module assumption (Declare Module).
      Since we look at modules from outside, we shouldn't have variables.
      But a Declare Module at toplevel seems legal (cf #2525). For the
      moment we don't support this situation. *)
-  let impl = match mb.mod_expr with
+  let impl = match Mod_declarations.mod_expr mb with
     | Abstract -> error_no_module_expr mp
-    | Algebraic me -> extract_mexpression env mp mb.mod_type me
+    | Algebraic me -> extract_mexpression access env mp (mod_type mb) me
     | Struct sign ->
       (* This module has a signature, otherwise it would be FullStruct.
          We extract just the elements required by this signature. *)
-      let () = add_labels mp mb.mod_type in
-      let sign = Modops.annotate_struct_body sign mb.mod_type in
-      extract_msignature env mp mb.mod_delta ~all:false sign
-    | FullStruct -> extract_msignature env mp mb.mod_delta ~all mb.mod_type
+      let () = add_labels mp (mod_type mb) in
+      let sign = Modops.annotate_struct_body sign (mod_type mb) in
+      extract_msignature access env mp (mod_delta mb) ~all:false sign
+    | FullStruct -> extract_msignature access env mp (mod_delta mb) ~all (mod_type mb)
   in
   (* Slight optimization: for modules without explicit signatures
      ([FullStruct] case), we build the type out of the extracted
      implementation *)
-  let typ = match mb.mod_expr with
+  let typ = match Mod_declarations.mod_expr mb with
     | FullStruct ->
-      assert (Option.is_empty mb.mod_type_alg);
+      assert (Option.is_empty @@ mod_type_alg mb);
       mtyp_of_mexpr impl
     | _ -> extract_mbody_spec env mp mb
   in
   { ml_mod_expr = impl;
     ml_mod_type = typ }
 
-let mono_environment refs mpl =
+let mono_environment ~opaque_access refs mpl =
   Visit.reset ();
   List.iter Visit.add_ref refs;
   List.iter Visit.add_mp_all mpl;
@@ -408,7 +427,7 @@ let mono_environment refs mpl =
   let l = List.rev (environment_until None) in
   List.rev_map
     (fun (mp,struc) ->
-      mp, extract_structure env mp no_delta ~all:(Visit.needed_mp_all mp) struc)
+      mp, extract_structure opaque_access env mp no_delta ~all:(Visit.needed_mp_all mp) struc)
     l
 
 (**************************************)
@@ -443,15 +462,23 @@ let mono_filename f =
             with UserError _ ->
               user_err Pp.(str "Extraction: provided filename is not a valid identifier")
         in
+        let f =
+          if Filename.is_relative f then
+            Filename.concat (output_directory ()) f
+          else f
+        in
         Some (f^d.file_suffix), Option.map ((^) f) d.sig_suffix, id
 
 (* Builds a suitable filename from a module id *)
 
 let module_filename mp =
   let f = file_of_modfile mp in
+  let id = Id.of_string f in
+  let f = Filename.concat (output_directory ()) f in
   let d = descr () in
-  let p = d.file_naming mp ^ d.file_suffix in
-  Some p, Option.map ((^) f) d.sig_suffix, Id.of_string f
+  let fimpl_base = d.file_naming mp ^ d.file_suffix in
+  let fimpl = Filename.concat (output_directory ()) fimpl_base in
+  Some fimpl, Option.map ((^) f) d.sig_suffix, id
 
 (*s Extraction of one decl to stdout. *)
 
@@ -469,7 +496,7 @@ let print_one_decl struc mp decl =
 (*s Extraction of a ml struct to a file. *)
 
 (** For Recursive Extraction, writing directly on stdout
-    won't work with coqide, we use a buffer instead *)
+    won't work with rocqide, we use a buffer instead *)
 
 let buf = Buffer.create 1000
 
@@ -549,7 +576,7 @@ let print_structure_to_file (fn,si,mo) dry struc =
        end;
        info_file si)
     (if dry then None else si);
-  (* Print the buffer content via Coq standard formatter (ok with coqide). *)
+  (* Print the buffer content via Rocq standard formatter (ok with rocqide). *)
   if not (Int.equal (Buffer.length buf) 0) then begin
     Feedback.msg_notice (str (Buffer.contents buf));
     Buffer.reset buf
@@ -565,7 +592,7 @@ let reset () =
   Visit.reset (); reset_tables (); reset_renaming_tables Everything
 
 let init ?(compute=false) ?(inner=false) modular library =
-  if not inner then (check_inside_section (); check_inside_module ());
+  if not inner then check_inside_section ();
   set_keywords (descr ()).keywords;
   set_modular modular;
   set_library library;
@@ -593,31 +620,32 @@ let rec locate_ref = function
         | None, Some r -> let refs,mps = locate_ref l in r::refs,mps
         | Some mp, None -> let refs,mps = locate_ref l in refs,mp::mps
         | Some mp, Some r ->
-           warning_ambiguous_name (qid,mp,r);
+           warning_ambiguous_name ?loc:qid.CAst.loc (qid,mp,r);
            let refs,mps = locate_ref l in refs,mp::mps
 
-(*s Recursive extraction in the Coq toplevel. The vernacular command is
+(*s Recursive extraction in the Rocq toplevel. The vernacular command is
     \verb!Recursive Extraction! [qualid1] ... [qualidn]. Also used when
     extracting to a file with the command:
     \verb!Extraction "file"! [qualid1] ... [qualidn]. *)
 
-let full_extr f (refs,mps) =
+let full_extr opaque_access f (refs,mps) =
   init false false;
   List.iter (fun mp -> if is_modfile mp then error_MPfile_as_mod mp true) mps;
-  let struc = optimize_struct (refs,mps) (mono_environment refs mps) in
+  let struc = optimize_struct (refs,mps) (mono_environment ~opaque_access refs mps) in
   warns ();
   print_structure_to_file (mono_filename f) false struc;
   reset ()
 
-let full_extraction f lr = full_extr f (locate_ref lr)
+let full_extraction ~opaque_access f lr =
+  full_extr opaque_access f (locate_ref lr)
 
 (*s Separate extraction is similar to recursive extraction, with the output
-   decomposed in many files, one per Coq .v file *)
+   decomposed in many files, one per Rocq .v file *)
 
-let separate_extraction lr =
+let separate_extraction ~opaque_access lr =
   init true false;
   let refs,mps = locate_ref lr in
-  let struc = optimize_struct (refs,mps) (mono_environment refs mps) in
+  let struc = optimize_struct (refs,mps) (mono_environment ~opaque_access refs mps) in
   let () = List.iter (function
     | MPfile _, _ -> ()
     | (MPdot _ | MPbound _), _ ->
@@ -633,15 +661,15 @@ let separate_extraction lr =
   List.iter print struc;
   reset ()
 
-(*s Simple extraction in the Coq toplevel. The vernacular command
+(*s Simple extraction in the Rocq toplevel. The vernacular command
     is \verb!Extraction! [qualid]. *)
 
-let simple_extraction r =
+let simple_extraction ~opaque_access r =
   match locate_ref [r] with
-  | ([], [mp]) as p -> full_extr None p
+  | ([], [mp]) as p -> full_extr opaque_access None p
   | [r],[] ->
       init false false;
-      let struc = optimize_struct ([r],[]) (mono_environment [r] []) in
+      let struc = optimize_struct ([r],[]) (mono_environment ~opaque_access [r] []) in
       let d = get_decl_in_structure r struc in
       warns ();
       let flag =
@@ -657,7 +685,7 @@ let simple_extraction r =
 (*s (Recursive) Extraction of a library. The vernacular command is
   \verb!(Recursive) Extraction Library! [M]. *)
 
-let extraction_library is_rec CAst.{loc;v=m} =
+let extraction_library ~opaque_access is_rec CAst.{loc;v=m} =
   init true true;
   let dir_m =
     let q = qualid_of_ident m in
@@ -668,7 +696,7 @@ let extraction_library is_rec CAst.{loc;v=m} =
   let l = List.rev (environment_until (Some dir_m)) in
   let select l (mp,struc) =
     if Visit.needed_mp mp
-    then (mp, extract_structure env mp no_delta ~all:true struc) :: l
+    then (mp, extract_structure opaque_access env mp no_delta ~all:true struc) :: l
     else l
   in
   let struc = List.fold_left select [] l in
@@ -697,7 +725,7 @@ let flatten_structure struc =
   and flatten_elems l = List.flatten (List.map flatten_elem l)
   in flatten_elems (List.flatten (List.map snd struc))
 
-let structure_for_compute env sg c =
+let structure_for_compute ~opaque_access env sg c =
   init false false ~compute:true;
   let ast, mlt = Extraction.extract_constr env sg c in
   let ast = Mlutil.normalize ast in
@@ -705,7 +733,7 @@ let structure_for_compute env sg c =
   let add_ref r = refs := GlobRef.Set.add r !refs in
   let () = ast_iter_references add_ref add_ref add_ref ast in
   let refs = GlobRef.Set.elements !refs in
-  let struc = optimize_struct (refs,[]) (mono_environment refs []) in
+  let struc = optimize_struct (refs,[]) (mono_environment ~opaque_access refs []) in
   (flatten_structure struc), ast, mlt
 
 (* For the test-suite :
@@ -734,11 +762,11 @@ let compile f =
 let remove f =
   if Sys.file_exists f then Sys.remove f
 
-let extract_and_compile l =
+let extract_and_compile ~opaque_access l =
   if lang () != Ocaml then
     CErrors.user_err (Pp.str "This command only works with OCaml extraction");
   let f = Filename.temp_file "testextraction" ".ml" in
-  let () = full_extraction (Some f) l in
+  let () = full_extraction ~opaque_access (Some f) l in
   let () = compile f in
   let () = remove f; remove (f^"i") in
   let base = Filename.chop_suffix f ".ml" in

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -18,15 +18,19 @@ sig
   val explode : string -> string list
   val implode : string list -> string
   val drop_simple_quotes : string -> string
+  val quote_coq_string : string -> string
+  val unquote_coq_string : string -> string option
+  val html_escape : string -> string
   val string_index_from : string -> int -> string -> int
   val string_contains : where:string -> what:string -> bool
   val plural : int -> string -> string
+  val lplural : _ list -> string -> string
   val conjugate_verb_to_be : int -> string
   val ordinal : int -> string
   val is_sub : string -> string -> int -> bool
   val is_prefix : string -> string -> bool
   val is_suffix : string -> string -> bool
-  module Set : Set.S with type elt = t
+  module Set : CSet.ExtS with type elt = t
   module Map : CMap.ExtS with type key = t and module Set := Set
   module Pred : Predicate.S with type elt = t
   module List : CList.MonoS with type elt = t
@@ -61,6 +65,42 @@ let is_empty s = String.length s = 0
 let drop_simple_quotes s =
   let n = String.length s in
   if n > 2 && s.[0] = '\'' && s.[n-1] = '\'' then String.sub s 1 (n-2) else s
+
+let quote_coq_string s =
+  let b = Buffer.create (String.length s + 2) in
+  Buffer.add_char b '"';
+  for i = 0 to String.length s - 1 do
+    Buffer.add_char b s.[i];
+    if s.[i] = '"' then Buffer.add_char b s.[i];
+  done;
+  Buffer.add_char b '"';
+  Buffer.contents b
+
+let unquote_coq_string s =
+  let b = Buffer.create (String.length s) in
+  let n = String.length s in
+  if n < 2 || s.[0] <> '"' || s.[n-1] <> '"' then None else
+    let i = ref 1 in
+    try
+      while !i < n - 1 do
+        Buffer.add_char b s.[!i];
+        if s.[!i] = '"' then
+          if !i < n - 2 && s.[!i+1] = '"' then incr i
+          else raise Exit;
+        incr i
+      done;
+      Some (Buffer.contents b)
+    with Exit -> None
+
+let html_escape msg =
+  let buf = Buffer.create (String.length msg) in
+  String.iter (fun c ->
+      if String.contains "\"&'<>" c then
+        Buffer.add_string buf (Printf.sprintf "&#%d;" (Char.code c))
+      else
+        Buffer.add_char buf c)
+    msg;
+  Buffer.contents buf
 
 (* substring searching... *)
 
@@ -112,6 +152,11 @@ let is_suffix p s =
 
 let plural n s = if n<>1 then s^"s" else s
 
+let lplural l s =
+  match l with
+  | [_] -> s
+  | _ -> s^"s"
+
 let conjugate_verb_to_be n = if n<>1 then "are" else "is"
 
 let ordinal n =
@@ -133,7 +178,7 @@ struct
   let compare = compare
 end
 
-module Set = Set.Make(Self)
+module Set = CSet.Make(Self)
 module Map = CMap.Make(Self)
 module Pred = Predicate.Make(Self)
 

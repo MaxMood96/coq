@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -38,6 +38,8 @@ struct
   let is_empty = Int.Map.is_empty
 
   let mem x s =
+    if Int.Map.is_empty s then false
+    else
     let h = M.hash x in
     try
       let m = Int.Map.find h s in
@@ -46,13 +48,10 @@ struct
 
   let add x s =
     let h = M.hash x in
-    try
-      let m = Int.Map.find h s in
-      let m = Set.add x m in
-      Int.Map.set h m s
-    with Not_found ->
-      let m = Set.singleton x in
-      Int.Map.add h m s
+    Int.Map.update h (function
+        | None -> Some (Set.singleton x)
+        | Some m -> Some (Set.add x m))
+      s
 
   let singleton x =
     let h = M.hash x in
@@ -60,15 +59,16 @@ struct
     Int.Map.singleton h m
 
   let remove x s =
-    let h = M.hash x in
-    try
-      let m = Int.Map.find h s in
-      let m = Set.remove x m in
-      if Set.is_empty m then
-        Int.Map.remove h s
-      else
-        Int.Map.set h m s
-    with Not_found -> s
+    if Int.Map.is_empty s then s
+    else
+      let h = M.hash x in
+      Int.Map.update h (function
+          | None -> None
+          | Some m ->
+            let m = Set.remove x m in
+            if Set.is_empty m then None
+            else Some m)
+        s
 
   let height s = Int.Map.height s
 
@@ -205,15 +205,9 @@ struct
     let fold _ m accu = Set.fold (fun x accu -> x :: accu) m accu in
     Int.Map.fold fold s []
 
-  let min_elt _ = assert false (** Cannot be implemented efficiently *)
-
-  let max_elt _ = assert false (** Cannot be implemented efficiently *)
-
   let choose s =
     let (_, m) = Int.Map.choose s in
     Set.choose m
-
-  let split s x = assert false (** Cannot be implemented efficiently *)
 
 end
 
@@ -233,6 +227,8 @@ struct
   let is_empty = Int.Map.is_empty
 
   let mem k s =
+    if Int.Map.is_empty s then false
+    else
     let h = M.hash k in
     try
       let m = Int.Map.find h s in
@@ -241,28 +237,26 @@ struct
 
   let add k x s =
     let h = M.hash k in
-    try
-      let m = Int.Map.find h s in
-      let m = Map.add k x m in
-      Int.Map.set h m s
-    with Not_found ->
-      let m = Map.singleton k x in
-      Int.Map.add h m s
+    Int.Map.update h (function
+        | None -> Some (Map.singleton k x)
+        | Some m -> Some (Map.add k x m))
+      s
 
   let singleton k x =
     let h = M.hash k in
     Int.Map.singleton h (Map.singleton k x)
 
   let remove k s =
+    if Int.Map.is_empty s then s
+    else
     let h = M.hash k in
-    try
-      let m = Int.Map.find h s in
-      let m = Map.remove k m in
-      if Map.is_empty m then
-        Int.Map.remove h s
-      else
-        Int.Map.set h m s
-    with Not_found -> s
+    Int.Map.update h (function
+        | None -> None
+        | Some m ->
+          let m = Map.remove k m in
+          if Map.is_empty m then None
+          else Some m)
+      s
 
   let merge f s1 s2 =
     let fm h m1 m2 = match m1, m2 with
@@ -319,6 +313,11 @@ struct
     let s = Int.Map.map ff s in
     Int.Map.filter (fun _ m -> not (Map.is_empty m)) s
 
+  let filter_map f s =
+    let ff m = Map.filter_map f m in
+    let s = Int.Map.map ff s in
+    Int.Map.filter (fun _ m -> not (Map.is_empty m)) s
+
   let partition f s =
     let fold h m (sl, sr) =
       let (ml, mr) = Map.partition f m in
@@ -336,14 +335,6 @@ struct
     let fold _ m accu = Map.fold (fun k x accu -> (k, x) :: accu) m accu in
     Int.Map.fold fold s []
 
-  let min_binding _ = assert false (** Cannot be implemented efficiently *)
-
-  let max_binding _ = assert false (** Cannot be implemented efficiently *)
-
-  let fold_left _ _ _ = assert false (** Cannot be implemented efficiently *)
-
-  let fold_right _ _ _ = assert false (** Cannot be implemented efficiently *)
-
   let choose s =
     let (_, m) = Int.Map.choose s in
     Map.choose m
@@ -353,11 +344,15 @@ struct
     with Not_found -> None
 
   let find k s =
+    if Int.Map.is_empty s then raise Not_found
+    else
     let h = M.hash k in
     let m = Int.Map.find h s in
     Map.find k m
 
   let find_opt k s =
+    if Int.Map.is_empty s then None
+    else
     let h = M.hash k in
     match Int.Map.find_opt h s with
     | None -> None
@@ -368,8 +363,6 @@ struct
     let m = Int.Map.get h s in
     Map.get k m
 
-  let split k s = assert false (** Cannot be implemented efficiently *)
-
   let map f s =
     let fs m = Map.map f m in
     Int.Map.map fs s
@@ -379,10 +372,10 @@ struct
     Int.Map.map fs s
 
   let modify k f s =
+    if Int.Map.is_empty s then raise Not_found
+    else
     let h = M.hash k in
-    let m = Int.Map.find h s in
-    let m = Map.modify k f m in
-    Int.Map.set h m s
+    Int.Map.modify h (fun _ m -> Map.modify k f m) s
 
   let bind f s =
     let fb m = Map.bind f m in
@@ -391,10 +384,10 @@ struct
   let domain s = Int.Map.map Map.domain s
 
   let set k x s =
+    if Int.Map.is_empty s then raise Not_found
+    else
     let h = M.hash k in
-    let m = Int.Map.find h s in
-    let m = Map.set k x m in
-    Int.Map.set h m s
+    Int.Map.modify h (fun _ m -> Map.set k x m) s
 
   module Smart =
   struct
@@ -420,16 +413,22 @@ struct
     List.fold_left fold empty l
 
   let update k f m =
-    let aux = function
-      | None -> (match f None with
-          | None -> None
-          | Some v -> Some (Map.singleton k v))
-      | Some m ->
-        let m = Map.update k f m in
-        if Map.is_empty m then None
-        else Some m
-    in
-    Int.Map.update (M.hash k) aux m
+    if Int.Map.is_empty m then
+      begin match f None with
+      | None -> m
+      | Some v -> singleton k v
+      end
+    else
+      let aux = function
+        | None -> (match f None with
+            | None -> None
+            | Some v -> Some (Map.singleton k v))
+        | Some m ->
+          let m = Map.update k f m in
+          if Map.is_empty m then None
+          else Some m
+      in
+      Int.Map.update (M.hash k) aux m
 
   module Monad(M : CMap.MonadS) =
   struct
@@ -440,11 +439,17 @@ struct
       let ff _ m accu = ExtM.fold f m accu in
       IntM.fold ff s accu
 
-    let fold_left _ _ _ = assert false
-    let fold_right _ _ _ = assert false
-
     let mapi f s =
       IntM.mapi (fun _ m -> ExtM.mapi f m) s
   end
+
+  let symmetric_diff_fold f lm rm acc =
+    Int.Map.symmetric_diff_fold
+      (fun _ l r -> match l, r with
+         | Some m, None -> Map.fold (fun k v acc -> f k (Some v) None acc) m
+         | None, Some m -> Map.fold (fun k v acc -> f k None (Some v) acc) m
+         | Some lm, Some rm -> Map.symmetric_diff_fold f lm rm
+         | None, None -> assert false)
+      lm rm acc
 
 end

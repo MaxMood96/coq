@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -70,7 +70,6 @@ let read_lines_and_close_fd fd =
 (** Run some unix command and read the first line of its output.
     We avoid Unix.open_process and its non-fully-portable /bin/sh,
     especially when it comes to quoting the filenames.
-    See open_process_pid in ide/coqide/coq.ml for more details.
     Error messages:
      - if err=StdErr, any error message goes in the stderr of our script.
      - if err=StdOut, we merge stderr and stdout (just as 2>&1).
@@ -172,7 +171,7 @@ let is_executable f =
 (** Equivalent of rm -f *)
 
 let safe_remove f =
-  try Unix.chmod f 0o644; Sys.remove f with _ -> ()
+  try Unix.chmod f 0o644; Sys.remove f with Unix.Unix_error _ | Sys_error _ -> ()
 
 (** The PATH list for searching programs *)
 
@@ -233,4 +232,7 @@ let write_config_file ~file ?(bin=false) action =
     action o;
     close_out o;
     Unix.chmod file 0o444
-  with _ -> close_out o; safe_remove file
+  with exn ->
+    close_out o;
+    safe_remove file;
+    raise exn

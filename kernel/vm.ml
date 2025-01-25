@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,7 +11,7 @@
 open Values
 open Vmvalues
 
-external mkPopStopCode : int -> tcode = "coq_pushpop"
+external mkPopStopCode : int -> tcode = "rocq_pushpop"
 
 let popstop_tbl =  ref (Array.init 30 mkPopStopCode)
 
@@ -33,10 +33,10 @@ let stop = popstop_code 0
 (************************************************)
 
 (* gestion de la pile *)
-external push_ra : tcode -> unit = "coq_push_ra"
-external push_val : values -> unit = "coq_push_val"
-external push_arguments : arguments -> unit = "coq_push_arguments"
-external push_vstack : vstack -> int -> unit = "coq_push_vstack"
+external push_ra : tcode -> unit = "rocq_push_ra"
+external push_val : values -> unit = "rocq_push_val"
+external push_arguments : arguments -> unit = "rocq_push_arguments"
+external push_vstack : vstack -> int -> unit = "rocq_push_vstack"
 
 let interprete = Vmsymtable.vm_interp
 
@@ -163,7 +163,7 @@ let rec apply_stack a stk v =
 let apply_whd k whd =
   let v = val_of_rel k in
   match whd with
-  | Vprod _ | Vconst _ | Vblock _ | Vint64 _ | Vfloat64 _ | Varray _ ->
+  | Vprod _ | Vconst _ | Vblock _ | Vint64 _ | Vfloat64 _ | Vstring _ | Varray _ ->
      assert false
   | Vfun f -> reduce_fun k f
   | Vfix(f, None) ->

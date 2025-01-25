@@ -8,6 +8,10 @@
     Grammars entries can be extended using the [EXTEND] statement,
     added by loading the Camlp5 [pa_extend.cmo] file. *)
 
+exception Error of string
+(** Raised by parsers when the first component of a stream pattern is
+   accepted, but one of the following components is rejected. *)
+
 (** {6 Functorial interface} *)
 
    (** Alternative for grammars use. Grammars are no more Ocaml values:
@@ -28,7 +32,7 @@ module type S = sig
   type ty_pattern = TPattern : 'a pattern -> ty_pattern
 
   (** Type combinators to factor the module type between explicit
-      state passing in Grammar and global state in Pcoq *)
+      state passing in Grammar and global state in Procq *)
 
   type 'a with_gstate
   (** Reader of grammar state *)
@@ -62,7 +66,7 @@ module type S = sig
     val is_empty : 'a t -> bool with_estate
 
     type any_t = Any : 'a t -> any_t
-    val accumulate_in : 'a t -> any_t list CString.Map.t with_estate
+    val accumulate_in : any_t list -> any_t list CString.Map.t with_estate
   end
 
   module rec Symbol : sig
@@ -118,7 +122,7 @@ module type S = sig
   | Fresh of Gramext.position * 'a single_extend_statement list
     (** Create a level at the given position. *)
 
-  val generalize_symbol : ('a, 'tr, 'c) Symbol.t -> ('a, norec, 'c) Symbol.t option
+  val generalize_symbol : ('a, 'tr, 'c) Symbol.t -> ('b, norec, 'c) Symbol.t option
 
   (* Used in custom entries, should tweak? *)
   val level_of_nonterm : ('a, norec, 'c) Symbol.t -> string option

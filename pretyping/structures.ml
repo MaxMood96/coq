@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -97,6 +97,11 @@ let projection_nparams cst = (Cmap.find cst !projection_table).nparams
 
 let is_projection cst = Cmap.mem cst !projection_table
 
+let projection_number env cst =
+  let s = find_from_projection cst in
+  CList.index0 (Option.equal (Environ.QConstant.equal env)) (Some cst)
+    (List.map (fun x -> x.proj_body) s.projections)
+
 end
 
 (************************************************************************)
@@ -131,7 +136,7 @@ end
 type obj_typ = {
   o_ORIGIN : GlobRef.t;
   o_DEF : constr;
-  o_CTX : Univ.AbstractContext.t;
+  o_CTX : UVars.AbstractContext.t;
   o_INJ : int option;      (* position of trivial argument if any *)
   o_TABS : constr list;    (* ordered *)
   o_TPARAMS : constr list; (* ordered *)
@@ -161,19 +166,19 @@ let compare p1 p2 = match p1, p2 with
   | Prod_cs, Prod_cs -> 0
   | Sort_cs s1, Sort_cs s2 -> Sorts.family_compare s1 s2
   | Default_cs, Default_cs -> 0
-  | _ -> pervasives_compare p1 p2
+  | _ -> Stdlib.compare p1 p2
 
-let rec of_constr env t =
-  match kind t with
+let rec of_constr sigma t =
+  match EConstr.kind sigma t with
   | App (f,vargs) ->
-    let patt, n, args = of_constr env f in
+    let patt, n, args = of_constr sigma f in
     patt, n, args @ Array.to_list vargs
   | Rel n -> Default_cs, Some n, []
-  | Lambda (_, _, b) -> let patt, _, _ = of_constr env b in patt, None, []
+  | Lambda (_, _, b) -> let patt, _, _ = of_constr sigma b in patt, None, []
   | Prod (_,_,_) -> Prod_cs, None, [t]
-  | Proj (p, c) -> Proj_cs (Names.Projection.repr p), None, [c]
-  | Sort s -> Sort_cs (Sorts.family s), None, []
-  | _ -> Const_cs (fst @@ destRef t) , None, []
+  | Proj (p, _, c) -> Proj_cs (Names.Projection.repr p), None, [c]
+  | Sort s -> Sort_cs (EConstr.ESorts.family sigma s), None, []
+  | _ -> Const_cs (fst @@ EConstr.destRef sigma t) , None, []
 
 let print = function
     Const_cs c -> Nametab.pr_global_env Id.Set.empty c
@@ -206,18 +211,18 @@ let warn_projection_no_head_constant =
           ++ con_pp ++ str " of " ++ proji_sp_pp ++ strbrk ", ignoring it.")
 
 (* Intended to always succeed *)
-let compute_canonical_projections env ~warn (gref,ind) =
+let compute_canonical_projections env sigma ~warn (gref,ind) =
   let o_CTX = Environ.universes_of_global env gref in
   let o_DEF, c =
     match gref with
     | GlobRef.ConstRef con ->
-        let u = Univ.make_abstract_instance o_CTX in
+        let u = UVars.make_abstract_instance o_CTX in
         mkConstU (con, u), Environ.constant_value_in env (con,u)
     | GlobRef.VarRef id ->
         mkVar id, Option.get (Environ.named_body id env)
     | GlobRef.ConstructRef _ | GlobRef.IndRef _ -> assert false
   in
-  let sign,t = Reduction.hnf_decompose_lambda env c in
+  let sign,t = Reduction.whd_decompose_lambda env c in
   let o_TABS = List.rev_map Context.Rel.Declaration.get_type sign in
   let args = snd (decompose_app_list t) in
   let { Structure.nparams = p; projections = lpj } =
@@ -225,16 +230,15 @@ let compute_canonical_projections env ~warn (gref,ind) =
   let o_TPARAMS, projs = List.chop p args in
   let o_NPARAMS = List.length o_TPARAMS in
   let lpj = keep_true_projections lpj in
-  let nenv = Environ.push_rel_context sign env in
   List.fold_left2 (fun acc (spopt, canonical) t ->
-      let t = EConstr.Unsafe.to_constr (shrink_eta (Evd.from_env env) (EConstr.of_constr t)) in
+      let t = EConstr.Unsafe.to_constr (shrink_eta sigma (EConstr.of_constr t)) in
       if canonical
       then
         Option.cata (fun proji_sp ->
-            match ValuePattern.of_constr nenv t with
+            match ValuePattern.of_constr sigma (EConstr.of_constr t) with
             | patt, o_INJ, o_TCOMPS ->
               ((GlobRef.ConstRef proji_sp, (patt, t)),
-               { o_ORIGIN = gref ; o_DEF ; o_CTX ; o_INJ ; o_TABS ; o_TPARAMS ; o_NPARAMS ; o_TCOMPS })
+               { o_ORIGIN = gref ; o_DEF ; o_CTX ; o_INJ ; o_TABS ; o_TPARAMS ; o_NPARAMS ; o_TCOMPS = List.map EConstr.Unsafe.to_constr o_TCOMPS })
               :: acc
             | exception DestKO ->
               if warn then warn_projection_no_head_constant (sign, env, t, gref, proji_sp);
@@ -278,7 +282,7 @@ let make env sigma ref =
   let vc =
     match ref with
     | GlobRef.ConstRef sp ->
-        let u = Univ.make_abstract_instance (Environ.constant_context env sp) in
+        let u = UVars.make_abstract_instance (Environ.constant_context env sp) in
         begin match Environ.constant_opt_value_in env (sp, u) with
         | Some vc -> vc
         | None -> error_not_structure ref (str "Could not find its value in the global environment") end
@@ -289,7 +293,7 @@ let make env sigma ref =
     | GlobRef.IndRef _ | GlobRef.ConstructRef _ ->
         error_not_structure ref (str "Expected an instance of a record or structure")
   in
-  let body = snd (hnf_decompose_lambda env sigma (EConstr.of_constr vc)) in
+  let body = snd (whd_decompose_lambda env sigma (EConstr.of_constr vc)) in
   let body = EConstr.Unsafe.to_constr body in
   let f,args = match kind body with
     | App (f,args) -> f,args
@@ -309,7 +313,7 @@ let make env sigma ref =
   (ref,indsp)
 
 let register ~warn env sigma o =
-    compute_canonical_projections env ~warn o |>
+    compute_canonical_projections env sigma ~warn o |>
     List.iter (fun ((proj, (cs_pat, t)), s) ->
       let l = try GlobRef.Map.find proj !object_table with Not_found -> PatMap.empty in
       match PatMap.find cs_pat l with
@@ -353,6 +357,7 @@ let find env sigma (proj,pat) =
   let us = List.map EConstr.of_constr us in
   let params = List.map EConstr.of_constr params in
   let u, ctx' = UnivGen.fresh_instance_from ctx None in
+  let u = EConstr.EInstance.make u in
   let c = EConstr.of_constr c in
   let c' = EConstr.Vars.subst_instance_constr u c in
   let t' = EConstr.of_constr t' in
@@ -360,7 +365,7 @@ let find env sigma (proj,pat) =
   let bs' = List.map (EConstr.of_constr %> EConstr.Vars.subst_instance_constr u) bs in
   let params = List.map (fun c -> EConstr.Vars.subst_instance_constr u c) params in
   let us = List.map (fun c -> EConstr.Vars.subst_instance_constr u c) us in
-  let sigma = Evd.merge_context_set Evd.univ_flexible sigma ctx' in
+  let sigma = Evd.merge_sort_context_set Evd.univ_flexible sigma ctx' in
   sigma, { body = t'; constant = c'; abstractions_ty = bs'; nparams; params; cvalue_arguments = us; cvalue_abstraction = n }
 
 
@@ -371,31 +376,50 @@ let rec get_nth n = function
   if n < len then arg.(n)
   else get_nth (n - len) args
 
-let rec decompose_projection sigma c args =
+let rec decompose_projection ?metas sigma c args =
   match EConstr.kind sigma c with
-  | Meta mv -> decompose_projection sigma (Evd.meta_value sigma mv) args
-  | Cast (c, _, _) -> decompose_projection sigma c args
-  | App (c, arg) -> decompose_projection sigma c (arg :: args)
+  | Meta mv ->
+    begin match metas with
+    | None -> raise Not_found
+    | Some m ->
+      match m.meta_value mv with
+      | None -> raise Not_found
+      | Some v -> decompose_projection ?metas sigma v args
+    end
+  | Cast (c, _, _) -> decompose_projection ?metas sigma c args
+  | App (c, arg) -> decompose_projection ?metas sigma c (arg :: args)
   | Const (c, u) ->
      let n = Structure.projection_nparams c in
      (* Check if there is some canonical projection attached to this structure *)
      let _ = GlobRef.Map.find (GlobRef.ConstRef c) !object_table in
      get_nth n args
-  | Proj (p, c) ->
+  | Proj (p, _, c) ->
      let _ = GlobRef.Map.find (GlobRef.ConstRef (Names.Projection.constant p)) !object_table in
      c
   | _ -> raise Not_found
 
-let is_open_canonical_projection env sigma c =
+let is_open_canonical_projection ?metas env sigma c =
   let open EConstr in
   try
-    let arg = decompose_projection sigma c [] in
+    let arg = decompose_projection ?metas sigma c [] in
     try
-      let arg = whd_all env sigma arg in
+      let arg = whd_all ?metas env sigma arg in
       let hd = match EConstr.kind sigma arg with App (hd, _) -> hd | _ -> arg in
       not (isConstruct sigma hd)
     with Failure _ -> false
   with Not_found -> false
+
+let print env sigma s =
+  let pr_econstr = Termops.Internal.debug_print_constr sigma in
+  let pr_econstr_list l = Pp.(str "[ " ++ prlist_with_sep (fun () -> str "; ") pr_econstr l ++ str " ]") in
+  Pp.(str "{ constant = " ++ pr_econstr s.constant ++ cut () ++
+     str "abstractions_ty = " ++ pr_econstr_list s.abstractions_ty ++ cut () ++
+     str "body = " ++ pr_econstr s.body ++ cut () ++
+     str "nparams = " ++ int s.nparams ++ cut () ++
+     str "params = " ++ pr_econstr_list s.params ++ cut () ++
+     str "cvalue_abstractions = " ++ pr_opt int s.cvalue_abstraction ++ cut () ++
+     str "cvalue_arguments = " ++ pr_econstr_list s.cvalue_arguments ++ cut () ++
+     str "}")
 
 end
 
@@ -436,5 +460,16 @@ let mem c = Cmap_env.mem c !prim_table
 
 let find_opt c =
   try Some (Cmap_env.find c !prim_table) with Not_found -> None
+
+let find_opt_with_relevance (c,u) =
+  find_opt c |>
+  Option.map (fun p ->
+      let u = EConstr.Unsafe.to_instance u in
+      p, EConstr.ERelevance.make @@ Relevanceops.relevance_of_projection_repr (Global.env()) (p,u))
+
+let is_transparent_constant ts c =
+  match find_opt c with
+  | None -> TransparentState.is_transparent_constant ts c
+  | Some p -> TransparentState.is_transparent_projection ts p
 
 end

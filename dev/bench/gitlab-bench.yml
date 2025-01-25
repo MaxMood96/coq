@@ -1,6 +1,6 @@
 
 bench:
-  stage: build
+  stage: build-0
   needs: []
   when: manual
   before_script:
@@ -19,6 +19,7 @@ bench:
       - _bench/files.listing
       - _bench/opam.NEW/**/*.log
       - _bench/opam.NEW/**/*.timing
+      - _bench/opam.NEW/**/*.prof.json.gz
       - _bench/opam.OLD/**/*.log
       - _bench/opam.OLD/**/*.timing
     when: always

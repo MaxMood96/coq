@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,7 +8,7 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-DECLARE PLUGIN "coq-core.plugins.ltac"
+DECLARE PLUGIN "rocq-runtime.plugins.ltac"
 
 {
 
@@ -16,15 +16,14 @@ open Util
 open Pp
 open Constrexpr
 open Tacexpr
-open Namegen
 open Genarg
 open Genredexpr
 open Names
 open Attributes
 
-open Pcoq
-open Pcoq.Prim
-open Pcoq.Constr
+open Procq
+open Procq.Prim
+open Procq.Constr
 open Pvernac.Vernac_
 open Pltac
 
@@ -49,18 +48,10 @@ let reference_to_id qid =
 
 let tactic_mode = Entry.make "tactic_command"
 
-let toplevel_selector = Entry.make "toplevel_selector"
 let tacdef_body = Entry.make "tacdef_body"
 
 (* Registers [tactic_mode] as a parser for proof editing *)
 let classic_proof_mode = Pvernac.register_proof_mode "Classic" tactic_mode
-
-(* Hack to parse "[ id" without dropping [ *)
-let test_bracket_ident =
-  let open Pcoq.Lookahead in
-  to_entry "test_bracket_ident" begin
-    lk_kw "[" >> lk_ident
-  end
 
 (* Tactics grammar rules *)
 
@@ -68,12 +59,17 @@ let hint = G_proofs.hint
 
 let for_extraargs = ()
 
+let goal_selector = G_vernac.goal_selector
+let toplevel_selector = G_vernac.toplevel_selector
+let subprf = G_vernac.subprf
+let subprf_with_selector = G_vernac.subprf_with_selector
+
 }
 
 GRAMMAR EXTEND Gram
-  GLOBAL: tactic tacdef_body ltac_expr binder_tactic tactic_value command hint
-          tactic_mode constr_may_eval constr_eval toplevel_selector
-          term;
+  GLOBAL: tactic tacdef_body ltac_expr tactic_value command hint
+          tactic_mode constr_may_eval constr_eval
+          term subprf subprf_with_selector;
 
   tactic_then_last:
     [ [ "|"; lta = LIST0 (OPT ltac_expr) SEP "|" ->
@@ -96,10 +92,9 @@ GRAMMAR EXTEND Gram
   ;
   ltac_expr:
     [ "5" RIGHTA
-      [ te = binder_tactic -> { te } ]
+      [ ]
     | "4" LEFTA
-      [ ta0 = ltac_expr; ";"; ta1 = binder_tactic -> { CAst.make ~loc (TacThen (ta0, ta1)) }
-      | ta0 = ltac_expr; ";"; ta1 = ltac_expr -> { CAst.make ~loc (TacThen (ta0,ta1)) }
+      [ ta0 = ltac_expr; ";"; ta1 = ltac_expr -> { CAst.make ~loc (TacThen (ta0,ta1)) }
       | ta0 = ltac_expr; ";"; l = tactic_then_locality; tg = for_each_goal; "]" -> {
           let (first,tail) = tg in
           match l , tail with
@@ -121,18 +116,21 @@ GRAMMAR EXTEND Gram
       | IDENT "abstract"; tc = NEXT -> { CAst.make ~loc (TacAbstract (tc,None)) }
       | IDENT "abstract"; tc = NEXT; "using";  s = ident ->
         { CAst.make ~loc (TacAbstract (tc,Some s)) }
-      | IDENT "only"; sel = selector; ":"; ta = ltac_expr -> { CAst.make ~loc (TacSelect (sel, ta)) } ]
+      | IDENT "only"; sel = goal_selector; ":"; ta = ltac_expr -> { CAst.make ~loc (TacSelect (sel, ta)) } ]
 (*End of To do*)
     | "2" RIGHTA
-      [ ta0 = ltac_expr; "+"; ta1 = binder_tactic -> { CAst.make ~loc (TacOr (ta0,ta1)) }
-      | ta0 = ltac_expr; "+"; ta1 = ltac_expr -> { CAst.make ~loc (TacOr (ta0,ta1)) }
+      [ ta0 = ltac_expr; "+"; ta1 = ltac_expr -> { CAst.make ~loc (TacOr (ta0,ta1)) }
       | IDENT "tryif" ; ta = ltac_expr ;
               "then" ; tat = ltac_expr ;
               "else" ; tae = ltac_expr -> { CAst.make ~loc (TacIfThenCatch (ta,tat,tae)) }
-      | ta0 = ltac_expr; "||"; ta1 = binder_tactic -> { CAst.make ~loc (TacOrelse (ta0,ta1)) }
       | ta0 = ltac_expr; "||"; ta1 = ltac_expr -> { CAst.make ~loc (TacOrelse (ta0,ta1)) } ]
     | "1" RIGHTA
-      [ b = match_key; IDENT "goal"; "with"; mrl = match_context_list; "end" ->
+      [ "fun"; it = LIST1 input_fun ; "=>"; body = ltac_expr LEVEL "5" ->
+          { CAst.make ~loc (TacFun (it,body)) }
+      | "let"; isrec = [IDENT "rec" -> { true } | -> { false } ];
+          llc = LIST1 let_clause SEP "with"; "in";
+          body = ltac_expr LEVEL "5" -> { CAst.make ~loc (TacLetIn (isrec,llc,body)) }
+      | b = match_key; IDENT "goal"; "with"; mrl = match_context_list; "end" ->
           { CAst.make ~loc (TacMatchGoal (b,false,mrl)) }
       | b = match_key; IDENT "reverse"; IDENT "goal"; "with";
         mrl = match_context_list; "end" ->
@@ -163,15 +161,6 @@ GRAMMAR EXTEND Gram
   failkw:
   [ [ IDENT "fail" -> { TacLocal } | IDENT "gfail" -> { TacGlobal } ] ]
   ;
-  (* binder_tactic: level 5 of ltac_expr *)
-  binder_tactic:
-    [ RIGHTA
-      [ "fun"; it = LIST1 input_fun ; "=>"; body = ltac_expr LEVEL "5" ->
-          { CAst.make ~loc (TacFun (it,body)) }
-      | "let"; isrec = [IDENT "rec" -> { true } | -> { false } ];
-          llc = LIST1 let_clause SEP "with"; "in";
-          body = ltac_expr LEVEL "5" -> { CAst.make ~loc (TacLetIn (isrec,llc,body)) } ] ]
-  ;
   (* Tactic arguments to the right of an application *)
   tactic_arg:
     [ [ a = tactic_value -> { a }
@@ -200,10 +189,6 @@ GRAMMAR EXTEND Gram
           { ConstrContext (id,c) }
       | IDENT "type"; IDENT "of"; c = Constr.constr ->
           { ConstrTypeOf c } ] ]
-  ;
-  constr_may_eval: (* For extensions *)
-    [ [ c = constr_eval -> { c }
-      | c = Constr.constr -> { ConstrTerm c } ] ]
   ;
   tactic_atom:
     [ [ n = integer -> { TacGeneric (None, genarg_of_int n) }
@@ -243,7 +228,7 @@ GRAMMAR EXTEND Gram
               | { CAst.v = CCast (t, Some DEFAULTcast, ty) } -> Term t, Some (Term ty)
               | _ -> mpv, None)
             | _ -> mpv, None
-          in Def (na, t, Option.default (Term (CAst.make @@ CHole (None, IntroAnonymous))) ty) }
+          in Def (na, t, Option.default (Term (CAst.make @@ CHole (None))) ty) }
     ] ]
   ;
   match_context_rule:
@@ -295,34 +280,10 @@ GRAMMAR EXTEND Gram
   tactic:
     [ [ tac = ltac_expr -> { tac } ] ]
   ;
-
-  range_selector:
-    [ [ n = natural ; "-" ; m = natural -> { (n, m) }
-      | n = natural -> { (n, n) } ] ]
-  ;
-  (* We unfold a range selectors list once so that we can make a special case
-   * for a unique SelectNth selector. *)
-  range_selector_or_nth:
-    [ [ n = natural ; "-" ; m = natural;
-        l = OPT [","; l = LIST1 range_selector SEP "," -> { l } ] ->
-        { Goal_select.SelectList ((n, m) :: Option.default [] l) }
-      | n = natural;
-        l = OPT [","; l = LIST1 range_selector SEP "," -> { l } ] ->
-        { let open Goal_select in
-          Option.cata (fun l -> SelectList ((n, n) :: l)) (SelectNth n) l } ] ]
-  ;
-  selector:
-  [ [ l = range_selector_or_nth -> { l }
-    | test_bracket_ident; "["; id = ident; "]" -> { Goal_select.SelectId id } ] ]
-  ;
-  toplevel_selector:
-    [ [ sel = selector; ":" -> { sel }
-    |   "!"; ":" -> { Goal_select.SelectAlreadyFocused }
-    |   IDENT "all"; ":" -> { Goal_select.SelectAll } ] ]
-  ;
   tactic_mode:
-    [ [ g = OPT toplevel_selector; tac = G_vernac.query_command -> { Vernacexpr.VernacSynPure (tac g) }
-      | g = OPT toplevel_selector; "{" -> { Vernacexpr.VernacSynPure (Vernacexpr.VernacSubproof g) } ] ]
+    [ [ p = subprf -> { Vernacexpr.VernacSynPure p }
+      | g = OPT toplevel_selector; p = subprf_with_selector -> { Vernacexpr.VernacSynPure (p g) }
+      ] ]
   ;
   command: TOP
     [ [ IDENT "Proof"; "with"; ta = Pltac.tactic;
@@ -351,7 +312,7 @@ open Tacarg
 open Vernacextend
 open Libnames
 
-let pr_ltac_selector s = Pptactic.pr_goal_selector ~toplevel:true s
+let pr_ltac_selector s = Pp.(Goal_select.pr_goal_selector s ++ str ":")
 
 }
 

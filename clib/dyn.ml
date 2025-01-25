@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -42,7 +42,6 @@ sig
   type t = Dyn : 'a tag * 'a -> t
 
   val create : string -> 'a tag
-  val anonymous : int -> 'a tag
   val eq : 'a tag -> 'b tag -> ('a, 'b) CSig.eq option
   val repr : 'a tag -> string
 
@@ -103,14 +102,6 @@ module Self : PreS = struct
     end;
     dyntab := Int.Map.add hash s !dyntab;
     hash
-
-  let anonymous n =
-    if Int.Map.mem n !dyntab then begin
-      Printf.eprintf "Dynamic tag collision: %d\n%!" n;
-      assert false
-    end;
-    dyntab := Int.Map.add n "<anonymous>" !dyntab;
-    n
 
   let eq : 'a 'b. 'a tag -> 'b tag -> ('a, 'b) CSig.eq option =
     fun h1 h2 -> if Int.equal h1 h2 then Some (Obj.magic CSig.Refl) else None

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -15,10 +15,15 @@ type one_inductive_impls =
   Impargs.manual_implicits (* for inds *) *
   Impargs.manual_implicits list (* for constrs *)
 
+type default_dep_elim = DefaultElim | PropButDepElim
+
+type indlocs = (Loc.t option * Loc.t option list) list
+(** Inductive type and constructor locs, for .glob and src loc info *)
+
 val declare_mutual_inductive_with_eliminations
-  : ?primitive_expected:bool
-  -> ?typing_flags:Declarations.typing_flags
-  -> ?indlocs:Loc.t option list (* Inductive type locs, for .glob *)
+  : ?typing_flags:Declarations.typing_flags
+  -> ?indlocs:indlocs
+  -> ?default_dep_elim:default_dep_elim list
   -> Entries.mutual_inductive_entry (* Inductive types declaration *)
   -> UState.named_universes_entry
   -> one_inductive_impls list (* Implicit arguments *)

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -34,21 +34,21 @@ Require Ltac2.Message.
 (* Question: what is returned in case of an out of range value?
    Answer:   Ltac2 throws a panic *)
 
-Ltac2 @external empty : unit -> 'a array := "coq-core.plugins.ltac2" "array_empty".
-Ltac2 @external make : int -> 'a -> 'a array := "coq-core.plugins.ltac2" "array_make".
-Ltac2 @external length : 'a array -> int := "coq-core.plugins.ltac2" "array_length".
-Ltac2 @external get : 'a array -> int -> 'a := "coq-core.plugins.ltac2" "array_get".
-Ltac2 @external set : 'a array -> int -> 'a -> unit := "coq-core.plugins.ltac2" "array_set".
-Ltac2 @external lowlevel_blit : 'a array -> int -> 'a array -> int -> int -> unit := "coq-core.plugins.ltac2" "array_blit".
-Ltac2 @external lowlevel_fill : 'a array -> int -> int -> 'a -> unit := "coq-core.plugins.ltac2" "array_fill".
-Ltac2 @external concat : ('a array) list -> 'a array := "coq-core.plugins.ltac2" "array_concat".
+Ltac2 @external empty : 'a array := "rocq-runtime.plugins.ltac2" "array_empty".
+Ltac2 @external make : int -> 'a -> 'a array := "rocq-runtime.plugins.ltac2" "array_make".
+Ltac2 @external length : 'a array -> int := "rocq-runtime.plugins.ltac2" "array_length".
+Ltac2 @external get : 'a array -> int -> 'a := "rocq-runtime.plugins.ltac2" "array_get".
+Ltac2 @external set : 'a array -> int -> 'a -> unit := "rocq-runtime.plugins.ltac2" "array_set".
+Ltac2 @external lowlevel_blit : 'a array -> int -> 'a array -> int -> int -> unit := "rocq-runtime.plugins.ltac2" "array_blit".
+Ltac2 @external lowlevel_fill : 'a array -> int -> int -> 'a -> unit := "rocq-runtime.plugins.ltac2" "array_fill".
+Ltac2 @external concat : ('a array) list -> 'a array := "rocq-runtime.plugins.ltac2" "array_concat".
 
 (* Low level array operations *)
 
 Ltac2 lowlevel_sub (arr : 'a array) (start : int) (len : int) :=
   let l := length arr in
   match Int.equal l 0 with
-  | true => empty ()
+  | true => empty
   | false =>
       let newarr:=make len (get arr 0) in
       lowlevel_blit arr start newarr 0 len;
@@ -67,7 +67,7 @@ Ltac2 init (l : int) (f : int->'a) :=
     end
   in
   match Int.le l 0 with
-  | true => empty ()
+  | true => empty
   | false =>
       let arr:=make l (f 0) in
       init_aux arr 1 (Int.sub l 1) f;
@@ -75,8 +75,8 @@ Ltac2 init (l : int) (f : int->'a) :=
   end.
 
 Ltac2 make_matrix (sx : int) (sy : int) (v : 'a) :=
-  let init1 i := v in
-  let initr i := init sy init1 in
+  let init1 _ := v in
+  let initr _ := init sy init1 in
   init sx initr.
 
 Ltac2 copy a := lowlevel_sub a 0 (length a).
@@ -174,8 +174,8 @@ Ltac2 of_list (ls : 'a list) :=
     | _ :: tl => Int.add 1 (list_length tl)
     end in
   match ls with
-  | [] => empty ()
-  | hd::tl =>
+  | [] => empty
+  | hd :: _ =>
       let anew := make (list_length ls) hd in
       of_list_aux ls anew 0;
       anew
@@ -187,17 +187,19 @@ Ltac2 rec fold_left_aux (f : 'a -> 'b -> 'a) (x : 'a) (a : 'b array) (pos : int)
   | false => fold_left_aux f (f x (get a pos)) a (Int.add pos 1) (Int.sub len 1)
   end.
 
-Ltac2 fold_left (f : 'a -> 'b -> 'a) (x : 'a) (a : 'b array) := fold_left_aux f x a 0 (length a).
+Ltac2 fold_left (f : 'a -> 'b -> 'a) (x : 'a) (a : 'b array) : 'a :=
+  fold_left_aux f x a 0 (length a).
 
-Ltac2 rec fold_right_aux (f : 'a -> 'b -> 'a) (x : 'a) (a : 'b array) (pos : int) (len : int) :=
+Ltac2 rec fold_right_aux (f : 'a -> 'b -> 'b) (a : 'a array) (x : 'b) (pos : int) (len : int) :=
   (* Note: one could compare pos<0.
      We keep an extra len parameter so that the function can be used for any sub array *)
   match Int.equal len 0 with
   | true => x
-  | false => fold_right_aux f (f x (get a pos)) a (Int.sub pos 1) (Int.sub len 1)
+  | false => fold_right_aux f a (f (get a pos) x) (Int.sub pos 1) (Int.sub len 1)
   end.
 
-Ltac2 fold_right (f : 'a -> 'b -> 'a) (x : 'a) (a : 'b array) := fold_right_aux f x a (Int.sub (length a) 1) (length a).
+Ltac2 fold_right (f : 'a -> 'b -> 'b) (a : 'a array) (x : 'b) : 'b :=
+  fold_right_aux f a x (Int.sub (length a) 1) (length a).
 
 Ltac2 rec exist_aux (p : 'a -> bool) (a : 'a array) (pos : int) (len : int) :=
   match Int.equal len 0 with
@@ -208,7 +210,7 @@ Ltac2 rec exist_aux (p : 'a -> bool) (a : 'a array) (pos : int) (len : int) :=
              end
   end.
 
-(* Note: named exist (as in Coq library) rather than exists cause exists is a notation *)
+(* Note: named exist (as in Rocq library) rather than exists cause exists is a notation *)
 Ltac2 exist (p : 'a -> bool) (a : 'a array) := exist_aux p a 0 (length a).
 
 Ltac2 rec for_all_aux (p : 'a -> bool) (a : 'a array) (pos : int) (len : int) :=
@@ -246,3 +248,7 @@ Ltac2 equal p a b :=
   if Int.equal lena lenb
   then for_all2_aux p a b 0 lena
   else false.
+
+Ltac2 rev (ar : 'a array) : 'a array :=
+  let len := length ar in
+  init len (fun i => get ar (Int.sub (Int.sub len i) 1)).

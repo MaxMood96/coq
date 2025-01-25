@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,6 +12,7 @@ open Conversion
 open Declarations
 open Constr
 open Univ
+open UVars
 open Variance
 open Util
 
@@ -107,13 +108,17 @@ open Inf
 
 let infer_generic_instance_eq variances u =
   Array.fold_left (fun variances u -> infer_level_eq u variances)
-    variances (Instance.to_array u)
+    variances
+    u
+
+(* no variance for qualities *)
+let instance_univs u = snd (Instance.to_array u)
 
 let extend_con_instance cb u =
-  Instance.(of_array (Array.append (to_array cb.const_univ_hyps) (to_array u)))
+  (Array.append (instance_univs cb.const_univ_hyps) (instance_univs u))
 
 let extend_ind_instance mib u =
-  Instance.(of_array (Array.append (to_array mib.mind_univ_hyps) (to_array u)))
+  (Array.append (instance_univs mib.mind_univ_hyps) (instance_univs u))
 
 let extended_mind_variance mind =
   match mind.mind_variance, mind.mind_sec_variance with
@@ -128,7 +133,9 @@ let infer_cumulative_ind_instance cv_pb mind_variance variances u =
       | _, Irrelevant -> variances
       | _, Invariant | CONV, Covariant -> infer_level_eq u variances
       | CUMUL, Covariant -> infer_level_leq u variances)
-    variances mind_variance (Instance.to_array u)
+    variances
+    mind_variance
+    u
 
 let infer_inductive_instance cv_pb env variances ind nargs u =
   let mind = Environ.lookup_mind (fst ind) env in
@@ -181,6 +188,7 @@ let rec infer_fterm cv_pb infos variances hd stk =
   | FRel _ -> infer_stack infos variances stk
   | FInt _ -> infer_stack infos variances stk
   | FFloat _ -> infer_stack infos variances stk
+  | FString _ -> infer_stack infos variances stk
   | FFlex Names.(RelKey _ | VarKey _ as fl) ->
     (* We could try to lazily unfold but then we have to analyse the
        universes in the bodies, not worth coding at least for now. *)
@@ -202,7 +210,7 @@ let rec infer_fterm cv_pb infos variances hd stk =
       | None -> raise e
       | Some (hd,stk) -> infer_fterm cv_pb infos variances hd stk
     end
-  | FProj (_,c) ->
+  | FProj (_,_,c) ->
     let variances = infer_fterm CONV infos variances c [] in
     infer_stack infos variances stk
   | FLambda _ ->
@@ -210,6 +218,7 @@ let rec infer_fterm cv_pb infos variances hd stk =
     let variances = infer_fterm CONV infos variances ty [] in
     infer_fterm CONV (push_relevance infos na) variances bd []
   | FProd (na,dom,codom,e) ->
+    let na = usubst_binder e na in
     let variances = infer_fterm CONV infos variances dom [] in
     infer_fterm cv_pb (push_relevance infos na) variances (mk_clos (CClosure.usubs_lift e) codom) []
   | FInd (ind, u) ->
@@ -229,12 +238,13 @@ let rec infer_fterm cv_pb infos variances hd stk =
     let variances = infer_vect infos variances (Array.map (mk_clos e) tys) in
     let le = CClosure.usubs_liftn n e in
     let variances =
+      let na = Array.map (usubst_binder e) na in
       let infos = push_relevances infos na in
       infer_vect infos variances (Array.map (mk_clos le) cl)
     in
     infer_stack infos variances stk
   | FArray (u,elemsdef,ty) ->
-    let variances = infer_generic_instance_eq variances u in
+    let variances = infer_generic_instance_eq variances (instance_univs u) in
     let variances = infer_fterm CONV infos variances ty [] in
     let elems, def = Parray.to_array elemsdef in
     let variances = infer_fterm CONV infos variances def [] in
@@ -243,7 +253,9 @@ let rec infer_fterm cv_pb infos variances hd stk =
 
   | FCaseInvert (ci, u, pms, p, _, _, br, e) ->
     let mib = Environ.lookup_mind (fst ci.ci_ind) (info_env (fst infos)) in
-    let (_, p, _, _, br) = Inductive.expand_case_specif mib (ci, u, pms, p, NoInvert, mkProp, br) in
+    let (_, (p, _), _, _, br) =
+      Inductive.expand_case_specif mib (ci, u, pms, p, NoInvert, mkProp, br)
+    in
     let infer c variances = infer_fterm CONV infos variances (mk_clos e c) [] in
     let variances = infer p variances in
     Array.fold_right infer br variances
@@ -266,7 +278,7 @@ and infer_stack infos variances (stk:CClosure.stack) =
       | ZcaseT (ci,u,pms,p,br,e) ->
         let dummy = mkProp in
         let case = (ci, u, pms, p, NoInvert, dummy, br) in
-        let (_, p, _, _, br) = Inductive.expand_case (info_env (fst infos)) case in
+        let (_, (p, _), _, _, br) = Inductive.expand_case (info_env (fst infos)) case in
         let variances = infer_fterm CONV infos variances (mk_clos e p) [] in
         infer_vect infos variances (Array.map (mk_clos e) br)
       | Zshift _ -> variances
@@ -283,7 +295,7 @@ and infer_vect infos variances v =
 
 let infer_term cv_pb env variances c =
   let open CClosure in
-  let reds = CClosure.RedFlags.red_add_transparent betaiotazeta TransparentState.full in
+  let reds = RedFlags.red_add_transparent RedFlags.betaiotazeta TransparentState.full in
   let infos = (create_clos_infos reds env, create_tab ()) in
   infer_fterm cv_pb infos variances (CClosure.inject c) []
 
@@ -294,7 +306,7 @@ let infer_arity_constructor is_arity env variances arcn =
       (Environ.push_rel typ env, infer_term CUMUL env variances typ')
     | Context.Rel.Declaration.LocalDef _ -> assert false
   in
-  let typs, codom = Reduction.hnf_decompose_prod env arcn in
+  let typs, codom = Reduction.whd_decompose_prod env arcn in
   let env, variances = Context.Rel.fold_outside infer_typ typs ~init:(env, variances) in
   (* If we have Inductive foo@{i j} : ... -> Type@{i} := C : ... -> foo Type@{j}
      i is irrelevant, j is invariant. *)

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,7 +8,83 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-(** Generic arguments used by the extension mechanisms of several Coq ASTs. *)
+(** Generic arguments used by the extension mechanisms of several Rocq ASTs. *)
+
+(** Generic arguments must be registered according to their usage:
+
+    (raw level printers are always useful for clearer [-time] output, for beautify,
+    and some other debug prints)
+
+    - extensible constr syntax beyond notations (eg [ltac:()], [ltac2:()] and ltac2 [$x]).
+      Such genargs appear in glob_term GGenarg and constrexpr CGenarg.
+      They must be registered with [Genintern.register_intern0]
+      and [GlobEnv.register_constr_interp0].
+
+      The glob level may be kept through notations and other operations like Ltac definitions
+      (eg [Ltac foo := exact ltac2:(foo)]) in which case [Gensubst.register_subst0]
+      and a glob level printer are useful.
+
+      Other useful registrations are
+      - [Genintern.register_intern_pat] and [Patternops.register_interp_pat]
+        to be used in tactic patterns.
+      - [Genintern.register_ntn_subst0] to be used in notations
+        (eg [Notation "foo" := ltac2:(foo)]).
+
+      NB: only the base [ExtraArg] is allowed here.
+
+    - tactic arguments to commands defined without depending on ltac_plugin
+      (VernacProof, HintsExtern, Hint Rewrite, etc).
+
+      Must be registered with [Genintern.register_intern0] and
+      [Genintern.register_interp0].
+
+      The glob level can be kept (currently with Hint Extern and Hint
+      Rewrite) so [Gensubst.register_subst0] is also needed.
+
+      Currently AFAICT this is just [Tacarg.wit_ltac].
+
+      NB: only the base [ExtraArg] is allowed here.
+
+    - vernac arguments, used by vernac extend. Usually declared in mlg
+      using VERNAC ARGUMENT EXTEND then used in VERNAC EXTEND.
+
+      With VERNAC ARGUMENT EXTEND the raw level printer is registered
+      by including PRINTED BY.
+
+      Must be registered with [Procq.register_grammar] (handled by
+      VERNAC ARGUMENT EXTEND when declared that way) as vernac extend
+      only gets the genarg as argument so must get the grammar from
+      the registration.
+
+      Unless combined with some other use, the glob and top levels will be empty
+      (as in [vernac_genarg_type]).
+
+    - Ltac tactic_extend arguments. Usually declared in mlg using ARGUMENT EXTEND
+      then used in TACTIC EXTEND.
+
+      Must be registered with [Genintern.register_intern0],
+      [Gensubst.register_subst0] and [Genintern.register_interp0].
+
+      Must be registered with [Procq.register_grammar] as tactic extend
+      only gets the genarg as argument so must get the grammar from
+      the registration.
+
+      They must be associated with a [Geninterp.Val.tag] using [Geninterp.register_val0]
+      (which creates a fresh tag if passed [None]).
+      Note: although [Genintern.register_interp0] registers a producer
+      of arbitrary [Geninterp.Val.t], tactic_extend requires them to be of the tag
+      registered by [Geninterp.register_val0] to work properly.
+
+      They should also have all printer levels registered with [Genprint.register_print0].
+
+      All registrations are handled by the arguments to ARGUMENT EXTEND when declared that way.
+
+      All of them can also be used as vernac_extend arguments since
+      vernac_extend uses a subset of the registrations needed for tactic_extend.
+
+    - some hack in Tacentries.ml_val_tactic_extend and its variant in
+      Tac2core_ltac1 for Ltac1.lambda.
+*)
 
 (** The route of a generic argument, from parsing to evaluation.
 In the following diagram, "object" can be ltac_expr, constr, tactic_value, etc.
@@ -67,6 +143,9 @@ type (_, _, _) genarg_type =
 
 type 'a uniform_genarg_type = ('a, 'a, 'a) genarg_type
 (** Alias for concision when the three types agree. *)
+
+type 'a vernac_genarg_type = ('a, Util.Empty.t, Util.Empty.t) genarg_type
+(** Produced  by VERNAC ARGUMENT EXTEND *)
 
 val make0 : string -> ('raw, 'glob, 'top) genarg_type
 (** Create a new generic type of argument: force to associate
@@ -158,7 +237,7 @@ val unquote : ('a, 'co) abstract_argument_type -> argument_type
 
 (** {6 Registering genarg-manipulating functions}
 
-  This is boilerplate code used here and there in the code of Coq. *)
+  This is boilerplate code used here and there in the code of Rocq. *)
 
 val get_arg_tag : ('a, 'b, 'c) genarg_type -> ('a, 'b, 'c) ArgT.tag
 (** Works only on base objects (ExtraArg), otherwise fails badly. *)
@@ -171,7 +250,7 @@ sig
   val name : string
   (** A name for such kind of manipulation, e.g. [interp]. *)
 
-  val default : ('raw, 'glb, 'top) genarg_type -> ('raw, 'glb, 'top) obj option
+  val default : ('raw, 'glb, 'top) ArgT.tag -> ('raw, 'glb, 'top) obj option
   (** A generic object when there is no registered object for this type. *)
 end
 
@@ -182,10 +261,13 @@ sig
 
   val register0 : ('raw, 'glb, 'top) genarg_type ->
     ('raw, 'glb, 'top) M.obj -> unit
-  (** Register a ground type manipulation function. *)
+  (** Register a ground type manipulation function. Must be [ExtraArg]. *)
 
   val obj : ('raw, 'glb, 'top) genarg_type -> ('raw, 'glb, 'top) M.obj
-  (** Recover a manipulation function at a given type. *)
+  (** Recover a manipulation function at a given type. Must be [ExtraArg]. *)
+
+  val mem : _ genarg_type -> bool
+  (** Is this type registered? (must be [ExtraArg]) *)
 
   val fold_keys : (ArgT.any -> 'acc -> 'acc) -> 'acc -> 'acc
   (** Fold over the registered keys. *)

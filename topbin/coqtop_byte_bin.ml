@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,36 +8,13 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-(* We register this handler for lower-level toplevel loading code *)
-let () = CErrors.register_handler (function
-    | Symtable.Error e ->
-      Some (Pp.str (Format.asprintf "%a" Symtable.report_error e))
-    | _ ->
-      None
-  )
+open Rocqshim
 
-let load_module fmt name =
-  if not ((Topdirs.load_file [@ocaml.warning "-3"]) fmt name) then
-    CErrors.user_err Pp.(str ("Could not load plugin " ^ name))
-
-let load_plugin fmt ps =
-  match Mltop.PluginSpec.repr ps with
-  | (Some file, _)  ->
-    let file = file ^ ".cma" in
-    load_module fmt file
-  | (None, lib ) ->
-    Topfind.load_deeply [lib]
-
-let drop_setup () =
-  let ppf = Format.std_formatter in
-  Mltop.(set_top
-           { load_plugin = load_plugin ppf
-           ; load_module = load_module ppf
-           ; add_dir  = Topdirs.dir_directory
-           ; ml_loop  = (fun () -> Toploop.loop ppf)
-           })
-
-(* Main coqtop initialization *)
-let _ =
-  drop_setup ();
-  Coqtop.(start_coq coqtop_toplevel)
+let () =
+  let args = List.tl (Array.to_list Sys.argv) in
+  let opts, args = Rocqshim.parse_opts args in
+  let () = Rocqshim.init opts args in
+  let prog = get_worker_path { package = "rocq-runtime"; basename = "rocqworker_with_drop" } in
+  let () = if opts.debug_shim then Printf.eprintf "Using %s\n%!" prog in
+  let argv = Array.of_list (prog :: args) in
+  exec_or_create_process prog argv

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -17,6 +17,7 @@
 open Util
 open Names
 open Declarations
+open Mod_declarations
 open Entries
 open Environ
 open Modops
@@ -29,7 +30,7 @@ let rec mp_from_mexpr = function
 
 let is_modular = function
   | SFBmodule _ | SFBmodtype _ -> true
-  | SFBconst _ | SFBmind _ -> false
+  | SFBconst _ | SFBmind _ | SFBrules _ -> false
 
 (** Split a [structure_body] at some label corresponding to
     a modular definition or not. *)
@@ -42,8 +43,8 @@ let split_struc k m struc =
     | h::tail -> split (h::rev_before) tail
   in split [] struc
 
-let discr_resolver mtb = match mtb.mod_type with
-  | NoFunctor _ -> mtb.mod_delta
+let discr_resolver mtb = match mod_type mtb with
+  | NoFunctor _ -> mod_delta mtb
   | MoreFunctor _ -> empty_delta_resolver
 
 let rec rebuild_mp mp l =
@@ -52,15 +53,15 @@ let rec rebuild_mp mp l =
   | i::r -> rebuild_mp (MPdot(mp,Label.of_id i)) r
 
 let infer_gen_conv state env c1 c2 =
-  Conversion.generic_conv Conversion.CONV ~l2r:false Constr.default_evar_handler TransparentState.full env state c1 c2
+  Conversion.generic_conv Conversion.CONV ~l2r:false TransparentState.full env state c1 c2
 
 let infer_gen_conv_leq state env c1 c2 =
-  Conversion.generic_conv Conversion.CUMUL ~l2r:false Constr.default_evar_handler TransparentState.full env state c1 c2
+  Conversion.generic_conv Conversion.CUMUL ~l2r:false TransparentState.full env state c1 c2
 
 type with_body = {
   w_def : Constr.t;
   w_univs : universes;
-  w_bytecode : Vmemitcodes.body_code option;
+  w_bytecode : Vmlibrary.indirect_code option;
 }
 
 let rec check_with_def (cst, ustate) env struc (idl, wth) mp reso =
@@ -87,38 +88,40 @@ let rec check_with_def (cst, ustate) env struc (idl, wth) mp reso =
           let cst = match cb.const_body with
             | Undef _ | OpaqueDef _ ->
               let j = Typeops.infer env' wth.w_def in
-              assert (j.uj_val == wth.w_def); (* relevances should already be correct here *)
               let typ = cb.const_type in
               let cst = infer_gen_conv_leq (cst, ustate) env' j.uj_type typ in
               cst
             | Def c' ->
               infer_gen_conv (cst, ustate) env' wth.w_def c'
-            | Primitive _ ->
+            | Primitive _ | Symbol _ ->
               error_incorrect_with_constraint lab
           in
-          cst
+          begin match cst with
+          | Result.Ok cst -> cst
+          | Result.Error (None | Some _) ->
+            error_incorrect_with_constraint lab
+          end
         | Polymorphic uctx, Polymorphic ctx ->
           let () =
             if not (UGraph.check_subtype (Environ.universes env) uctx ctx) then
               error_incorrect_with_constraint lab
           in
           (** Terms are compared in a context with De Bruijn universe indices *)
-          let env' = Environ.push_context ~strict:false (Univ.AbstractContext.repr uctx) env in
+          let env' = Environ.push_context ~strict:false (UVars.AbstractContext.repr uctx) env in
           let () = match cb.const_body with
             | Undef _ | OpaqueDef _ ->
               let j = Typeops.infer env' wth.w_def in
-              assert (j.uj_val == wth.w_def); (* relevances should already be correct here *)
               let typ = cb.const_type in
-              begin
-                try Conversion.conv_leq env' j.uj_type typ
-                with Conversion.NotConvertible -> error_incorrect_with_constraint lab
+              begin match Conversion.conv_leq env' j.uj_type typ with
+              | Result.Ok () -> ()
+              | Result.Error () -> error_incorrect_with_constraint lab
               end
             | Def c' ->
-              begin
-                try Conversion.conv env' wth.w_def c'
-                with Conversion.NotConvertible -> error_incorrect_with_constraint lab
+              begin match Conversion.conv env' wth.w_def c' with
+              | Result.Ok () -> ()
+              | Result.Error () -> error_incorrect_with_constraint lab
               end
-            | Primitive _ ->
+            | Primitive _ | Symbol _ ->
               error_incorrect_with_constraint lab
           in
           cst
@@ -137,23 +140,21 @@ let rec check_with_def (cst, ustate) env struc (idl, wth) mp reso =
         | SFBmodule mb -> mb
         | _ -> error_not_a_module_label lab
       in
-      begin match mb.mod_expr with
+      begin match Mod_declarations.mod_expr mb with
         | Abstract ->
-          let struc = Modops.destr_nofunctor (MPdot (mp,lab)) mb.mod_type in
+          let struc = Modops.destr_nofunctor (MPdot (mp,lab)) (mod_type mb) in
           let struc', cst =
-            check_with_def (cst, ustate) env' struc (idl, wth) (MPdot(mp,lab)) mb.mod_delta
+            check_with_def (cst, ustate) env' struc (idl, wth) (MPdot(mp,lab)) (mod_delta mb)
           in
-          let mb' = { mb with
-                      mod_type = NoFunctor struc';
-                      mod_type_alg = None }
-          in
+          let mb' = replace_module_body struc' (mod_delta mb) mb in
           before@(lab,SFBmodule mb')::after, cst
         | _ -> error_generative_module_expected lab
       end
   with
   | Not_found -> error_no_such_label lab mp
-  | Conversion.NotConvertible -> error_incorrect_with_constraint lab
 
+(* [mp] is the ambient modpath of [struc],
+   [new_mp] is the path of the module to replace [idl] with *)
 let rec check_with_mod (cst, ustate) env struc (idl,new_mp) mp reso =
   let lab,idl = match idl with
     | [] -> assert false
@@ -170,10 +171,10 @@ let rec check_with_mod (cst, ustate) env struc (idl,new_mp) mp reso =
       (* Toplevel module definition *)
       let new_mb = lookup_module new_mp env in
       let new_mtb = module_type_of_module new_mb in
-      let cst = match old.mod_expr with
+      let cst = match Mod_declarations.mod_expr old with
         | Abstract ->
           let mtb_old = module_type_of_module old in
-          let cst = Subtyping.check_subtypes (cst, ustate) env' new_mtb mtb_old in
+          let cst = Subtyping.check_subtypes (cst, ustate) env' new_mp new_mtb (MPdot (mp, lab)) mtb_old in
           cst
         | Algebraic (MENoFunctor (MEident(mp'))) ->
           check_modpath_equiv env' new_mp mp';
@@ -181,18 +182,14 @@ let rec check_with_mod (cst, ustate) env struc (idl,new_mp) mp reso =
         | _ -> error_generative_module_expected lab
       in
       let mp' = MPdot (mp,lab) in
-      let new_mb = strengthen_and_subst_module_body new_mb mp' false in
-      let new_mb' =
-        { new_mb with
-          mod_mp = mp';
-          mod_expr = Algebraic (MENoFunctor (MEident new_mp));
-        }
-      in
-      let new_reso = add_delta_resolver reso new_mb.mod_delta in
+      let new_mb = strengthen_and_subst_module_body new_mp new_mb mp' false in
+      (** TODO: check this is fine when new_mb is a functor *)
+      let new_mb' = strengthen_module_body ~src:new_mp (mod_type new_mb) (mod_delta new_mb) new_mb in
+      let new_reso = add_delta_resolver reso (upcast_delta_resolver mp (mod_delta new_mb)) in
       (* we propagate the new equality in the rest of the signature
          with the identity substitution accompanied by the new resolver*)
-      let id_subst = map_mp mp' mp' new_mb.mod_delta in
-      let new_after = subst_structure id_subst after in
+      let id_subst = map_mp mp' mp' (mod_delta new_mb) in
+      let new_after = subst_structure id_subst mp after in
       before@(lab,SFBmodule new_mb')::new_after, new_reso, cst
     else
       (* Module definition of a sub-module *)
@@ -201,21 +198,19 @@ let rec check_with_mod (cst, ustate) env struc (idl,new_mp) mp reso =
         | SFBmodule msb -> msb
         | _ -> error_not_a_module_label lab
       in
-      begin match old.mod_expr with
+      begin match Mod_declarations.mod_expr old with
       | Abstract ->
-        let struc = destr_nofunctor mp' old.mod_type in
+        let struc = destr_nofunctor mp' (mod_type old) in
         let struc',reso',cst =
-          check_with_mod (cst, ustate) env' struc (idl,new_mp) mp' old.mod_delta
+          check_with_mod (cst, ustate) env' struc (idl,new_mp) mp' (mod_delta old)
         in
-        let new_mb =
-          { old with
-            mod_type = NoFunctor struc';
-            mod_type_alg = None;
-            mod_delta = reso' }
-        in
-        let new_reso = add_delta_resolver reso reso' in
+        let new_mb = replace_module_body struc' reso' old in
+        (* XXX we are adding bits of [mod_delta old] twice below, all bindings
+           [mp₀ ↦ mp₁] where mp₁ ≠ mp.idl should already be part of reso and
+           will be left untouched in reso' by check_with_mod *)
+        let new_reso = add_delta_resolver reso (upcast_delta_resolver mp reso') in
         let id_subst = map_mp mp' mp' reso' in
-        let new_after = subst_structure id_subst after in
+        let new_after = subst_structure id_subst mp after in
         before@(lab,SFBmodule new_mb)::new_after, new_reso, cst
       | Algebraic (MENoFunctor (MEident mp0)) ->
         let mpnew = rebuild_mp mp0 idl in
@@ -225,36 +220,38 @@ let rec check_with_mod (cst, ustate) env struc (idl,new_mp) mp reso =
       end
   with
   | Not_found -> error_no_such_label lab mp
-  | Conversion.NotConvertible -> error_incorrect_with_constraint lab
 
-let check_with ustate env mp (sign,reso,cst) = function
+type 'a vm_handler = { vm_handler : env -> universes -> Constr.t -> 'a -> 'a * Vmlibrary.indirect_code option }
+type 'a vm_state = 'a * 'a vm_handler
+
+let check_with ustate vmstate env mp (sign,reso,cst,vm) = function
   | WithDef(idl, (c, ctx)) ->
     let struc = destr_nofunctor mp sign in
     let univs = match ctx with None -> Monomorphic | Some uctx -> Polymorphic uctx in
-    let bcode = Vmbytegen.compile_constant_body ~fail_on_error:false env univs (Def c) in
+    let vm, bcode = vmstate.vm_handler env univs c vm in
     let body = { w_def = c; w_univs = univs; w_bytecode = bcode } in
     let struc', cst = check_with_def (cst, ustate) env struc (idl, body) mp reso in
-    NoFunctor struc', reso, cst
+    NoFunctor struc', reso, cst, vm
   | WithMod(idl,new_mp) ->
     let struc = destr_nofunctor mp sign in
     let struc',reso',cst = check_with_mod (cst, ustate) env struc (idl,new_mp) mp reso in
-    NoFunctor struc', reso', cst
+    NoFunctor struc', reso', cst, vm
 
-let check_with_alg ustate env mp (sign,alg,reso,cst) wd =
-  let struc, reso, cst = check_with ustate env mp (sign, reso, cst) wd in
-  struc, MEwith (alg, wd), reso, cst
+let check_with_alg ustate vmstate env mp (sign, alg, reso, cst, vm) wd =
+  let struc, reso, cst, vm = check_with ustate vmstate env mp (sign, reso, cst, vm) wd in
+  struc, MEwith (alg, wd), reso, cst, vm
 
-let translate_apply ustate env inl (sign,alg,reso,cst) mp1 mkalg =
+let translate_apply ustate env inl mp (sign,alg,reso,cst,vm) mp1 mkalg =
   let farg_id, farg_b, fbody_b = destr_functor sign in
   let mtb = module_type_of_module (lookup_module mp1 env) in
-  let cst = Subtyping.check_subtypes (cst, ustate) env mtb farg_b in
+  let cst = Subtyping.check_subtypes (cst, ustate) env mp1 mtb (MPbound farg_id) farg_b in
   let mp_delta = discr_resolver mtb in
   let mp_delta = inline_delta_resolver env inl mp1 farg_id farg_b mp_delta in
   let subst = map_mbid farg_id mp1 mp_delta in
-  let body = subst_signature subst fbody_b in
+  let body = subst_signature subst mp fbody_b in
   let alg' = mkalg alg mp1 in
   let reso' = subst_codom_delta_resolver subst reso in
-  body, alg', reso', cst
+  body, alg', reso', cst, vm
 
 (** Translation of a module struct entry :
     - We translate to a module when a [module_path] is given,
@@ -265,66 +262,59 @@ let translate_apply ustate env inl (sign,alg,reso,cst) mp1 mkalg =
 
 let mk_alg_app alg arg = MEapply (alg,arg)
 
-let rec translate_mse (cst, ustate) env mpo inl = function
+let rec translate_mse (cst, ustate) (vm, vmstate) env mpo inl = function
   | MEident mp1 as me ->
     let mb = match mpo with
-      | Some mp -> strengthen_and_subst_module_body (lookup_module mp1 env) mp false
+      | Some mp -> strengthen_and_subst_module_body mp1 (lookup_module mp1 env) mp false
       | None ->
         let mt = lookup_modtype mp1 env in
-        module_body_of_type mt.mod_mp mt
+        module_body_of_type mt
     in
-    mb.mod_type, me, mb.mod_delta, cst
+    mod_type mb, me, mod_delta mb, cst, vm
   | MEapply (fe,mp1) ->
-    translate_apply ustate env inl (translate_mse (cst, ustate) env mpo inl fe) mp1 mk_alg_app
-  |MEwith(me, with_decl) ->
+    let mp = match mpo with Some mp -> mp | None -> mp_from_mexpr fe in
+    translate_apply ustate env inl mp (translate_mse (cst, ustate) (vm, vmstate) env mpo inl fe) mp1 mk_alg_app
+  | MEwith(me, with_decl) ->
     assert (Option.is_empty mpo); (* No 'with' syntax for modules *)
     let mp = mp_from_mexpr me in
-    check_with_alg ustate env mp (translate_mse (cst, ustate) env None inl me) with_decl
+    check_with_alg ustate vmstate env mp (translate_mse (cst, ustate) (vm, vmstate) env None inl me) with_decl
 
-let mk_mod mp e ty reso =
-  { mod_mp = mp;
-    mod_expr = e;
-    mod_type = ty;
-    mod_type_alg = None;
-    mod_delta = reso;
-    mod_retroknowledge = ModBodyRK []; }
+let mk_modtype = Mod_declarations.make_module_type
 
-let mk_modtype mp ty reso =
-  let mb = mk_mod mp Abstract ty reso in
-  { mb with mod_expr = (); mod_retroknowledge = ModTypeRK }
-
-let rec translate_mse_funct (cst, ustate) env ~is_mod mp inl mse = function
-  |[] ->
-    let sign,alg,reso,cst = translate_mse (cst, ustate) env (if is_mod then Some mp else None) inl mse in
+let rec translate_mse_funct (cst, ustate) (vm, vmstate) env ~is_mod mp inl mse = function
+  | [] ->
+    let sign,alg,reso,cst,vm = translate_mse (cst, ustate) (vm, vmstate) env (if is_mod then Some mp else None) inl mse in
     let sign,reso =
       if is_mod then sign,reso
       else subst_modtype_signature_and_resolver (mp_from_mexpr mse) mp sign reso in
-    sign, MENoFunctor alg, reso, cst
-  |(mbid, ty, ty_inl) :: params ->
+    sign, MENoFunctor alg, reso, cst, vm
+  | (mbid, ty, ty_inl) :: params ->
     let mp_id = MPbound mbid in
-    let mtb, cst = translate_modtype (cst, ustate) env mp_id ty_inl ([],ty) in
+    let mtb, cst, vm = translate_modtype (cst, ustate) (vm, vmstate) env mp_id ty_inl ([],ty) in
     let env' = add_module_type mp_id mtb env in
-    let sign,alg,reso,cst = translate_mse_funct (cst, ustate) env' ~is_mod mp inl mse params in
+    let sign,alg,reso,cst,vm = translate_mse_funct (cst, ustate) (vm, vmstate) env' ~is_mod mp inl mse params in
     let alg' = MEMoreFunctor alg in
-    MoreFunctor (mbid, mtb, sign), alg',reso, cst
+    MoreFunctor (mbid, mtb, sign), alg',reso, cst, vm
 
-and translate_modtype state env mp inl (params,mte) =
-  let sign,alg,reso,cst = translate_mse_funct state env ~is_mod:false mp inl mte params in
-  let mtb = mk_modtype mp sign reso in
-  { mtb with mod_type_alg = Some alg }, cst
+and translate_modtype state vmstate env mp inl (params,mte) =
+  let sign,alg,reso,cst,vm = translate_mse_funct state vmstate env ~is_mod:false mp inl mte params in
+  let mtb = mk_modtype sign reso in
+  set_algebraic_type mtb alg, cst, vm
 
 (** [finalize_module] :
     from an already-translated (or interactive) implementation and
     an (optional) signature entry, produces a final [module_body] *)
 
-let finalize_module_alg (cst, ustate) env mp (sign,alg,reso) restype = match restype with
+let finalize_module_alg (cst, ustate) (vm, vmstate) env mp (sign,alg,reso) restype = match restype with
   | None ->
     let impl = match alg with Some e -> Algebraic e | None -> FullStruct in
-    mk_mod mp impl sign reso, cst
+    let mb = make_module_body sign reso [] in
+    let mb = set_implementation impl mb in
+    mb, cst, vm
   | Some (params_mte,inl) ->
-    let res_mtb, cst = translate_modtype (cst, ustate) env mp inl params_mte in
-    let auto_mtb = mk_modtype mp sign reso in
-    let cst = Subtyping.check_subtypes (cst, ustate) env auto_mtb res_mtb in
+    let res_mtb, cst, vm = translate_modtype (cst, ustate) (vm, vmstate) env mp inl params_mte in
+    let auto_mtb = mk_modtype sign reso in
+    let cst = Subtyping.check_subtypes (cst, ustate) env mp auto_mtb mp res_mtb in
     let impl = match alg with
     | Some e -> Algebraic e
     | None ->
@@ -334,25 +324,24 @@ let finalize_module_alg (cst, ustate) env mp (sign,alg,reso) restype = match res
       in
       Struct sign
     in
-    { res_mtb with
-      mod_mp = mp;
-      mod_expr = impl;
-      mod_retroknowledge = ModBodyRK [];
-    },
+    let mb = module_body_of_type res_mtb in
+    let mb = set_implementation impl mb in
+    mb,
     (** constraints from module body typing + subtyping + module type. *)
-    cst
+    cst,
+    vm
 
-let finalize_module univs env mp (sign, reso) typ =
-  finalize_module_alg univs env mp (sign, None, reso) typ
+let finalize_module univs vm env mp (sign, reso) typ =
+  finalize_module_alg univs vm env mp (sign, None, reso) typ
 
-let translate_module (cst, ustate) env mp inl = function
+let translate_module (cst, ustate) (vm, vmstate) env mp inl = function
   | MType (params,ty) ->
-    let mtb, cst = translate_modtype (cst, ustate) env mp inl (params,ty) in
-    module_body_of_type mp mtb, cst
-  |MExpr (params,mse,oty) ->
-    let (sg,alg,reso,cst) = translate_mse_funct (cst, ustate) env ~is_mod:true mp inl mse params in
+    let mtb, cst, vm = translate_modtype (cst, ustate) (vm, vmstate) env mp inl (params,ty) in
+    module_body_of_type mtb, cst, vm
+  | MExpr (params,mse,oty) ->
+    let (sg,alg,reso,cst,vm) = translate_mse_funct (cst, ustate) (vm, vmstate) env ~is_mod:true mp inl mse params in
     let restype = Option.map (fun ty -> ((params,ty),inl)) oty in
-    finalize_module_alg (cst, ustate) env mp (sg,Some alg,reso) restype
+    finalize_module_alg (cst, ustate) (vm, vmstate) env mp (sg,Some alg,reso) restype
 
 (** We now forbid any Include of functors with restricted signatures.
     Otherwise, we could end with the creation of undesired axioms
@@ -368,30 +357,30 @@ let rec forbid_incl_signed_functor env = function
   | MEwith _ -> assert false (* No 'with' syntax for modules *)
   | MEident mp1 ->
     let mb = lookup_module mp1 env in
-    match mb.mod_type, mb.mod_type_alg, mb.mod_expr with
+    match mod_type mb, mod_type_alg mb, Mod_declarations.mod_expr mb with
     | MoreFunctor _, Some _, _ ->
       (* functor + restricted signature = error *)
       error_include_restricted_functor mp1
     | MoreFunctor _, None, Algebraic me ->
       (* functor, no signature yet, a definition which may be restricted *)
       forbid_incl_signed_functor env (unfunct me)
-    |_ -> ()
+    | _ -> ()
 
-let rec translate_mse_include_module (cst, ustate) env mp inl = function
+let rec translate_mse_include_module (cst, ustate) (vm, vmstate) env mp inl = function
   | MEident mp1 ->
-    let mb = strengthen_and_subst_module_body (lookup_module mp1 env) mp true in
-    let sign = clean_bounded_mod_expr mb.mod_type in
-    sign,(),mb.mod_delta,cst
+    let mb = strengthen_and_subst_module_body mp1 (lookup_module mp1 env) mp true in
+    let sign = clean_bounded_mod_expr (mod_type mb) in
+    sign, (), mod_delta mb, cst, vm
   | MEapply (fe,arg) ->
-    let ftrans = translate_mse_include_module (cst, ustate) env mp inl fe in
-    translate_apply ustate env inl ftrans arg (fun _ _ -> ())
+    let ftrans = translate_mse_include_module (cst, ustate) (vm, vmstate) env mp inl fe in
+    translate_apply ustate env inl mp ftrans arg (fun _ _ -> ())
   | MEwith _ -> assert false (* No 'with' syntax for modules *)
 
-let translate_mse_include is_mod (cst, ustate) env mp inl me =
+let translate_mse_include is_mod (cst, ustate) (vm, vmstate) env mp inl me =
   if is_mod then
     let () = forbid_incl_signed_functor env me in
-    translate_mse_include_module (cst, ustate) env mp inl me
+    translate_mse_include_module (cst, ustate) (vm, vmstate) env mp inl me
   else
-    let mtb, cst = translate_modtype (cst, ustate) env mp inl ([],me) in
-    let sign = clean_bounded_mod_expr mtb.mod_type in
-    sign, (), mtb.mod_delta, cst
+    let mtb, cst, vm = translate_modtype (cst, ustate) (vm, vmstate) env mp inl ([],me) in
+    let sign = clean_bounded_mod_expr (mod_type mtb) in
+    sign, (), mod_delta mtb, cst, vm

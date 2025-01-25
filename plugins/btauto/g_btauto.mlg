@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -14,7 +14,7 @@ open Ltac_plugin
 
 }
 
-DECLARE PLUGIN "coq-core.plugins.btauto"
+DECLARE PLUGIN "rocq-runtime.plugins.btauto"
 
 TACTIC EXTEND btauto
 | [ "btauto" ] -> { Refl_btauto.Btauto.tac }

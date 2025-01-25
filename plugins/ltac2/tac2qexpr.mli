@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -47,7 +47,7 @@ and intro_pattern_action_r =
 | QIntroWildcard
 | QIntroOrAndPattern of or_and_intro_pattern
 | QIntroInjection of intro_pattern list CAst.t
-(* | QIntroApplyOn of Empty.t (** Not implemented yet *) *)
+| QIntroApplyOn of Constrexpr.constr_expr * intro_pattern
 | QIntroRewrite of bool
 and or_and_intro_pattern_r =
 | QIntroOrPattern of intro_pattern list CAst.t list
@@ -105,8 +105,10 @@ type multi_r =
 
 type multi = multi_r CAst.t
 
+type orientation = bool option CAst.t
+
 type rewriting_r = {
-  rew_orient : bool option CAst.t;
+  rew_orient : orientation;
   rew_repeat : multi;
   rew_equatn : constr_with_bindings;
 }
@@ -126,6 +128,7 @@ type red_flag_r =
 | QZeta
 | QConst of reference or_anti list CAst.t
 | QDeltaBut of reference or_anti list CAst.t
+| QHead
 
 type red_flag = red_flag_r CAst.t
 

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -17,4 +17,4 @@ val vm_conv : conv_pb -> types kernel_conversion_function
 
 (** A conversion function parametrized by a universe comparator and
    evar normalizer. Used outside of the kernel. *)
-val vm_conv_gen : conv_pb -> Genlambda.evars -> (types, 'a) generic_conversion_function
+val vm_conv_gen : conv_pb -> Genlambda.evars -> Environ.env -> ('a, 'err) generic_conversion_function

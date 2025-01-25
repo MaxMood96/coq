@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -70,31 +70,51 @@ open Inductiveops
 
 (************************************************************************)
 
-(* An auxiliary function for searching for fixpoint guard indexes *)
+(* An auxiliary function for searching for fixpoint guard indices *)
 
-exception Found of int array
+(* Tells the possible indices liable to guard a fixpoint *)
+type possible_fix_indices = int list list
+
+(* Tells if possibly a cofixpoint or a fixpoint over the given list of possible indices *)
+type possible_guard = {
+  possibly_cofix : bool;
+  possible_fix_indices : possible_fix_indices;
+} (* Note: if no fix indices are given, it has to be a cofix *)
+
+exception Found of int array option
 
 let nf_fix sigma (nas, cs, ts) =
   let inj c = EConstr.to_constr ~abort_on_undefined_evars:false sigma c in
-  (nas, Array.map inj cs, Array.map inj ts)
+  (Array.map EConstr.Unsafe.to_binder_annot nas, Array.map inj cs, Array.map inj ts)
 
-let search_guard ?loc env possible_indexes fixdefs =
-  (* Standard situation with only one possibility for each fix. *)
-  (* We treat it separately in order to get proper error msg. *)
+let search_guard ?loc ?evars env {possibly_cofix; possible_fix_indices} fixdefs =
   let is_singleton = function [_] -> true | _ -> false in
-  if List.for_all is_singleton possible_indexes then
-    let indexes = Array.of_list (List.map List.hd possible_indexes) in
-    let fix = ((indexes, 0),fixdefs) in
-    (try check_fix env fix
-     with reraise ->
-       let (e, info) = Exninfo.capture reraise in
-       let info = Option.cata (fun loc -> Loc.add_loc info loc) info loc in
-       Exninfo.iraise (e, info));
-    indexes
+  let one_fix_possibility = List.for_all is_singleton possible_fix_indices in
+  if one_fix_possibility && not possibly_cofix then
+    let indexes = Array.of_list (List.map List.hd possible_fix_indices) in
+    let fix = ((indexes, 0), fixdefs) in
+    try let () = check_fix ?evars env fix in Some indexes
+    with reraise ->
+      let (e, info) = Exninfo.capture reraise in
+      let info = Option.cata (fun loc -> Loc.add_loc info loc) info loc in
+      Exninfo.iraise (e, info)
   else
+    let zero_fix_possibility = List.for_all List.is_empty possible_fix_indices in
+    if zero_fix_possibility && possibly_cofix then
+      (* Maybe can we skip this check since it will be done in the kernel again *)
+      let cofix = (0, fixdefs) in
+      try let () = check_cofix ?evars env cofix in None
+      with reraise ->
+        let (e, info) = Exninfo.capture reraise in
+        let info = Option.cata (fun loc -> Loc.add_loc info loc) info loc in
+        Exninfo.iraise (e, info)
+    else
     (* we now search recursively among all combinations *)
-    (try
-       List.iter
+    let combinations = List.combinations possible_fix_indices in
+    let flags = { (typing_flags env) with Declarations.check_guarded = true } in
+    let env = Environ.set_typing_flags flags env in
+    try
+       let () = List.iter
          (fun l ->
             let indexes = Array.of_list l in
             let fix = ((indexes, 0),fixdefs) in
@@ -105,29 +125,46 @@ let search_guard ?loc env possible_indexes fixdefs =
                error when totality is assumed but the strutural argument is
                not specified. *)
             try
-              let flags = { (typing_flags env) with Declarations.check_guarded = true } in
-              let env = Environ.set_typing_flags flags env in
-              check_fix env fix; raise (Found indexes)
+              let () = check_fix ?evars env fix in raise (Found (Some indexes))
             with TypeError _ -> ())
-         (List.combinations possible_indexes);
+          combinations in
+       let () =
+         if possibly_cofix then
+           (* Maybe can we skip this check since it will be done in the kernel again *)
+           try let () = check_cofix env (0, fixdefs) in raise (Found None)
+           with TypeError _ -> () in
        let errmsg = "Cannot guess decreasing argument of fix." in
-         user_err ?loc (Pp.str errmsg)
-     with Found indexes -> indexes)
+       user_err ?loc (Pp.str errmsg)
+     with Found indexes -> indexes
+
+let search_fix_guard ?loc ?evars env possible_fix_indices fixdefs =
+  Option.get (search_guard ?loc ?evars env {possibly_cofix=false; possible_fix_indices} fixdefs)
 
 let esearch_guard ?loc env sigma indexes fix =
+  (* not sure if we still need to nf_fix when calling search_guard with ~evars
+     (here and other callers through the code)
+     OTOH search_guard needs to go through the whole term to see possible recursive calls
+     so we may as well upfront normalize *)
   let fix = nf_fix sigma fix in
-  try search_guard ?loc env indexes fix
+  let evars = Evd.evar_handler sigma in
+  try search_guard ?loc ~evars env indexes fix
   with TypeError (env,err) ->
-    raise (PretypeError (env,sigma,TypingError (map_ptype_error of_constr err)))
+    Loc.raise ?loc (PretypeError (env,sigma,TypingError (of_type_error err)))
+
+let esearch_fix_guard ?loc env sigma possible_fix_indices fix =
+  Option.get (esearch_guard ?loc env sigma {possibly_cofix=false; possible_fix_indices} fix)
+
+let esearch_cofix_guard ?loc env sigma cofix =
+  let res = esearch_guard ?loc env sigma {possibly_cofix=true; possible_fix_indices=[]} cofix in
+  assert (Option.is_empty res)
 
 (* To force universe name declaration before use *)
 
-let is_strict_universe_declarations =
+let { Goptions.get = is_strict_universe_declarations } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Strict";"Universe";"Declaration"]
     ~value:true
+    ()
 
 (** Miscellaneous interpretation functions *)
 
@@ -144,18 +181,91 @@ let level_name sigma = function
   | GSet -> Some (sigma, Univ.Level.set)
   | GUniv u -> Some (sigma, u)
   | GRawUniv u ->
-    let sigma = try Evd.add_global_univ sigma u with UGraph.AlreadyDeclared -> sigma in
+    let sigma = try Evd.add_forgotten_univ sigma u with UGraph.AlreadyDeclared -> sigma in
     Some (sigma, u)
   | GLocalUniv l ->
     let sigma, u = universe_level_name sigma l in
     Some (sigma, u)
 
-let sort_info ?loc sigma l = match l with
-| [] -> assert false
-| [GSProp, 0] -> sigma, Sorts.sprop
-| [GProp, 0] -> sigma, Sorts.prop
-| (u, n) :: us ->
+let glob_level ?loc evd : glob_level -> _ = function
+  | UAnonymous {rigid} ->
+    assert (rigid <> UnivFlexible true);
+    new_univ_level_variable ?loc rigid evd
+  | UNamed s ->
+    match level_name evd s with
+    | None ->
+      user_err ?loc
+        (str "Universe instances cannot contain non-Set small levels," ++ spc() ++
+         str "polymorphic universe instances must be greater or equal to Set.");
+    | Some r -> r
+
+let glob_qvar ?loc evd : glob_qvar -> _ = function
+  | GQVar q -> evd, q
+  | GLocalQVar {v=Anonymous} ->
+    let evd, q = new_quality_variable ?loc evd in
+    evd, q
+  | GRawQVar q ->
+    let evd = Evd.merge_sort_variables ~sideff:true evd (Sorts.QVar.Set.singleton q) in
+    evd, q
+  | GLocalQVar {v=Name id; loc} ->
+    try evd, (Evd.quality_of_name evd id)
+    with Not_found ->
+      if not (is_strict_universe_declarations()) then
+        let evd, q = new_quality_variable ?loc evd in
+        evd, q
+      else user_err ?loc Pp.(str "Undeclared quality: " ++ Id.print id ++ str".")
+
+let glob_quality ?loc evd = let open Sorts.Quality in function
+  | GQConstant q -> evd, QConstant q
+  | GQualVar (GQVar _ | GLocalQVar _ | GRawQVar _ as q) ->
+    let evd, q = glob_qvar ?loc evd q in
+    evd, QVar q
+
+type inference_hook = env -> evar_map -> Evar.t -> (evar_map * constr) option
+
+type use_typeclasses = NoUseTC | UseTCForConv | UseTC
+
+type inference_flags = {
+  use_coercions : bool;
+  use_typeclasses : use_typeclasses;
+  solve_unification_constraints : bool;
+  fail_evar : bool;
+  expand_evars : bool;
+  program_mode : bool;
+  polymorphic : bool;
+  undeclared_evars_patvars: bool;
+  patvars_abstract : bool;
+  unconstrained_sorts : bool;
+}
+
+type pretype_flags = {
+  poly : bool;
+  resolve_tc : bool;
+  program_mode : bool;
+  use_coercions : bool;
+  undeclared_evars_patvars : bool;
+  patvars_abstract : bool;
+  unconstrained_sorts : bool;
+}
+
+let glob_opt_qvar ?loc ~flags sigma = function
+  | None ->
+    if flags.unconstrained_sorts then
+      let sigma, q = new_quality_variable ?loc sigma in
+      sigma, Some q
+    else sigma, None
+  | Some q ->
+    let sigma, q = glob_qvar ?loc sigma q in
+    sigma, Some q
+
+let sort ?loc ~flags sigma (q, l) = match l with
+| UNamed [] -> assert false
+| UNamed [GSProp, 0] -> assert (Option.is_empty q); sigma, ESorts.sprop
+| UNamed [GProp, 0] -> assert (Option.is_empty q); sigma, ESorts.prop
+| UNamed [GSet, 0] when Option.is_empty q -> sigma, ESorts.set
+| UNamed ((u, n) :: us) ->
   let open Pp in
+  let sigma, q = glob_opt_qvar ?loc ~flags sigma q in
   let get_level sigma u n = match level_name sigma u with
   | None ->
     user_err ?loc
@@ -177,28 +287,20 @@ let sort_info ?loc sigma l = match l with
   in
   let (sigma, u) = get_level sigma u n in
   let (sigma, u) = List.fold_left fold (sigma, u) us in
-  sigma, Sorts.sort_of_univ u
-
-type inference_hook = env -> evar_map -> Evar.t -> (evar_map * constr) option
-
-type use_typeclasses = NoUseTC | UseTCForConv | UseTC
-
-type inference_flags = {
-  use_coercions : bool;
-  use_typeclasses : use_typeclasses;
-  solve_unification_constraints : bool;
-  fail_evar : bool;
-  expand_evars : bool;
-  program_mode : bool;
-  polymorphic : bool;
-}
-
-type pretype_flags = {
-  poly : bool;
-  resolve_tc : bool;
-  program_mode : bool;
-  use_coercions : bool;
-}
+  let s = match q with
+    | None -> Sorts.sort_of_univ u
+    | Some q -> Sorts.qsort q u
+  in
+  sigma, ESorts.make s
+| UAnonymous {rigid} ->
+  let sigma, q = glob_opt_qvar ?loc ~flags sigma q in
+  let sigma, l = new_univ_level_variable ?loc rigid sigma in
+  let u = Univ.Universe.make l in
+  let s = match q with
+    | None -> Sorts.sort_of_univ u
+    | Some q -> Sorts.qsort q u
+  in
+  sigma, ESorts.make s
 
 (* Compute the set of still-undefined initial evars up to restriction
    (e.g. clearing) and the set of yet-unsolved evars freshly created
@@ -208,34 +310,50 @@ type pretype_flags = {
    [sigma'] into those already in [sigma] or deriving from an evar in
    [sigma] by restriction, and the evars properly created in [sigma'] *)
 
-type frozen =
-| FrozenId of undefined evar_info Evar.Map.t
-  (** No pending evars. We do not put a set here not to reallocate like crazy,
-      but the actual data of the map is not used, only keys matter. All
-      functions operating on this type must have the same behaviour on
-      [FrozenId map] and [FrozenProgress (Evar.Map.domain map, Evar.Set.empty)] *)
-| FrozenProgress of (Evar.Set.t * Evar.Set.t) Lazy.t
-  (** Proper partition of the evar map as described above. *)
+type frozen_and_pending =
+  Frz :
+    'a Evar.Map.t
+    (* Undefined from [sigma']. This is used only as a set,
+       guaranteed by the existential type 'a, but we do not use
+       Evar.Set to avoid reallocating. *)
+    * Evar.Set.t Lazy.t option
+    (* Undefined evars in [sigma'] which are neither in [sigma] or aliases thereof.
+       [None] means empty.*)
+    -> frozen_and_pending
 
-let frozen_and_pending_holes (sigma, sigma') =
+let frozen_and_pending_holes (sigma, sigma') term =
   let undefined0 = Option.cata Evd.undefined_map Evar.Map.empty sigma in
-  (* Fast path when the undefined evars where not modified *)
-  if undefined0 == Evd.undefined_map sigma' then
-    FrozenId undefined0
-  else
-    let data = lazy begin
-    let add_derivative_of evk evi acc =
-      match advance sigma' evk with None -> acc | Some evk' -> Evar.Set.add evk' acc in
-    let frozen = Evar.Map.fold add_derivative_of undefined0 Evar.Set.empty in
-    let fold evk _ accu = if not (Evar.Set.mem evk frozen) then Evar.Set.add evk accu else accu in
-    let pending = Evd.fold_undefined fold sigma' Evar.Set.empty in
-    (frozen, pending)
-    end in
-    FrozenProgress data
+  let included = Option.cata (Evd.evars_of_term sigma') Evar.Set.empty term in
+  let pending =
+    if undefined0 == Evd.undefined_map sigma' && Evar.Set.is_empty included
+    then None
+    else
+      Some (lazy begin
+        let pending, aliases =
+          Evar.Map.symmetric_diff_fold (fun ev v v' (pending,aliases as acc) -> match v, v' with
+              | None, None -> assert false
+              | Some _, None ->
+                (* ev got defined in sigma', but is it an alias? *)
+                begin match advance sigma' ev with
+                | None -> acc
+                | Some ev -> pending, Evar.Set.add ev aliases
+                end
+              | None, Some _ ->
+                (* ev is new in sigma' *)
+                Evar.Set.add ev pending, aliases
+              | Some _, Some _ -> (* ev is still undefined in sigma' *) acc)
+            undefined0
+            (Evd.undefined_map sigma')
+            (Evar.Set.empty, Evar.Set.empty)
+        in
+        Evar.Set.union included (Evar.Set.diff pending aliases);
+      end)
+  in
+  Frz (Evd.undefined_map sigma', pending)
 
 let filter_frozen frozen = match frozen with
-  | FrozenId map -> fun evk -> Evar.Map.mem evk map
-  | FrozenProgress (lazy (frozen, _)) -> fun evk -> Evar.Set.mem evk frozen
+  | Frz (undf, None) -> fun evk -> Evar.Map.mem evk undf
+  | Frz (undf, Some (lazy pending)) -> fun evk -> not (Evar.Set.mem evk pending) && Evar.Map.mem evk undf
 
 let typeclasses_filter ~program_mode frozen =
   if program_mode
@@ -253,8 +371,8 @@ let apply_typeclasses ~program_mode ~fail_evar env sigma frozen =
   sigma
 
 let apply_inference_hook (hook : inference_hook) env sigma frozen = match frozen with
-| FrozenId _ -> sigma
-| FrozenProgress (lazy (_, pending)) ->
+| Frz (_, None) -> sigma
+| Frz (_, Some (lazy pending)) ->
   Evar.Set.fold (fun evk sigma ->
     if Evd.is_undefined sigma evk (* in particular not defined by side-effect *)
     then
@@ -265,9 +383,19 @@ let apply_inference_hook (hook : inference_hook) env sigma frozen = match frozen
     else
       sigma) pending sigma
 
-let apply_heuristics env sigma =
+let allow_all_but_patvars sigma =
+  let p evk =
+    try
+      let EvarInfo evi = Evd.find sigma evk in
+      match snd (Evd.evar_source evi) with Evar_kinds.MatchingVar _ -> false | _ -> true
+    with Not_found -> true
+  in
+  Evarsolve.AllowedEvars.from_pred p
+
+let apply_heuristics ~patvars_abstract env sigma =
   (* Resolve eagerly, potentially making wrong choices *)
   let flags = default_flags_of (Conv_oracle.get_transp_state (Environ.oracle env)) in
+  let flags = if patvars_abstract then { flags with allowed_evars = allow_all_but_patvars sigma } else flags in
   try solve_unif_constraints_with_heuristics ~flags env sigma
   with e when CErrors.noncritical e -> sigma
 
@@ -281,8 +409,8 @@ let check_typeclasses_instances_are_solved ~program_mode env sigma frozen =
   end
 
 let check_extra_evars_are_solved env current_sigma frozen = match frozen with
-| FrozenId _ -> ()
-| FrozenProgress (lazy (_, pending)) ->
+| Frz (_, None) -> ()
+| Frz (_, Some (lazy pending)) ->
   Evar.Set.iter
     (fun evk ->
       if not (Evd.is_defined current_sigma evk) then
@@ -310,68 +438,73 @@ let check_evars env ?initial sigma c =
     | _ -> EConstr.iter sigma proc_rec c
   in proc_rec c
 
-let check_evars_are_solved ~program_mode env sigma frozen =
+let check_problems_are_solved env sigma = function
+  | Frz (_, None) -> ()
+  | Frz (_, Some (lazy pending)) -> check_problems_are_solved ~evars:pending env sigma
+
+let check_evars_are_solved_from ~program_mode env sigma frozen frozen_for_pb =
   check_typeclasses_instances_are_solved ~program_mode env sigma frozen;
-  check_problems_are_solved env sigma;
+  check_problems_are_solved env sigma frozen_for_pb;
   check_extra_evars_are_solved env sigma frozen
 
 (* Try typeclasses, hooks, unification heuristics ... *)
 
-let solve_remaining_evars ?hook (flags : inference_flags) env ?initial sigma =
+let solve_remaining_evars_from ?hook (flags : inference_flags) env ?initial sigma term =
   let program_mode = flags.program_mode in
-  let frozen = frozen_and_pending_holes (initial, sigma) in
   let sigma =
     match flags.use_typeclasses with
-    | UseTC -> apply_typeclasses ~program_mode ~fail_evar:false env sigma frozen
+    | UseTC ->
+      let frozen = frozen_and_pending_holes (initial, sigma) None in
+      apply_typeclasses ~program_mode ~fail_evar:false env sigma frozen
     | NoUseTC | UseTCForConv -> sigma
   in
-  let frozen = frozen_and_pending_holes (initial, sigma) in
   let sigma = match hook with
   | None -> sigma
-  | Some hook -> apply_inference_hook hook env sigma frozen
+  | Some hook ->
+    let frozen = frozen_and_pending_holes (initial, sigma) None in
+    apply_inference_hook hook env sigma frozen
   in
   let sigma = if flags.solve_unification_constraints
-    then apply_heuristics env sigma
+    then apply_heuristics ~patvars_abstract:flags.patvars_abstract env sigma
     else sigma
   in
-  if flags.fail_evar then check_evars_are_solved ~program_mode env sigma frozen;
+  let () = if flags.fail_evar then
+    let frozen = frozen_and_pending_holes (initial, sigma) None in
+    let frozen_for_pb = frozen_and_pending_holes (initial, sigma) term in
+    check_evars_are_solved_from ~program_mode env sigma frozen frozen_for_pb in
   sigma
 
+let solve_remaining_evars ?hook (flags : inference_flags) env ?initial sigma =
+  solve_remaining_evars_from ?hook (flags : inference_flags) env ?initial sigma None
+
 let check_evars_are_solved ~program_mode env ?initial current_sigma =
-  let frozen = frozen_and_pending_holes (initial, current_sigma) in
-  check_evars_are_solved ~program_mode env current_sigma frozen
+  let frozen = frozen_and_pending_holes (initial, current_sigma) None in
+  check_evars_are_solved_from ~program_mode env current_sigma frozen frozen
 
 let process_inference_flags flags env initial (sigma,c,cty) =
-  let sigma = solve_remaining_evars flags env ~initial sigma in
+  let sigma = solve_remaining_evars_from flags env ~initial sigma (Some cty) in
   let c = if flags.expand_evars then nf_evar sigma c else c in
   sigma,c,cty
 
 let adjust_evar_source sigma na c =
   match na, kind sigma c with
   | Name id, Evar (evk,args) ->
-     let EvarInfo evi = Evd.find sigma evk in
+     let evi = Evd.find_undefined sigma evk in
      begin match Evd.evar_source evi with
-     | loc, Evar_kinds.QuestionMark {
-         Evar_kinds.qm_obligation=b;
-         Evar_kinds.qm_name=Anonymous;
-         Evar_kinds.qm_record_field=recfieldname;
-        } ->
-        let src = (loc,Evar_kinds.QuestionMark {
-            Evar_kinds.qm_obligation=b;
-            Evar_kinds.qm_name=na;
-            Evar_kinds.qm_record_field=recfieldname;
-        }) in
-        let (sigma, evk') = restrict_evar sigma evk (evar_filter evi) ~src None in
-        sigma, mkEvar (evk',args)
+     | loc, Evar_kinds.QuestionMark ({ Evar_kinds.qm_name=Anonymous } as qm) ->
+       let src = (loc,Evar_kinds.QuestionMark { qm with Evar_kinds.qm_name=na }) in
+       (* Evd.update_source doesn't work for some reason, cf test bug_18260_1.v *)
+       let (sigma, evk') = Evd.restrict evk (evar_filter evi) ~src sigma in
+       sigma, mkEvar (evk',args)
      | _ -> sigma, c
      end
   | _, _ -> sigma, c
 
 (* coerce to tycon if any *)
-let inh_conv_coerce_to_tycon ?loc ~flags:{ program_mode; resolve_tc; use_coercions } env sigma j = function
+let inh_conv_coerce_to_tycon ?loc ~flags:{ program_mode; resolve_tc; use_coercions; patvars_abstract } env sigma j = function
   | None -> sigma, j, Some Coercion.empty_coercion_trace
   | Some t ->
-    Coercion.inh_conv_coerce_to ?loc ~program_mode ~resolve_tc ~use_coercions !!env sigma j t
+    Coercion.inh_conv_coerce_to ?loc ~program_mode ~resolve_tc ~use_coercions ~patvars_abstract !!env sigma j t
 
 let check_instance subst = function
   | [] -> ()
@@ -407,25 +540,22 @@ let pretype_id pretype loc env sigma id =
 (*************************************************************************)
 (* Main pretyping function                                               *)
 
-let glob_level ?loc evd : glob_level -> _ = function
-  | UAnonymous {rigid} -> new_univ_level_variable ?loc (if rigid then univ_rigid else univ_flexible) evd
-  | UNamed s ->
-    match level_name evd s with
-    | None ->
-      user_err ?loc
-        (str "Universe instances cannot contain non-Set small levels, polymorphic" ++
-        str " universe instances must be greater or equal to Set.");
-    | Some r -> r
-
-let instance ?loc evd l =
-  let evd, l' =
+let instance ?loc evd (ql,ul) =
+  let evd, ql' =
+    List.fold_left
+      (fun (evd, quals) l ->
+         let evd, l = glob_quality ?loc evd l in
+         (evd, l :: quals)) (evd, [])
+      ql
+  in
+  let evd, ul' =
     List.fold_left
       (fun (evd, univs) l ->
          let evd, l = glob_level ?loc evd l in
          (evd, l :: univs)) (evd, [])
-      l
+      ul
   in
-  evd, Some (Univ.Instance.of_array (Array.of_list (List.rev l')))
+  evd, Some (UVars.Instance.of_array (Array.rev_of_list ql', Array.rev_of_list ul'))
 
 let pretype_global ?loc rigid env evd gr us =
   let evd, instance =
@@ -442,12 +572,13 @@ let pretype_ref ?loc sigma env ref us =
     (try
        let ty = NamedDecl.get_type (lookup_named id !!env) in
        (match us with
-        | None | Some [] -> ()
-        | Some us ->
+        | None | Some ([],[]) -> ()
+        | Some (qs,us) ->
             let open UnivGen in
             Loc.raise ?loc (UniverseLengthMismatch {
-              actual = List.length us;
-              expect = 0;
+              gref = ref;
+              actual = List.length qs, List.length us;
+              expect = 0, 0;
             }));
        sigma, make_judge (mkVar id) ty
        with Not_found ->
@@ -460,29 +591,14 @@ let pretype_ref ?loc sigma env ref us =
     let sigma, ty = type_of !!env sigma c in
     sigma, make_judge c ty
 
-let sort ?loc evd : glob_sort -> _ = function
-  | UAnonymous {rigid} ->
-    let evd, l = new_univ_level_variable ?loc (if rigid then univ_rigid else univ_flexible) evd in
-    evd, ESorts.make (Sorts.sort_of_univ (Univ.Universe.make l))
-  | UNamed (q, l) ->
-    (* No user-facing syntax for qualities *)
-    let () = assert (Option.is_empty q) in
-    let evd, s = sort_info ?loc evd l in
-    evd, ESorts.make s
-
 let judge_of_sort ?loc evd s =
   let judge =
     { uj_val = mkSort s; uj_type = mkSort (ESorts.super evd s) }
   in
     evd, judge
 
-let pretype_sort ?loc sigma s =
-  match s with
-  | UNamed (None, [GSProp, 0]) -> sigma, judge_of_sprop
-  | UNamed (None, [GProp, 0]) -> sigma, judge_of_prop
-  | UNamed (None, [GSet, 0]) -> sigma, judge_of_set
-  | _ ->
-  let sigma, s = sort ?loc sigma s in
+let pretype_sort ?loc ~flags sigma s =
+  let sigma, s = sort ?loc ~flags sigma s in
   judge_of_sort ?loc sigma s
 
 let new_typed_evar env sigma ?naming ~src tycon =
@@ -509,12 +625,12 @@ let mark_obligation_evar sigma k evc =
 type 'a pretype_fun = ?loc:Loc.t -> flags:pretype_flags -> type_constraint -> GlobEnv.t -> evar_map -> evar_map * 'a
 
 type pretyper = {
-  pretype_ref : pretyper -> GlobRef.t * glob_level list option -> unsafe_judgment pretype_fun;
+  pretype_ref : pretyper -> GlobRef.t * glob_instance option -> unsafe_judgment pretype_fun;
   pretype_var : pretyper -> Id.t -> unsafe_judgment pretype_fun;
   pretype_evar : pretyper -> existential_name CAst.t * (lident * glob_constr) list -> unsafe_judgment pretype_fun;
   pretype_patvar : pretyper -> Evar_kinds.matching_var_kind -> unsafe_judgment pretype_fun;
   pretype_app : pretyper -> glob_constr * glob_constr list -> unsafe_judgment pretype_fun;
-  pretype_proj : pretyper -> (Constant.t * glob_level list option) * glob_constr list * glob_constr -> unsafe_judgment pretype_fun;
+  pretype_proj : pretyper -> (Constant.t * glob_instance option) * glob_constr list * glob_constr -> unsafe_judgment pretype_fun;
   pretype_lambda : pretyper -> Name.t * binding_kind * glob_constr * glob_constr -> unsafe_judgment pretype_fun;
   pretype_prod : pretyper -> Name.t * binding_kind * glob_constr * glob_constr -> unsafe_judgment pretype_fun;
   pretype_letin : pretyper -> Name.t * glob_constr * glob_constr option * glob_constr -> unsafe_judgment pretype_fun;
@@ -523,12 +639,13 @@ type pretyper = {
   pretype_if : pretyper -> glob_constr * (Name.t * glob_constr option) * glob_constr * glob_constr -> unsafe_judgment pretype_fun;
   pretype_rec : pretyper -> glob_fix_kind * Id.t array * glob_decl list array * glob_constr array * glob_constr array -> unsafe_judgment pretype_fun;
   pretype_sort : pretyper -> glob_sort -> unsafe_judgment pretype_fun;
-  pretype_hole : pretyper -> Evar_kinds.t * Namegen.intro_pattern_naming_expr -> unsafe_judgment pretype_fun;
+  pretype_hole : pretyper -> Evar_kinds.glob_evar_kind -> unsafe_judgment pretype_fun;
   pretype_genarg : pretyper -> Genarg.glob_generic_argument -> unsafe_judgment pretype_fun;
   pretype_cast : pretyper -> glob_constr * cast_kind option * glob_constr -> unsafe_judgment pretype_fun;
   pretype_int : pretyper -> Uint63.t -> unsafe_judgment pretype_fun;
   pretype_float : pretyper -> Float64.t -> unsafe_judgment pretype_fun;
-  pretype_array : pretyper -> glob_level list option * glob_constr array * glob_constr * glob_constr -> unsafe_judgment pretype_fun;
+  pretype_string : pretyper -> Pstring.t -> unsafe_judgment pretype_fun;
+  pretype_array : pretyper -> glob_instance option * glob_constr array * glob_constr * glob_constr -> unsafe_judgment pretype_fun;
   pretype_type : pretyper -> glob_constr -> unsafe_type_judgment pretype_fun;
 }
 
@@ -548,11 +665,11 @@ let eval_pretyper self ~flags tycon env sigma t =
     self.pretype_app self (c, args) ?loc ~flags tycon env sigma
   | GProj (hd, args, c) ->
     self.pretype_proj self (hd, args, c) ?loc ~flags tycon env sigma
-  | GLambda (na, bk, t, c) ->
+  | GLambda (na, _, bk, t, c) ->
     self.pretype_lambda self (na, bk, t, c) ?loc ~flags tycon env sigma
-  | GProd (na, bk, t, c) ->
+  | GProd (na, _, bk, t, c) ->
     self.pretype_prod self (na, bk, t, c) ?loc ~flags tycon env sigma
-  | GLetIn (na, b, t, c) ->
+  | GLetIn (na, _, b, t, c) ->
     self.pretype_letin self (na, b, t, c) ?loc ~flags tycon env sigma
   | GCases (st, c, tm, cl) ->
     self.pretype_cases self (st, c, tm, cl) ?loc ~flags tycon env sigma
@@ -564,8 +681,8 @@ let eval_pretyper self ~flags tycon env sigma t =
     self.pretype_rec self (knd, nas, decl, c, t) ?loc ~flags tycon env sigma
   | GSort s ->
     self.pretype_sort self s ?loc ~flags tycon env sigma
-  | GHole (knd, nam) ->
-    self.pretype_hole self (knd, nam) ?loc ~flags tycon env sigma
+  | GHole knd ->
+    self.pretype_hole self knd ?loc ~flags tycon env sigma
   | GGenarg arg ->
     self.pretype_genarg self arg ?loc ~flags tycon env sigma
   | GCast (c, k, t) ->
@@ -574,6 +691,8 @@ let eval_pretyper self ~flags tycon env sigma t =
     self.pretype_int self n ?loc ~flags tycon env sigma
   | GFloat f ->
     self.pretype_float self f ?loc ~flags tycon env sigma
+  | GString s ->
+    self.pretype_string self s ?loc ~flags tycon env sigma
   | GArray (u,t,def,ty) ->
     self.pretype_array self (u,t,def,ty) ?loc ~flags tycon env sigma
 
@@ -585,10 +704,13 @@ let pretype_instance self ~flags env sigma loc hyps evk update =
     let id = NamedDecl.get_id decl in
     let b = Option.map (replace_vars sigma subst) (NamedDecl.get_value decl) in
     let t = replace_vars sigma subst (NamedDecl.get_type decl) in
+    let uflags = default_flags_of TransparentState.full in
+    let uflags = if flags.patvars_abstract then { uflags with allowed_evars = allow_all_but_patvars sigma } else uflags in
     let check_body sigma id c =
       match b, c with
-      | Some b, Some c ->
-         if not (is_conv !!env sigma b c) then
+      | Some b, Some c -> begin
+         try (Evarconv.unify_delay ~flags:uflags !!env sigma b c)
+         with UnableToUnify (sigma, _) ->
            user_err ?loc  (str "Cannot interpret " ++
              pr_existential_key !!env sigma evk ++
              strbrk " in current context: binding for " ++ Id.print id ++
@@ -597,14 +719,16 @@ let pretype_instance self ~flags env sigma loc hyps evk update =
              strbrk " and " ++
              quote (Termops.Internal.print_constr_env !!env sigma c) ++
              str ").")
+         end
       | Some b, None ->
            user_err ?loc  (str "Cannot interpret " ++
              pr_existential_key !!env sigma evk ++
              strbrk " in current context: " ++ Id.print id ++
              strbrk " should be bound to a local definition.")
-      | None, _ -> () in
+      | None, _ -> sigma in
     let check_type sigma id t' =
-      if not (is_conv !!env sigma t t') then
+      try (Evarconv.unify_delay ~flags:uflags !!env sigma t t')
+      with UnableToUnify (sigma, _) ->
         user_err ?loc  (str "Cannot interpret " ++
           pr_existential_key !!env sigma evk ++
           strbrk " in current context: binding for " ++ Id.print id ++
@@ -613,19 +737,19 @@ let pretype_instance self ~flags env sigma loc hyps evk update =
       try
         let c = snd (List.find (fun (CAst.{v=id'},c) -> Id.equal id id') update) in
         let sigma, c = eval_pretyper self ~flags (mk_tycon t) env sigma c in
-        check_body sigma id (Some c.uj_val);
+        let sigma = check_body sigma id (Some c.uj_val) in
         sigma, c.uj_val, List.remove_first (fun (CAst.{v=id'},_) -> Id.equal id id') update
       with Not_found ->
       try
         let (n,b',t') = lookup_rel_id id (rel_context !!env) in
-        check_type sigma id (lift n t');
-        check_body sigma id (Option.map (lift n) b');
+        let sigma = check_type sigma id (lift n t') in
+        let sigma = check_body sigma id (Option.map (lift n) b') in
         sigma, mkRel n, update
       with Not_found ->
       try
         let decl = lookup_named id !!env in
-        check_type sigma id (NamedDecl.get_type decl);
-        check_body sigma id (NamedDecl.get_value decl);
+        let sigma = check_type sigma id (NamedDecl.get_type decl) in
+        let sigma = check_body sigma id (NamedDecl.get_value decl) in
         sigma, mkVar id, update
       with Not_found ->
         user_err ?loc  (str "Cannot interpret " ++
@@ -656,9 +780,17 @@ struct
       (* Ne faudrait-il pas s'assurer que hyps est bien un
          sous-contexte du contexte courant, et qu'il n'y a pas de Rel "caché" *)
       let id = interp_ltac_id env id in
-      let evk =
-        try Evd.evar_key id sigma
-        with Not_found -> error_evar_not_found ?loc:locid !!env sigma id in
+      let sigma, evk =
+        match Evd.evar_key id sigma with
+        | evk -> sigma, evk
+        | exception Not_found ->
+            if flags.undeclared_evars_patvars then
+              let k = Evar_kinds.(MatchingVar (FirstOrderPatVar id)) in
+              let sigma, uj_val, _ = new_typed_evar env sigma ~naming:(IntroIdentifier id) ~src:(loc,k) tycon in
+              sigma, fst (destEvar sigma uj_val)
+            else
+              error_evar_not_found ?loc:locid !!env sigma id
+      in
       let EvarInfo evi = Evd.find sigma evk in
       let hyps = evar_filtered_context evi in
       let sigma, args = pretype_instance self ~flags env sigma loc hyps evk inst in
@@ -671,12 +803,14 @@ struct
     let sigma, uj_val, uj_type = new_typed_evar env sigma ~src:(loc,k) tycon in
     sigma, { uj_val; uj_type }
 
-  let pretype_hole self (k, naming) ?loc ~flags tycon env sigma =
+  let pretype_hole self k ?loc ~flags tycon env sigma =
     let open Namegen in
+    let naming = naming_of_glob_kind k in
     let naming = match naming with
       | IntroIdentifier id -> IntroIdentifier (interp_ltac_id env id)
       | IntroAnonymous -> IntroAnonymous
       | IntroFresh id -> IntroFresh (interp_ltac_id env id) in
+    let k = kind_of_glob_kind k in
     let sigma, uj_val, uj_type = new_typed_evar env sigma ~src:(loc,k) ~naming tycon in
     let sigma = if flags.program_mode then mark_obligation_evar sigma k uj_val else sigma in
     sigma, { uj_val; uj_type }
@@ -694,15 +828,15 @@ struct
     let hypnaming = if flags.program_mode then ProgramNaming vars else RenameExistingBut vars in
     let rec type_bl env sigma ctxt = function
       | [] -> sigma, ctxt
-      | (na,bk,None,ty)::bl ->
+      | (na,_,bk,None,ty)::bl ->
         let sigma, ty' = pretype_type empty_valcon env sigma ty in
-        let rty' = ESorts.relevance_of_sort sigma ty'.utj_type in
+        let rty' = ESorts.relevance_of_sort ty'.utj_type in
         let dcl = LocalAssum (make_annot na rty', ty'.utj_val) in
         let dcl', env = push_rel ~hypnaming sigma dcl env in
         type_bl env sigma (Context.Rel.add dcl' ctxt) bl
-      | (na,bk,Some bd,ty)::bl ->
+      | (na,_,bk,Some bd,ty)::bl ->
         let sigma, ty' = pretype_type empty_valcon env sigma ty in
-        let rty' = ESorts.relevance_of_sort sigma ty'.utj_type in
+        let rty' = ESorts.relevance_of_sort ty'.utj_type in
         let sigma, bd' = pretype (mk_tycon ty'.utj_val) env sigma bd in
         let dcl = LocalDef (make_annot na rty', bd'.uj_val, ty'.utj_val) in
         let dcl', env = push_rel ~hypnaming sigma dcl env in
@@ -761,32 +895,134 @@ struct
                  but doing it properly involves delta-reduction, and it finally
                  doesn't seem worth the effort (except for huge mutual
                  fixpoints ?) *)
-          let possible_indexes =
+          let possible_fix_indices =
             Array.to_list (Array.mapi
                              (fun i annot -> match annot with
                              | Some n -> [n]
-                             | None -> List.map_i (fun i _ -> i) 0 ctxtv.(i))
+                             | None -> List.interval 0 (Context.Rel.nhyps ctxtv.(i) - 1))
            vn)
           in
           let fixdecls = (names,ftys,fdefs) in
-          let indexes = esearch_guard ?loc !!env sigma possible_indexes fixdecls in
+          let indexes = esearch_fix_guard ?loc !!env sigma possible_fix_indices fixdecls in
           make_judge (mkFix ((indexes,i),fixdecls)) ftys.(i)
         | GCoFix i ->
           let fixdecls = (names,ftys,fdefs) in
           let cofix = (i, fixdecls) in
-            (try check_cofix !!env (i, nf_fix sigma fixdecls)
-             with reraise ->
-               let (e, info) = Exninfo.capture reraise in
-               let info = Option.cata (Loc.add_loc info) info loc in
-               Exninfo.iraise (e, info));
-            make_judge (mkCoFix cofix) ftys.(i)
+          let () = esearch_cofix_guard ?loc !!env sigma fixdecls in
+          make_judge (mkCoFix cofix) ftys.(i)
       in
       discard_trace @@ inh_conv_coerce_to_tycon ?loc ~flags env sigma fixj tycon
 
   let pretype_sort self s =
     fun ?loc ~flags tycon env sigma ->
-    let sigma, j = pretype_sort ?loc sigma s in
+    let sigma, j = pretype_sort ?loc ~flags sigma s in
     discard_trace @@ inh_conv_coerce_to_tycon ?loc ~flags env sigma j tycon
+
+  let enforce_template_csts sigma bound csts =
+    (* maybe could be smarter when something becomes Prop *)
+    let bound = Univ.Level.Map.map (fun u -> TemplateUniv u) bound in
+    let csts = Inductive.instantiate_template_constraints bound csts in
+    Evd.add_constraints sigma csts
+
+  let template_sort qopt boundus (s:Sorts.t) =
+    match s with
+    | SProp | Prop | Set -> ESorts.make s
+    | Type u ->
+      let subst_fn u = Univ.Level.Map.find_opt u boundus in
+      let u = UnivSubst.subst_univs_universe subst_fn u in
+      let s = match qopt with
+        | None -> Sorts.sort_of_univ u
+        | Some (_,q) -> Sorts.qsort q u
+      in
+      ESorts.make s
+    | QSort (q,u) -> assert false
+
+  let bind_template_univ ~domu u bound =
+    Univ.Level.Map.update domu (function
+        | None -> Some u
+        | Some u' -> CErrors.anomaly Pp.(str "non linear template univ"))
+      bound
+
+  let rec finish_template qopt sigma boundus = let open TemplateArity in function
+    | CtorType (csts, typ) ->
+      let sigma = enforce_template_csts sigma boundus csts in
+      sigma, typ
+    | IndType (csts, ctx, s) ->
+      let sigma = enforce_template_csts sigma boundus csts in
+      let s = template_sort qopt boundus s in
+      sigma, mkArity (ctx, s)
+    | DefParam (na, v, t, codom) ->
+      let sigma, codom = finish_template qopt sigma boundus codom in
+      sigma, mkLetIn (na,v,t,codom)
+    | NonTemplateArg (na,dom,codom) ->
+      let sigma, codom = finish_template qopt sigma boundus codom in
+      sigma, mkProd (na,dom,codom)
+    | TemplateArg (na,ctx,domu,codom) ->
+      (* partially applied template: use the global univ level, force quality = Type *)
+      let sigma = match qopt with
+        | Some (used_template_levels,q) when Univ.Level.Set.mem domu used_template_levels ->
+          Evd.add_quconstraints sigma
+            (Sorts.QConstraints.singleton (QVar q, Equal, QConstant QType),
+             Univ.Constraints.empty)
+        | _ -> sigma
+      in
+      let boundus = bind_template_univ ~domu (Univ.Universe.make domu) boundus in
+      let sigma, codom = finish_template qopt sigma boundus codom in
+      let s = ESorts.make @@ Sorts.sort_of_univ @@ Univ.Universe.make domu in
+      sigma, mkProd (na,mkArity (ctx,s),codom)
+
+  let rec apply_template qopt pretype_arg arg_state env sigma body subst boundus todoargs typ =
+    let open TemplateArity in
+    match todoargs, typ with
+    | [], _
+    | _, (CtorType _ | IndType _) ->
+      let sigma, typ = finish_template qopt sigma boundus typ in
+      sigma, body, subst, typ, arg_state, todoargs
+    | _, DefParam (_, v, _, codom) ->
+      (* eager subst may be inefficient but template inductives with
+         letin params are hopefully rare enough that it doesn't
+         matter *)
+      let v = Vars.esubst Vars.lift_substituend subst v in
+      let subst = Esubst.subs_cons (Vars.make_substituend v) subst in
+      apply_template qopt pretype_arg arg_state env sigma body subst boundus todoargs codom
+    | arg :: todoargs, NonTemplateArg (na, dom, codom) ->
+      let dom = Vars.esubst Vars.lift_substituend subst dom in
+      let sigma, arg_state, body, arg = pretype_arg env sigma arg_state body arg na.binder_name dom in
+      let subst = Esubst.subs_cons (Vars.make_substituend arg) subst in
+      apply_template qopt pretype_arg arg_state env sigma body subst boundus todoargs codom
+    | arg :: todoargs, TemplateArg (na, ctx, domu, codom) ->
+      let sigma, u = Evd.new_univ_level_variable UState.univ_flexible_alg sigma in
+      let s = match qopt with
+        | Some (used_template_levels, q) when Univ.Level.Set.mem domu used_template_levels ->
+          ESorts.make @@ Sorts.qsort q @@ Univ.Universe.make u
+        | _ -> ESorts.make @@ Sorts.sort_of_univ @@ Univ.Universe.make u
+      in
+      let dom = Vars.esubst Vars.lift_substituend subst (mkArity (ctx, s)) in
+      let sigma, arg_state, body, arg = pretype_arg env sigma arg_state body arg na.binder_name dom in
+      let u =
+        (* get an algebraic instead of the generated variable *)
+        let s =
+          try
+            snd @@ Reductionops.dest_arity !!env sigma @@ Retyping.get_type_of !!env sigma arg
+          with Reduction.NotArity ->
+            (* delayed constraints prevent getting the sort from retyping *)
+            s
+        in
+        match ESorts.kind sigma s with
+        | SProp -> assert false
+        | Prop ->
+          (* putting type0 here doesn't prevent getting Prop
+             because the return type will be "qsort q type0" *)
+          Univ.Universe.type0
+        | Set -> Univ.Universe.type0
+        | Type u -> u
+        | QSort (_,u) ->
+          (* quality guaranteed = Option.get qopt *)
+          u
+      in
+      let boundus = bind_template_univ ~domu u boundus in
+      let subst = Esubst.subs_cons (Vars.make_substituend arg) subst in
+      apply_template qopt pretype_arg arg_state env sigma body subst boundus todoargs codom
 
   let pretype_app self (f, args) =
     fun ?loc ~flags tycon env sigma ->
@@ -824,32 +1060,49 @@ struct
             try
               let IndType (indf, args) = find_rectype !!env sigma ty in
               let ((ind',u'),pars) = dest_ind_family indf in
-              if QInd.equal !!env ind ind' then List.map EConstr.of_constr pars
+              if QInd.equal !!env ind ind' then pars
               else (* Let the usual code throw an error *) []
             with Not_found -> []
       else []
     in
-    let refresh_template env sigma resj =
-      (* Special case for inductive type applications that must be
-         refreshed right away. *)
-      match EConstr.kind sigma resj.uj_val with
-      | App (f,args) ->
-        if Termops.is_template_polymorphic_ind !!env sigma f then
-          let c = mkApp (f, args) in
-          let sigma, c = Evarsolve.refresh_universes (Some true) !!env sigma c in
-          let t = Retyping.get_type_of !!env sigma c in
-          sigma, make_judge c (* use this for keeping evars: resj.uj_val *) t
-        else sigma, resj
-      | _ -> sigma, resj
+    let pretype_arg ?(trace=Coercion.empty_coercion_trace) env sigma (n, val_before_bidi, bidiargs, candargs) body arg na tycon =
+      (* trace is the coercion trace from coercing the body to funclass *)
+      let bidi = n >= nargs_before_bidi in
+      let sigma, c, bidiargs =
+        if bidi then
+          (* We want to get some typing information from the context
+             before typing the argument, so we replace it by an
+             existential variable *)
+          let sigma, c_hole = new_evar env sigma ~src:(loc,Evar_kinds.InternalHole) tycon in
+          sigma, c_hole, (c_hole, tycon, arg, trace) :: bidiargs
+        else
+          let sigma, j = pretype (Some tycon) env sigma arg in
+          sigma, j_val j, bidiargs
+      in
+      let sigma, candargs, c =
+        match candargs with
+        | [] -> sigma, [], c
+        | arg :: args ->
+          begin match Evarconv.unify_delay !!env sigma c arg with
+          | exception Evarconv.UnableToUnify (sigma,e) ->
+            raise (PretypeError (!!env,sigma,CannotUnify (c, arg, Some e)))
+          | sigma ->
+            sigma, args, nf_evar sigma c
+          end
+      in
+      let sigma, c = adjust_evar_source sigma na c in
+      let body = Coercion.push_arg body c in
+      let val_before_bidi = if bidi then val_before_bidi else body in
+      sigma, (n+1,val_before_bidi,bidiargs,candargs), body, c
     in
-    let rec apply_rec env sigma n body (subs, typ) val_before_bidi candargs bidiargs = function
+    let rec apply_rec env sigma arg_state body (subs, typ) = function
       | [] ->
         let typ = Vars.esubst Vars.lift_substituend subs typ in
         let body = Coercion.force_app_body body in
         let resj = { uj_val = body; uj_type = typ } in
+        let _,val_before_bidi, bidiargs,_ = arg_state in
         sigma, resj, val_before_bidi, List.rev bidiargs
       | c::rest ->
-        let bidi = n >= nargs_before_bidi in
         let argloc = loc_of_glob_constr c in
         let sigma, body, na, c1, subs, c2, trace = match EConstr.kind sigma typ with
         | Prod (na, c1, c2) ->
@@ -870,42 +1123,54 @@ struct
           in
           sigma, body, na, c1, Esubst.subs_id 0, c2, trace
         in
-        let (sigma, hj), bidiargs =
-          if bidi then
-            (* We want to get some typing information from the context before
-               typing the argument, so we replace it by an existential
-               variable *)
-            let sigma, c_hole = new_evar env sigma ~src:(loc,Evar_kinds.InternalHole) c1 in
-            (sigma, make_judge c_hole c1), (c_hole, c1, c, trace) :: bidiargs
-          else
-            let tycon = Some c1 in
-            pretype tycon env sigma c, bidiargs
+        let sigma, arg_state, body, arg =
+          pretype_arg env sigma arg_state ~trace body c na.binder_name c1
         in
-        let sigma, candargs, ujval =
-          match candargs with
-          | [] -> sigma, [], j_val hj
-          | arg :: args ->
-            begin match Evarconv.unify_delay !!env sigma (j_val hj) arg with
-              | exception Evarconv.UnableToUnify (sigma,e) ->
-                raise (PretypeError (!!env,sigma,CannotUnify (j_val hj, arg, Some e)))
-              | sigma ->
-                sigma, args, nf_evar sigma (j_val hj)
-            end
-        in
-        let sigma, ujval = adjust_evar_source sigma na.binder_name ujval in
-        let subs = Esubst.subs_cons (Vars.make_substituend ujval) subs in
-        let body = Coercion.push_arg body ujval in
-        let val_before_bidi = if bidi then val_before_bidi else body in
-        apply_rec env sigma (n+1) body (subs, c2) val_before_bidi candargs bidiargs rest
+        let subs = Esubst.subs_cons (Vars.make_substituend arg) subs in
+        apply_rec env sigma arg_state body (subs, c2) rest
     in
-    let typ = (Esubst.subs_id 0, fj.uj_type) in
     let body = (Coercion.start_app_body sigma fj.uj_val) in
-    let sigma, resj, val_before_bidi, bidiargs =
-      apply_rec env sigma 0 body typ body candargs [] args
+    let sigma, template_arity = match EConstr.kind sigma fj.uj_val with
+      | Ind (ind,u) | Construct ((ind,_),u) as k
+        when EInstance.is_empty u && Environ.template_polymorphic_ind ind !!env ->
+        let ctoropt = match k with
+          | Ind _ -> None
+          | Construct ((_,ctor),_) -> Some ctor
+          | _ -> assert false
+        in
+        let can_be_prop, arity = TemplateArity.get_template_arity !!env ind ~ctoropt in
+        let sigma, quality = match can_be_prop.template_can_be_prop with
+          | None -> sigma, None
+          | Some used_levels ->
+            let sigma, q = Evd.new_quality_variable sigma in
+            (* make q in cumulativity with Prop/Type *)
+            let sigma =
+              Evd.set_leq_sort sigma
+                ESorts.prop
+                (ESorts.make (Sorts.qsort q Univ.Universe.type0))
+            in
+            sigma, Some (used_levels,q)
+        in
+        sigma, Some (quality, arity)
+      | _ -> sigma, None
     in
-    let sigma, resj = refresh_template env sigma resj in
+    let arg_state = (0,body,[],candargs) in
+    let subst =  Esubst.subs_id 0 in
+    let typ = fj.uj_type in
+    let sigma, body, subst, typ, arg_state, args =
+      match template_arity with
+      | None -> sigma, body, subst, typ, arg_state, args
+      | Some (q,typ) ->
+        let pretype_arg env sigma arg_state body arg na tycon =
+          pretype_arg env sigma arg_state body arg na tycon
+        in
+        apply_template q pretype_arg arg_state env sigma body subst Univ.Level.Map.empty args typ
+    in
+    let sigma, resj, val_before_bidi, bidiargs =
+      apply_rec env sigma arg_state body (subst,typ) args
+    in
     let sigma, resj, otrace = inh_conv_coerce_to_tycon ?loc ~flags env sigma resj tycon in
-    let refine_arg n (sigma,t) (newarg,ty,origarg,trace) =
+    let refine_arg (sigma,t) (newarg,ty,origarg,trace) =
       (* Refine an argument (originally `origarg`) represented by an evar
          (`newarg`) to use typing information from the context *)
       (* Type the argument using the expected type *)
@@ -921,7 +1186,7 @@ struct
     (* We now refine any arguments whose typing was delayed for
        bidirectionality *)
     let t = val_before_bidi in
-    let sigma, t = List.fold_left_i refine_arg nargs_before_bidi (sigma,t) bidiargs in
+    let sigma, t = List.fold_left refine_arg (sigma,t) bidiargs in
     let t = Coercion.force_app_body t in
     (* If we did not get a coercion trace (e.g. with `Program` coercions, we
        replaced user-provided arguments with inferred ones. Otherwise, we apply
@@ -931,7 +1196,6 @@ struct
       | None -> resj
       | Some trace ->
         let resj = { resj with uj_val = t } in
-        let sigma, resj = refresh_template env sigma resj in
         { resj with uj_val = Coercion.reapply_coercions sigma trace t }
     in
     (sigma, resj)
@@ -979,7 +1243,7 @@ struct
     in
     let dom_valcon = valcon_of_tycon dom in
     let sigma, j = eval_type_pretyper self ~flags dom_valcon env sigma c1 in
-    let name = {binder_name=name; binder_relevance=ESorts.relevance_of_sort sigma j.utj_type} in
+    let name = {binder_name=name; binder_relevance=ESorts.relevance_of_sort j.utj_type} in
     let var = LocalAssum (name, j.utj_val) in
     let vars = VarSet.variables (Global.env ()) in
     let hypnaming = if flags.program_mode then ProgramNaming vars else RenameExistingBut vars in
@@ -1001,7 +1265,7 @@ struct
         let sigma, j = pretype_type empty_valcon env sigma c2 in
         sigma, name, { j with utj_val = lift 1 j.utj_val }
       | Name _ ->
-        let r = ESorts.relevance_of_sort sigma j.utj_type in
+        let r = ESorts.relevance_of_sort j.utj_type in
         let var = LocalAssum (make_annot name r, j.utj_val) in
         let var, env' = push_rel ~hypnaming sigma var env in
         let sigma, c2_j = pretype_type empty_valcon env' sigma c2 in
@@ -1064,7 +1328,6 @@ struct
       user_err ?loc:loc (str "Destructing let on this type expects " ++
         int cs.cs_nargs ++ str " variables.");
     let fsign, record =
-      let set_name na d = set_name na (map_rel_decl EConstr.of_constr d) in
       match Environ.get_projections !!env ind with
       | None ->
          List.map2 set_name (List.rev nal) cs.cs_args, false
@@ -1072,10 +1335,9 @@ struct
         let rec aux n k names l =
           match names, l with
           | na :: names, (LocalAssum (na', t) :: l) ->
-            let t = EConstr.of_constr t in
-            let proj = Projection.make ps.(cs.cs_nargs - k) true in
+            let proj = Projection.make (fst ps.(cs.cs_nargs - k)) true in
             LocalDef ({na' with binder_name = na},
-                      lift (cs.cs_nargs - n) (mkProj (proj, cj.uj_val)), t)
+                      lift (cs.cs_nargs - n) (mkProj (proj, na'.binder_relevance, cj.uj_val)), t)
             :: aux (n+1) (k + 1) names l
           | na :: names, (decl :: l) ->
             set_name na decl :: aux (n+1) k names l
@@ -1089,18 +1351,17 @@ struct
     let obj indt rci p v f =
       if not record then
         let f = it_mkLambda_or_LetIn f fsign in
-        let ci = make_case_info !!env (ind_of_ind_type indt) rci LetStyle in
-          mkCase (EConstr.contract_case !!env sigma (ci, p, make_case_invert !!env indt ci, cj.uj_val,[|f|]))
+        let ci = make_case_info !!env (ind_of_ind_type indt) LetStyle in
+          mkCase (EConstr.contract_case !!env sigma (ci, (p,rci), make_case_invert !!env sigma indt ~case_relevance:rci ci, cj.uj_val,[|f|]))
       else it_mkLambda_or_LetIn f fsign
     in
     (* Make dependencies from arity signature impossible *)
     let arsgn, indr =
-      let arsgn,s = get_arity !!env indf in
-      List.map (set_name Anonymous) arsgn, Sorts.relevance_of_sort_family s
+      let arsgn = get_arity !!env indf in
+      List.map (set_name Anonymous) arsgn, Inductiveops.relevance_of_inductive_family !!env indf
     in
       let indt = build_dependent_inductive !!env indf in
       let psign = LocalAssum (make_annot na indr, indt) :: arsgn in (* For locating names in [po] *)
-      let psign = List.map (fun d -> map_rel_decl EConstr.of_constr d) psign in
       let predenv = Cases.make_return_predicate_ltac_lvar env sigma na c cj.uj_val in
       let nar = List.length arsgn in
       let psign',env_p = push_rel_context ~hypnaming ~force_names:true sigma psign predenv in
@@ -1110,15 +1371,15 @@ struct
             let ccl = nf_evar sigma pj.utj_val in
             let p = it_mkLambda_or_LetIn ccl psign' in
             let inst =
-              (Array.map_to_list EConstr.of_constr cs.cs_concl_realargs)
-              @[EConstr.of_constr (build_dependent_constructor cs)] in
+              (Array.to_list cs.cs_concl_realargs)
+              @ [build_dependent_constructor cs] in
             let lp = lift cs.cs_nargs p in
             let fty = hnf_lam_applist !!env sigma lp inst in
             let sigma, fj = pretype (mk_tycon fty) env_f sigma d in
-            let v =
+            let sigma, v =
               let ind,_ = dest_ind_family indf in
-                let rci = Typing.check_allowed_sort !!env sigma ind cj.uj_val p in
-                obj indty rci p cj.uj_val fj.uj_val
+                let sigma, rci = Typing.check_allowed_sort !!env sigma ind cj.uj_val p in
+                sigma, obj indty rci p cj.uj_val fj.uj_val
             in
             sigma, { uj_val = v; uj_type = (substl (realargs@[cj.uj_val]) ccl) }
 
@@ -1134,10 +1395,10 @@ struct
                   cj.uj_val in
                  (* let ccl = refresh_universes ccl in *)
             let p = it_mkLambda_or_LetIn (lift (nar+1) ccl) psign' in
-            let v =
+            let sigma, v =
               let ind,_ = dest_ind_family indf in
-                let rci = Typing.check_allowed_sort !!env sigma ind cj.uj_val p in
-                obj indty rci p cj.uj_val fj.uj_val
+                let sigma, rci = Typing.check_allowed_sort !!env sigma ind cj.uj_val p in
+                sigma, obj indty rci p cj.uj_val fj.uj_val
             in sigma, { uj_val = v; uj_type = ccl })
 
   let pretype_cases self (sty, po, tml, eqns)  =
@@ -1161,14 +1422,13 @@ struct
                       (str "If is only for inductive types with two constructors.");
 
       let arsgn, indr =
-        let arsgn,s = get_arity !!env indf in
+        let arsgn = get_arity !!env indf in
         (* Make dependencies from arity signature impossible *)
-        List.map (set_name Anonymous) arsgn, Sorts.relevance_of_sort_family s
+        List.map (set_name Anonymous) arsgn, Inductiveops.relevance_of_inductive_family !!env indf
       in
       let nar = List.length arsgn in
       let indt = build_dependent_inductive !!env indf in
       let psign = LocalAssum (make_annot na indr, indt) :: arsgn in (* For locating names in [po] *)
-      let psign = List.map (fun d -> map_rel_decl EConstr.of_constr d) psign in
       let predenv = Cases.make_return_predicate_ltac_lvar env sigma na c cj.uj_val in
       let vars = VarSet.variables (Global.env ()) in
       let hypnaming = if flags.program_mode then ProgramNaming vars else RenameExistingBut vars in
@@ -1191,8 +1451,8 @@ struct
       let f sigma cs b =
         let n = Context.Rel.length cs.cs_args in
         let pi = lift n pred in (* liftn n 2 pred ? *)
-        let pi = beta_applist sigma (pi, [EConstr.of_constr (build_dependent_constructor cs)]) in
-        let cs_args = List.map (fun d -> map_rel_decl EConstr.of_constr d) cs.cs_args in
+        let pi = beta_applist sigma (pi, [build_dependent_constructor cs]) in
+        let cs_args = cs.cs_args in
         let cs_args = Context.Rel.map (whd_betaiota !!env sigma) cs_args in
         let csgn =
           List.map (set_name Anonymous) cs_args
@@ -1202,12 +1462,15 @@ struct
         sigma, it_mkLambda_or_LetIn bj.uj_val cs_args in
       let sigma, b1 = f sigma cstrs.(0) b1 in
       let sigma, b2 = f sigma cstrs.(1) b2 in
-      let v =
+      let sigma, v =
         let ind,_ = dest_ind_family indf in
         let pred = nf_evar sigma pred in
-        let rci = Typing.check_allowed_sort !!env sigma ind cj.uj_val pred in
-        let ci = make_case_info !!env (fst ind) rci IfStyle in
-        mkCase (EConstr.contract_case !!env sigma (ci, pred, make_case_invert !!env indty ci, cj.uj_val, [|b1;b2|]))
+        let sigma, rci = Typing.check_allowed_sort !!env sigma ind cj.uj_val pred in
+        let ci = make_case_info !!env (fst ind) IfStyle in
+        sigma, mkCase (EConstr.contract_case !!env sigma
+                  (ci, (pred,rci),
+                   make_case_invert !!env sigma indty ~case_relevance:rci ci, cj.uj_val,
+                   [|b1;b2|]))
       in
       let cj = { uj_val = v; uj_type = p } in
       discard_trace @@ inh_conv_coerce_to_tycon ?loc ~flags env sigma cj tycon
@@ -1217,9 +1480,7 @@ struct
     let pretype tycon env sigma c = eval_pretyper self ~flags tycon env sigma c in
     let sigma, cj =
       let sigma, tj = eval_type_pretyper self ~flags empty_valcon env sigma t in
-      let sigma, tval = Evarsolve.refresh_universes
-          ~onlyalg:true ~status:Evd.univ_flexible (Some false) !!env sigma tj.utj_val in
-      let tval = nf_evar sigma tval in
+      let tval = nf_evar sigma tj.utj_val in
       let (sigma, cj), tval = match k with
         | Some VMcast ->
           let sigma, cj = pretype empty_tycon env sigma c in
@@ -1252,8 +1513,10 @@ struct
 
 (* [pretype_type valcon env sigma c] coerces [c] into a type *)
 let pretype_type self c ?loc ~flags valcon (env : GlobEnv.t) sigma = match DAst.get c with
-  | GHole (knd, naming) ->
+  | GHole knd ->
       let loc = loc_of_glob_constr c in
+      let naming = naming_of_glob_kind knd in
+      let knd = kind_of_glob_kind knd in
       (match valcon with
        | Some v ->
            let sigma, s =
@@ -1311,32 +1574,51 @@ let pretype_type self c ?loc ~flags valcon (env : GlobEnv.t) sigma = match DAst.
         in
         discard_trace @@ inh_conv_coerce_to_tycon ?loc ~flags env sigma resj tycon
 
+  let pretype_string self s =
+    fun ?loc ~flags tycon env sigma ->
+      let resj =
+        try Typing.judge_of_string !!env s
+        with Invalid_argument _ ->
+          user_err ?loc (str "Type of string should be registered first.")
+        in
+        discard_trace @@ inh_conv_coerce_to_tycon ?loc ~flags env sigma resj tycon
+
   let pretype_array self (u,t,def,ty) =
     fun ?loc ~flags tycon env sigma ->
+    let array_kn =   match (!!env).retroknowledge.Retroknowledge.retro_array with
+  | Some c -> c
+  | None -> CErrors.user_err Pp.(str"The type array must be registered before this construction can be typechecked.")
+    in
     let sigma, u = match u with
       | None -> sigma, None
-      | Some [u] ->
+      | Some ([],[u]) ->
         let sigma, u = glob_level ?loc sigma u in
         sigma, Some u
-      | Some u ->
-          let open UnivGen in
+      | Some (qs,us) ->
+        let open UnivGen in
           Loc.raise ?loc (UniverseLengthMismatch {
-            actual = List.length u;
-            expect = 1;
+            gref = ConstRef array_kn;
+            actual = List.length qs, List.length us;
+            expect = 0, 1;
           })
     in
     let sigma, tycon' = split_as_array !!env sigma tycon in
     let sigma, jty = eval_type_pretyper self ~flags tycon' env sigma ty in
-    let sigma, u = match u with
-    | Some u -> sigma, u
-    | None -> Evd.new_univ_level_variable UState.univ_flexible sigma
-    in
-    let sigma = Evd.set_leq_sort !!env sigma jty.utj_type (ESorts.make (Sorts.sort_of_univ (Univ.Universe.make u))) in
     let sigma, jdef = eval_pretyper self ~flags (mk_tycon jty.utj_val) env sigma def in
     let pretype_elem = eval_pretyper self ~flags (mk_tycon jty.utj_val) env in
     let sigma, jt = Array.fold_left_map pretype_elem sigma t in
-    let u = Univ.Instance.of_array [| u |] in
-    let ta = EConstr.of_constr @@ Typeops.type_of_array !!env u in
+    let sigma, u = match u with
+      | Some u -> sigma, u
+      | None -> Evd.new_univ_level_variable UState.univ_flexible sigma
+    in
+    let sigma = Evd.set_leq_sort sigma
+        (* we retype because it may be an evar which has been defined, resulting in a lower sort
+           cf #18480 *)
+        (Retyping.get_sort_of !!env sigma jty.utj_val)
+        (ESorts.make (Sorts.sort_of_univ (Univ.Universe.make u)))
+    in
+    let u = UVars.Instance.of_array ([||],[| u |]) in
+    let ta = EConstr.mkConstU (array_kn, EInstance.make u) in
     let j = {
       uj_val = EConstr.mkArray(EInstance.make u, Array.map (fun j -> j.uj_val) jt, jdef.uj_val, jty.utj_val);
       uj_type = EConstr.mkApp(ta,[|jdef.uj_type|])
@@ -1371,6 +1653,7 @@ let default_pretyper =
     pretype_cast = pretype_cast;
     pretype_int = pretype_int;
     pretype_float = pretype_float;
+    pretype_string = pretype_string;
     pretype_array = pretype_array;
     pretype_type = pretype_type;
   }
@@ -1386,6 +1669,9 @@ let ise_pretype_gen (flags : inference_flags) env sigma lvar kind c =
     program_mode = flags.program_mode;
     use_coercions = flags.use_coercions;
     poly = flags.polymorphic;
+    undeclared_evars_patvars = flags.undeclared_evars_patvars;
+    patvars_abstract = flags.patvars_abstract;
+    unconstrained_sorts = flags.unconstrained_sorts;
     resolve_tc = match flags.use_typeclasses with
       | NoUseTC -> false
       | UseTC | UseTCForConv -> true
@@ -1406,6 +1692,11 @@ let ise_pretype_gen (flags : inference_flags) env sigma lvar kind c =
   in
   process_inference_flags flags !!env sigma (sigma',c',c'_ty)
 
+let ise_pretype_gen flags env sigma lvar kind c : _ * _ * _ =
+  NewProfile.profile "pretyping" (fun () ->
+      ise_pretype_gen flags env sigma lvar kind c)
+    ()
+
 let default_inference_flags fail = {
   use_coercions = true;
   use_typeclasses = UseTC;
@@ -1414,6 +1705,9 @@ let default_inference_flags fail = {
   expand_evars = true;
   program_mode = false;
   polymorphic = false;
+  undeclared_evars_patvars = false;
+  patvars_abstract = false;
+  unconstrained_sorts = false;
 }
 
 let no_classes_no_fail_inference_flags = {
@@ -1424,6 +1718,9 @@ let no_classes_no_fail_inference_flags = {
   expand_evars = true;
   program_mode = false;
   polymorphic = false;
+  undeclared_evars_patvars = false;
+  patvars_abstract = false;
+  unconstrained_sorts = false;
 }
 
 let all_and_fail_flags = default_inference_flags true
@@ -1431,7 +1728,7 @@ let all_no_fail_flags = default_inference_flags false
 
 let ise_pretype_gen_ctx flags env sigma lvar kind c =
   let sigma, c, _ = ise_pretype_gen flags env sigma lvar kind c in
-  c, Evd.evar_universe_context sigma
+  c, Evd.ustate sigma
 
 (** Entry points of the high-level type synthesis algorithm *)
 
@@ -1452,6 +1749,9 @@ let understand_ltac flags env sigma lvar kind c =
   let (sigma, c, _) = ise_pretype_gen flags env sigma lvar kind c in
   (sigma, c)
 
+let understand_ltac_ty flags env sigma lvar kind c =
+  ise_pretype_gen flags env sigma lvar kind c
+
 (* Fully evaluate an untyped constr *)
 let understand_uconstr ?(flags = all_and_fail_flags)
   ?(expected_type = WithoutTypeConstraint) env sigma c =
@@ -1470,9 +1770,9 @@ let path_convertible env sigma cl p q =
   let mkGRef ref          = DAst.make @@ Glob_term.GRef(ref,None) in
   let mkGVar id           = DAst.make @@ Glob_term.GVar(id) in
   let mkGApp(rt,rtl)      = DAst.make @@ Glob_term.GApp(rt,rtl) in
-  let mkGLambda(n,t,b)    = DAst.make @@ Glob_term.GLambda(n,Explicit,t,b) in
+  let mkGLambda(n,t,b)    = DAst.make @@ Glob_term.GLambda(n,None,Explicit,t,b) in
   let mkGSort u           = DAst.make @@ Glob_term.GSort u in
-  let mkGHole ()          = DAst.make @@ Glob_term.GHole(Evar_kinds.BinderType Anonymous,Namegen.IntroAnonymous) in
+  let mkGHole ()          = DAst.make @@ Glob_term.GHole (GBinderType Anonymous) in
   let path_to_gterm p =
     match p with
     | ic :: p' ->
@@ -1493,7 +1793,7 @@ let path_convertible env sigma cl p q =
       let params = class_nparams cl in
       let clty =
         match cl with
-        | CL_SORT -> mkGSort (Glob_term.UAnonymous {rigid=false})
+        | CL_SORT -> mkGSort (None, Glob_term.UAnonymous {rigid=UnivFlexible false})
         | CL_FUN -> anomaly (str "A source class must not be Funclass.")
         | CL_SECVAR v -> mkGRef (GlobRef.VarRef v)
         | CL_CONST c -> mkGRef (GlobRef.ConstRef c)
@@ -1518,4 +1818,4 @@ let path_convertible env sigma cl p q =
       let _ = Evarconv.unify_delay env sigma tp tq in true
   with Evarconv.UnableToUnify _ | PretypeError _ -> false
 
-let _ = Coercionops.install_path_comparator path_convertible
+let () = Coercionops.install_path_comparator path_convertible

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -77,11 +77,7 @@ val declare_extra_genarg_pprule_with_level :
   'a raw_extra_genarg_printer_with_level ->
   'b glob_extra_genarg_printer_with_level ->
   'c extra_genarg_printer_with_level ->
-  (* surroounded *) entry_relative_level -> (* non-surroounded *) entry_relative_level -> unit
-
-val declare_extra_vernac_genarg_pprule :
-  ('a, 'b, 'c) genarg_type ->
-  'a raw_extra_genarg_printer -> unit
+  (* surrounded *) entry_relative_level -> (* non-surrounded *) entry_relative_level -> unit
 
 type grammar_terminals = Genarg.ArgT.any Extend.user_symbol grammar_tactic_prod_item_expr list
 
@@ -95,18 +91,23 @@ val pr_goal_selector : toplevel:bool -> Goal_select.t -> Pp.t
 val declare_notation_tactic_pprule : KerName.t -> pp_tactic -> unit
 
 val pr_with_occurrences :
-  ('a -> Pp.t) -> 'a Locus.with_occurrences -> Pp.t
+  ('v -> Pp.t) -> ('a -> Pp.t) -> 'v Locus.occurrences_gen * 'a -> Pp.t
 val pr_red_expr : env -> Evd.evar_map ->
-  (env -> Evd.evar_map -> 'a -> Pp.t) * (env -> Evd.evar_map -> 'a -> Pp.t) * ('b -> Pp.t) * (env -> Evd.evar_map -> 'c -> Pp.t) ->
-  ('a,'b,'c) Genredexpr.red_expr_gen -> Pp.t
+  (env -> Evd.evar_map -> 'a -> Pp.t) *
+  (env -> Evd.evar_map -> 'a -> Pp.t) *
+  ('b -> Pp.t) *
+  (env -> Evd.evar_map -> 'c -> Pp.t) *
+  ('occvar -> Pp.t) ->
+  ('a,'b,'c,'occvar) Genredexpr.red_expr_gen -> Pp.t
 val pr_may_eval :
   env -> Evd.evar_map ->
   (env -> Evd.evar_map -> 'a -> Pp.t) -> (env -> Evd.evar_map -> 'a -> Pp.t) -> ('b -> Pp.t) ->
-  (env -> Evd.evar_map -> 'c -> Pp.t) -> ('a,'b,'c) Genredexpr.may_eval -> Pp.t
+  (env -> Evd.evar_map -> 'c -> Pp.t) -> ('occvar -> Pp.t) ->
+  ('a,'b,'c,'occvar) Genredexpr.may_eval -> Pp.t
 
 val pr_and_short_name : ('a -> Pp.t) -> 'a Genredexpr.and_short_name -> Pp.t
 
-val pr_evaluable_reference_env : env -> Tacred.evaluable_global_reference -> Pp.t
+val pr_evaluable_reference_env : env -> Evaluable.t -> Pp.t
 
 val pr_quantified_hypothesis : quantified_hypothesis -> Pp.t
 
@@ -156,6 +157,7 @@ val pr_match_rule : bool -> ('a -> Pp.t) -> ('b -> Pp.t) ->
 
 val pr_value : entry_relative_level -> Val.t -> Pp.t
 
+val pp_ltac_call_kind : ltac_call_kind -> Pp.t
 
 val ltop : entry_relative_level
 

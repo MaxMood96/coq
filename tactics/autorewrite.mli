@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -44,5 +44,3 @@ val auto_multi_rewrite : ?conds:conditions -> string list -> Locus.clause -> uni
 val auto_multi_rewrite_with : ?conds:conditions -> unit Proofview.tactic -> string list -> Locus.clause -> unit Proofview.tactic
 
 val print_rewrite_hintdb : string -> Pp.t
-
-val default_hint_rewrite_locality : unit -> Hints.hint_locality

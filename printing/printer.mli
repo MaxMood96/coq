@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -109,9 +109,9 @@ val pr_lglob_constr_env    : env -> evar_map -> 'a glob_constr_g -> Pp.t
 
 val pr_glob_constr_env     : env -> evar_map -> 'a glob_constr_g -> Pp.t
 
-val pr_lconstr_pattern_env : env -> evar_map -> constr_pattern -> Pp.t
+val pr_lconstr_pattern_env : env -> evar_map -> _ constr_pattern_r -> Pp.t
 
-val pr_constr_pattern_env  : env -> evar_map -> constr_pattern -> Pp.t
+val pr_constr_pattern_env  : env -> evar_map -> _ constr_pattern_r -> Pp.t
 
 val pr_cases_pattern       : cases_pattern -> Pp.t
 
@@ -119,15 +119,15 @@ val pr_sort                : evar_map -> Sorts.t -> Pp.t
 
 (** Universe constraints *)
 
-val pr_universe_instance   : evar_map -> Univ.Instance.t -> Pp.t
-val pr_universe_instance_constraints : evar_map -> Univ.Instance.t -> Univ.Constraints.t -> Pp.t
-val pr_universe_ctx        : evar_map -> ?variance:Univ.Variance.t array ->
-  Univ.UContext.t -> Pp.t
-val pr_abstract_universe_ctx : evar_map -> ?variance:Univ.Variance.t array ->
-  ?priv:Univ.ContextSet.t -> Univ.AbstractContext.t -> Pp.t
+val pr_universe_instance   : evar_map -> UVars.Instance.t -> Pp.t
+val pr_universe_instance_constraints : evar_map -> UVars.Instance.t -> Univ.Constraints.t -> Pp.t
+val pr_universe_ctx        : evar_map -> ?variance:UVars.Variance.t array ->
+  UVars.UContext.t -> Pp.t
+val pr_abstract_universe_ctx : evar_map -> ?variance:UVars.Variance.t array ->
+  ?priv:Univ.ContextSet.t -> UVars.AbstractContext.t -> Pp.t
 val pr_universe_ctx_set    : evar_map -> Univ.ContextSet.t -> Pp.t
 val pr_universes  : evar_map ->
-  ?variance:Univ.Variance.t array -> ?priv:Univ.ContextSet.t ->
+  ?variance:UVars.Variance.t array -> ?priv:Univ.ContextSet.t ->
   Declarations.universes -> Pp.t
 
 (** [universe_binders_with_opt_names ref l]
@@ -139,8 +139,8 @@ val pr_universes  : evar_map ->
     Otherwise return the bound universe names registered for [ref].
 
     Inefficient on large contexts due to name generation. *)
-val universe_binders_with_opt_names : Univ.AbstractContext.t ->
-  UnivNames.univ_name_list option -> UnivNames.universe_binders * Id.t Univ.Level.Map.t
+val universe_binders_with_opt_names : UVars.AbstractContext.t ->
+  (GlobRef.t * UnivNames.full_name_list) option -> UnivNames.universe_binders * UnivNames.rev_binders
 
 (** Printing global references using names as short as possible *)
 
@@ -152,12 +152,14 @@ val pr_existential_key     : env -> evar_map -> Evar.t -> Pp.t
 val pr_existential         : env -> evar_map -> existential -> Pp.t
 val pr_constructor         : env -> constructor -> Pp.t
 val pr_inductive           : env -> inductive -> Pp.t
-val pr_evaluable_reference : Tacred.evaluable_global_reference -> Pp.t
+val pr_evaluable_reference : Evaluable.t -> Pp.t
 
 val pr_pconstant : env -> evar_map -> pconstant -> Pp.t
 val pr_pinductive : env -> evar_map -> pinductive -> Pp.t
 val pr_pconstructor : env -> evar_map -> pconstructor -> Pp.t
 
+val pr_notation_interpretation_env : env -> evar_map -> glob_constr -> Pp.t
+val pr_notation_interpretation : glob_constr -> Pp.t
 
 (** Contexts *)
 
@@ -187,6 +189,7 @@ val pr_context_of          : env -> evar_map -> Pp.t
 val pr_predicate           : ('a -> Pp.t) -> (bool * 'a list) -> Pp.t
 val pr_cpred               : Cpred.t -> Pp.t
 val pr_idpred              : Id.Pred.t -> Pp.t
+val pr_prpred              : PRpred.t -> Pp.t
 val pr_transparent_state   : TransparentState.t -> Pp.t
 
 (** Proofs, these functions obey [Hyps Limit] and [Compact contexts]. *)
@@ -217,7 +220,7 @@ type context_object =
   | Opaque of Constant.t     (* An opaque constant. *)
   | Transparent of Constant.t
 
-module ContextObjectSet : Set.S with type elt = context_object
+module ContextObjectSet : CSet.ExtS with type elt = context_object
 module ContextObjectMap : CMap.ExtS
   with type key = context_object and module Set := ContextObjectSet
 

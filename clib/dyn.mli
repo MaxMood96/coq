@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -51,12 +51,6 @@ sig
       [create] raises an exception if [n] is already registered.
       Type names are hashed, so [create] may raise even if no type with
       the exact same name was registered due to a collision. *)
-
-  val anonymous : int -> 'a tag
-  (** [anonymous i] returns a tag describing an [i]-th anonymous type.
-      If [anonymous] is not used together with [create], [max_int] anonymous types
-      are available.
-      [anonymous] raises an exception if [i] is already registered. *)
 
   val eq : 'a tag -> 'b tag -> ('a, 'b) CSig.eq option
   (** [eq t1 t2] returns [Some witness] if [t1] is the same as [t2], [None] otherwise. *)

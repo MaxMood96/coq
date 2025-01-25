@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -10,7 +10,7 @@
 
 (* (c) Copyright 2006-2015 Microsoft Corporation and Inria.                  *)
 
-Declare ML Module "ssrmatching_plugin:coq-core.plugins.ssrmatching".
+Declare ML Module "rocq-runtime.plugins.ssrmatching".
 
 Module SsrMatchingSyntax.
 

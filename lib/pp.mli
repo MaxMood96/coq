@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,13 +8,13 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-(** Coq document type. *)
+(** Rocq document type. *)
 
 (**
 {4 Pretty printing guidelines}
 
 [Pp.t] is the main pretty printing document type
-in the Coq system. Documents are composed laying out boxes, and
+in the Rocq system. Documents are composed laying out boxes, and
 users can add arbitrary tag metadata that backends are free
 to interpret.
 
@@ -48,6 +48,7 @@ type block_type =
   | Pp_vbox   of int
   | Pp_hvbox  of int
   | Pp_hovbox of int
+(** [Pp_hovbox] produces boxes according to [Format.open_box] not [Format.open_hovbox] *)
 
 type doc_view =
   | Ppcmd_empty
@@ -91,6 +92,7 @@ val spc : unit -> t
 val cut : unit -> t
 val align : unit -> t
 val int : int -> t
+val int64 : Int64.t -> t
 val real : float -> t
 val bool : bool -> t
 val qstring : string -> t
@@ -104,6 +106,7 @@ val h : t -> t
 val v : int -> t -> t
 val hv : int -> t -> t
 val hov : int -> t -> t
+(** [hov] produces boxes according to [Format.open_box] not [Format.open_hovbox] *)
 
 (** {6 Tagging} *)
 
@@ -212,6 +215,12 @@ val db_print_pp : Format.formatter -> t -> unit
 
 (** Print the Pp in tree form for debugging, return as a string *)
 val db_string_of_pp : t -> string
+
+(** Returns [fmt, args] such that [fmt] is a format string which
+    applied to [args] produces the same result as [pp_with].
+
+    [with_tags] default false. *)
+val pp_as_format : ?with_tags:bool -> t -> string * string list
 
 (** Combine nested Ppcmd_glues *)
 val flatten : t -> t

@@ -115,7 +115,7 @@ application will include that argument.  Otherwise, the argument is
 *non-maximally inserted* and the partial application will not include that argument.
 
 Each implicit argument can be declared to be inserted maximally or non
-maximally. In Coq, maximally inserted implicit arguments are written between curly braces
+maximally. In Rocq, maximally inserted implicit arguments are written between curly braces
 "{ }" and non-maximally inserted implicit arguments are written in square brackets "[ ]".
 
 .. seealso:: :flag:`Maximal Implicit Insertion`
@@ -131,7 +131,7 @@ otherwise they would never be inserted.
 
    For instance:
 
-   .. coqtop:: all fail
+   .. rocqtop:: all fail
 
       Fail Definition double [n] := n + n.
 
@@ -146,7 +146,7 @@ by replacing it with `_`.
 .. exn:: Cannot infer a term for this placeholder.
    :name: Cannot infer a term for this placeholder. (Casual use of implicit arguments)
 
-   Coq was not able to deduce an instantiation of a “_”.
+   Rocq was not able to deduce an instantiation of a “_”.
 
 .. _declare-implicit-args:
 
@@ -172,7 +172,7 @@ form, with square brackets, makes :token:`name` a non-maximally inserted implici
 
 For example:
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Definition id {A : Type} (x : A) : A := x.
 
@@ -180,7 +180,7 @@ declares the argument `A` of `id` as a maximally
 inserted implicit argument. `A` may be omitted
 in applications of `id` but may be specified if needed:
 
-.. coqtop:: all abort
+.. rocqtop:: all abort
 
    Definition compose {A B C} (g : B -> C) (f : A -> B) := fun x => g (f x).
 
@@ -188,7 +188,7 @@ in applications of `id` but may be specified if needed:
 
 For non-maximally inserted implicit arguments, use square brackets:
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Fixpoint map [A B : Type] (f : A -> B) (l : list A) : list B :=
      match l with
@@ -204,7 +204,7 @@ declared as an implicit argument need not be repeated in the inductive
 definition and will become implicit for the inductive type and the constructors.
 For example:
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Inductive list {A : Type} : Type :=
    | nil : list
@@ -228,7 +228,7 @@ implicit:
 
 Here is an example:
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Axiom Ax :
      forall (f:forall {A} (a:A), A * A),
@@ -241,7 +241,7 @@ Here is an example:
    expression which does not correspond to the type of an assumption
    or to the :term:`body` of a definition. Here is an example:
 
-   .. coqtop:: all warn
+   .. rocqtop:: all warn
 
       Definition f := forall {y}, y = 0.
 
@@ -251,7 +251,7 @@ Here is an example:
    in the same block of binders, in which case the first occurrence is
    considered to be unnamed. Here is an example:
 
-   .. coqtop:: all warn
+   .. rocqtop:: all warn
 
       Check let g {x:nat} (H:x=x) {x} (H:x=x) := x in 0.
 
@@ -291,8 +291,8 @@ Controlling contextual implicit arguments
 
 .. flag:: Contextual Implicit
 
-   By default, Coq does not automatically set implicit the contextual
-   implicit arguments. You can turn this :term:`flag` on to tell Coq to also
+   By default, Rocq does not automatically set implicit the contextual
+   implicit arguments. You can turn this :term:`flag` on to tell Rocq to also
    infer contextual implicit argument.
 
 .. _controlling-rev-pattern-implicit-args:
@@ -302,8 +302,8 @@ Controlling reversible-pattern implicit arguments
 
 .. flag:: Reversible Pattern Implicit
 
-   By default, Coq does not automatically set implicit the reversible-pattern
-   implicit arguments. You can turn this :term:`flag` on to tell Coq to also infer
+   By default, Rocq does not automatically set implicit the reversible-pattern
+   implicit arguments. You can turn this :term:`flag` on to tell Rocq to also infer
    reversible-pattern implicit argument.
 
 .. _controlling-insertion-implicit-args:
@@ -331,7 +331,7 @@ this case, they are converted to maximally inserted ones.
 
 .. example::
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       Set Implicit Arguments.
       Axiom eq0_le0 : forall (n : nat) (x : n = 0), n <= 0.
@@ -365,7 +365,7 @@ the hiding of implicit arguments for a single function application using the
 
 .. example:: Syntax for explicitly giving implicit arguments (continued)
 
-    .. coqtop:: all
+    .. rocqtop:: all
 
        Parameter X : Type.
        Definition Relation := X -> X -> Prop.
@@ -434,16 +434,17 @@ arguments is taken into account, and not an upper type of all of them.
 As a consequence, the inference of the implicit argument of “=” fails
 in
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Fail Check nat = Prop.
 
 but succeeds in
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Check Prop = nat.
 
+.. _deactivation-of-implicit-arguments:
 
 Deactivation of implicit arguments for parsing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -461,14 +462,14 @@ function.
    The function `id` has one implicit argument and one explicit
    argument.
 
-   .. coqtop:: all reset
+   .. rocqtop:: all reset
 
       Check (id 0).
       Definition id' := @id.
 
    The function `id'` has no implicit argument.
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       Check (id' nat 0).
 
@@ -486,7 +487,7 @@ function.
    We can reproduce the example above using the :flag:`Parsing
    Explicit` flag:
 
-   .. coqtop:: all reset
+   .. rocqtop:: all reset
 
       Set Parsing Explicit.
       Definition id' := id.
@@ -519,9 +520,9 @@ or :g:`m` to the type :g:`nat` of natural numbers).
 
 .. example::
 
-    .. coqtop:: all
+    .. rocqtop:: all
 
-       Require Import List.
+       Require Import ListDef.
 
        Implicit Types m n : nat.
 
@@ -583,7 +584,7 @@ In the following statement, ``A`` and ``y`` are automatically
 generalized, ``A`` is implicit and ``x``, ``y`` and the anonymous
 equality argument are explicit.
 
-.. coqtop:: all reset
+.. rocqtop:: all reset
 
    Generalizable All Variables.
 
@@ -593,7 +594,7 @@ equality argument are explicit.
 
 Dually to normal binders, the name is optional but the type is required:
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Check (forall `{x = y :> A}, y = x).
 
@@ -605,11 +606,7 @@ this behavior may be disabled by prefixing the type with a ``!`` or
 by forcing the typeclass name to be an explicit application using
 ``@`` (however the later ignores implicit argument information).
 
-.. coqtop:: none
-
-   Set Warnings "-deprecated-instance-without-locality".
-
-.. coqtop:: all
+.. rocqtop:: all
 
    Class Op (A:Type) := op : A -> A -> A.
 
@@ -627,7 +624,7 @@ by forcing the typeclass name to be an explicit application using
 
 Multiple binders can be merged using ``,`` as a separator:
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Check (forall `{Commutative A, Hnat : !Commutative nat}, True).
 

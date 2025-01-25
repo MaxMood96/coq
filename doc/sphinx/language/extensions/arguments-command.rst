@@ -11,15 +11,16 @@ Setting properties of a function's arguments
       arg_specs ::= @argument_spec
       | /
       | &
-      | ( {+ @argument_spec } ) {* % @scope }
-      | [ {+ @argument_spec } ] {* % @scope }
-      | %{ {+ @argument_spec } %} {* % @scope }
-      argument_spec ::= {? ! } @name {* % @scope }
+      | ( {+ @argument_spec } ) {* {| % @scope | %_ @scope } }
+      | [ {+ @argument_spec } ] {* {| % @scope | %_ @scope } }
+      | %{ {+ @argument_spec } %} {* {| % @scope | %_ @scope } }
+      argument_spec ::= {? ! } @name {* {| % @scope | %_ @scope } }
       implicits_alt ::= @name
       | [ {+ @name } ]
       | %{ {+ @name } %}
       args_modifier ::= simpl nomatch
       | simpl never
+      | clear simpl
       | default implicits
       | clear implicits
       | clear scopes
@@ -65,25 +66,25 @@ Setting properties of a function's arguments
          .. exn:: The & modifier may only occur once.
             :undocumented:
 
-      :n:`( {+ @argument_spec } ) {* % @scope }`
+      :n:`( {+ @argument_spec } ) {* %_ @scope }`
          :n:`(@name__1 @name__2 ...){* %@scope }` is shorthand for
          :n:`@name__1{* %@scope } @name__2{* %@scope } ...`
 
-      :n:`[ {+ @argument_spec } ] {* % @scope }`
+      :n:`[ {+ @argument_spec } ] {* %_ @scope }`
          declares the enclosed names as implicit, non-maximally inserted.
-         :n:`[@name__1 @name__2 ... ]{* %@scope }` is equivalent to
-         :n:`[@name__1]{* %@scope } [@name__2]{* %@scope } ...`
+         :n:`[@name__1 @name__2 ... ]{* %_@scope }` is equivalent to
+         :n:`[@name__1]{* %_@scope } [@name__2]{* %_@scope } ...`
 
-      :n:`%{ {+ @argument_spec } %} {* % @scope }`
+      :n:`%{ {+ @argument_spec } %} {* %_ @scope }`
          declares the enclosed names as implicit, maximally inserted.
-         :n:`%{@name__1 @name__2 ... %}{* %@scope }` is equivalent to
-         :n:`%{@name__1%}{* %@scope } %{@name__2%}{* %@scope } ...`
+         :n:`%{@name__1 @name__2 ... %}{* %_@scope }` is equivalent to
+         :n:`%{@name__1%}{* %_@scope } %{@name__2%}{* %_@scope } ...`
 
       `!`
          the function will be unfolded only if all the arguments marked with `!`
          evaluate to constructors.  See :ref:`Args_effect_on_unfolding`.
 
-      :n:`@name {* % @scope }`
+      :n:`@name {* %_ @scope }`
          a *formal parameter* of the function :n:`@reference` (i.e.
          the parameter name used in the function definition).  Unless `rename` is specified,
          the list of :n:`@name`\s must be a prefix of the formal parameters, including all implicit
@@ -94,6 +95,10 @@ Setting properties of a function's arguments
          :token:`scope` can be either scope names or their delimiting
          keys. When multiple scopes are present, notations are interpreted in the
          leftmost scope containing them. See :ref:`binding_to_scope`.
+
+         .. deprecated:: 8.19
+            The :n:`% @scope` syntax is deprecated in favor of the currently equivalent :n:`%_ @scope`.
+            It will be reused in future versions with the same semantics as in terms.
 
          .. exn:: To rename arguments the 'rename' flag must be specified.
             :undocumented:
@@ -136,6 +141,9 @@ Setting properties of a function's arguments
          that would expose a match construct in the head position.  See :ref:`Args_effect_on_unfolding`.
       `simpl never`
          prevents performing a simplification step for :n:`@reference`.  See :ref:`Args_effect_on_unfolding`.
+      `clear simpl`
+         resets the modifications made to the simplification steps,
+         i.e., cancels all previous `simpl never`, `simpl nomatch`, `/` and `!`.
 
       `clear bidirectionality hint`
          removes the bidirectionality hint, the `&`
@@ -164,7 +172,7 @@ Manual declaration of implicit arguments
 
 .. example::
 
-   .. coqtop:: reset all
+   .. rocqtop:: reset all
 
       Inductive list (A : Type) : Type :=
       | nil : list A
@@ -194,7 +202,7 @@ Manual declaration of implicit arguments
 
 .. example:: Multiple alternatives with :n:`@implicits_alt`
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       Arguments map [A B] f l, [A] B f l, A B f l.
 
@@ -205,7 +213,7 @@ Manual declaration of implicit arguments
 Automatic declaration of implicit arguments
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   The ":n:`default implicits`" :token:`args_modifier` clause tells Coq to automatically determine the
+   The ":n:`default implicits`" :token:`args_modifier` clause tells Rocq to automatically determine the
    implicit arguments of the object.
 
    Auto-detection is governed by flags specifying whether strict,
@@ -215,7 +223,7 @@ Automatic declaration of implicit arguments
 
 .. example:: Default implicits
 
-   .. coqtop:: reset all
+   .. rocqtop:: reset all
 
       Inductive list (A:Set) : Set :=
       | nil : list A
@@ -241,7 +249,7 @@ of :term:`constants <constant>`. For instance, the variable ``p`` below has type
 ``forall x,y:U, R x y -> forall z:U, R y z -> R x z``. As the variables ``x``, ``y`` and ``z``
 appear strictly in the :term:`body` of the type, they are implicit.
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Parameter X : Type.
 
@@ -269,7 +277,7 @@ Renaming implicit arguments
 
 .. example:: (continued)  Renaming implicit arguments
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       Arguments p [s t] _ [u] _: rename.
 
@@ -290,9 +298,9 @@ Binding arguments to scopes
    the key ``R``, then in ``F`` (when a notation has
    no interpretation in ``R``).
 
-      .. coqdoc::
+      .. rocqdoc::
 
-         Arguments plus_fct (f1 f2)%F x%R%F.
+         Arguments plus_fct (f1 f2)%_F x%_R%_F.
 
    When interpreting a term, if some of the arguments of :token:`reference` are built
    from a notation, then this notation is interpreted in the scope stack
@@ -309,7 +317,7 @@ Binding arguments to scopes
    occurred at the time of the declaration of the notation. Here is an
    example:
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       Parameter g : bool -> bool.
       Declare Scope mybool_scope.
@@ -320,7 +328,7 @@ Binding arguments to scopes
       Bind Scope bool_scope with bool.
       Notation "# x #" := (g x) (at level 40).
       Check # @@ #.
-      Arguments g _%mybool_scope.
+      Arguments g _%_mybool_scope.
       Check # @@ #.
       Delimit Scope mybool_scope with mybool.
       Check # @@%mybool #.
@@ -330,24 +338,31 @@ Binding arguments to scopes
 Effects of :cmd:`Arguments` on unfolding
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-+ `simpl never` indicates that a :term:`constant` should never be unfolded by :tacn:`cbn` or
-  :tacn:`simpl`:
++ `simpl never` indicates that a :term:`constant` should not be unfolded by :tacn:`cbn` or
+  :tacn:`simpl` when in head position. Note that in the case of :tacn:`simpl`, the
+  modifier does not apply to reduction of the main argument of a `match`, `fix`,
+  primitive projection, or of an unfoldable constant hiding a `match`,
+  `fix` or primitive projection.
 
   .. example::
 
-     .. coqtop:: all
+     .. rocqtop:: all
 
-        Arguments minus n m : simpl never.
+        Arguments Nat.sub n m : simpl never.
 
-  After that command an expression like :g:`(minus (S x) y)` is left
+  After that command an expression like :g:`(Nat.sub (S x) y)` is left
   untouched by the tactics :tacn:`cbn` and :tacn:`simpl`.
+
+  Otherwise, an expression like :g:`(Nat.sub (S x) 0) + 1`
+  reduces to :g:`S (x + 1)` for :tacn:`simpl` because `Nat.sub`
+  is the main argument of `+` in this case.
 
 + A :term:`constant` can be marked to be unfolded only if it's applied to at least
   the arguments appearing before the `/` in a :cmd:`Arguments` command.
 
   .. example::
 
-     .. coqtop:: all
+     .. rocqtop:: all
 
         Definition fcomp A B C f (g : A -> B) (x : A) : C := f (g x).
         Arguments fcomp {A B C} f g x /.
@@ -360,7 +375,7 @@ Effects of :cmd:`Arguments` on unfolding
 
   .. example::
 
-     .. coqtop:: all
+     .. rocqtop:: all
 
         Definition volatile := fun x : nat => x.
         Arguments volatile / x.
@@ -371,7 +386,7 @@ Effects of :cmd:`Arguments` on unfolding
 
   .. example::
 
-     .. coqtop:: all
+     .. rocqtop:: all
 
         Arguments minus !n !m.
 
@@ -384,7 +399,7 @@ Effects of :cmd:`Arguments` on unfolding
 
   .. example::
 
-     .. coqtop:: all
+     .. rocqtop:: all
 
         Arguments minus n m : simpl nomatch.
 
@@ -403,7 +418,7 @@ Effects of :cmd:`Arguments` on unfolding
 Bidirectionality hints
 ~~~~~~~~~~~~~~~~~~~~~~
 
-When type-checking an application, Coq normally does not use information from
+When type-checking an application, Rocq normally does not use information from
 the context to infer the types of the arguments. It only checks after the fact
 that the type inferred for the application is coherent with the expected type.
 Bidirectionality hints make it possible to specify that after type-checking the
@@ -420,7 +435,7 @@ the context to help inferring the types of the remaining arguments.
   * *type inference*, with is inferring the type of a construct by analyzing the construct.
 
   Methods that combine these approaches are known as *bidirectional typing*.
-  Coq normally uses only the first approach to infer the types of arguments,
+  Rocq normally uses only the first approach to infer the types of arguments,
   then later verifies that the inferred type is consistent with the expected type.
   *Bidirectionality hints* specify to use both methods: after type checking the
   first arguments of an application (appearing before the `&` in :cmd:`Arguments`),
@@ -437,27 +452,27 @@ type check the remaining arguments (in :n:`@arg_specs__2`).
 
    In a context where a coercion was declared from ``bool`` to ``nat``:
 
-   .. coqtop:: in reset
+   .. rocqtop:: in reset
 
       Definition b2n (b : bool) := if b then 1 else 0.
       Coercion b2n : bool >-> nat.
 
-   Coq cannot automatically coerce existential statements over ``bool`` to
+   Rocq cannot automatically coerce existential statements over ``bool`` to
    statements over ``nat``, because the need for inserting a coercion is known
    only from the expected type of a subterm:
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       Fail Check (ex_intro _ true _ : exists n : nat, n > 0).
 
    However, a suitable bidirectionality hint makes the example work:
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       Arguments ex_intro _ _ & _ _.
       Check (ex_intro _ true _ : exists n : nat, n > 0).
 
-Coq will attempt to produce a term which uses the arguments you
+Rocq will attempt to produce a term which uses the arguments you
 provided, but in some cases involving Program mode the arguments after
 the bidirectionality starts may be replaced by convertible but
 syntactically different terms.

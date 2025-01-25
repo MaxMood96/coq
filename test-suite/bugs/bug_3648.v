@@ -21,7 +21,7 @@ Record PreCategory :=
                 -> morphism s d'
     where "f 'o' g" := (compose f g)
   }.
-Arguments identity {!C%category} / x%object : rename.
+Arguments identity {!C%_category} / x%_object : rename.
 
 Infix "o" := (@compose _ _ _ _) : morphism_scope.
 
@@ -47,7 +47,7 @@ Record Functor (C D : PreCategory) :=
     identity_of : forall x, morphism_of _ _ (identity x)
                             = identity (object_of x)
   }.
-Arguments morphism_of [C%category] [D%category] F%functor [s%object d%object] m%morphism : rename, simpl nomatch.
+Arguments morphism_of [C%_category] [D%_category] F%_functor [s%_object d%_object] m%_morphism : rename, simpl nomatch.
 Notation "F '_1' m" := (morphism_of F m) (at level 10, no associativity) : morphism_scope.
 Axiom cheat : forall {A}, A.
 Record NaturalTransformation C D (F G : Functor C D) := { components_of :> forall c, morphism D (F c) (G c) }.
@@ -57,9 +57,9 @@ Definition functor_category (C D : PreCategory) : PreCategory.
 Defined.
 
 Local Notation "C -> D" := (functor_category C D) : category_scope.
-Variable C1 : PreCategory.
-Variable C2 : PreCategory.
-Variable D : PreCategory.
+Parameter C1 : PreCategory.
+Parameter C2 : PreCategory.
+Parameter D : PreCategory.
 
 Definition functor_object_of
 : (C1 -> (C2 -> D))%category -> (C1 * C2 -> D)%category.

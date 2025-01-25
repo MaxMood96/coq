@@ -182,7 +182,7 @@ Record wrap (A : Type) := { unwrap : A; unwrap2 : A }.
 Definition term (x : wrap nat) := x.(unwrap).
 Definition term' (x : wrap nat) := let f := (@unwrap2 nat) in f x.
 
-Require Coq.extraction.Extraction.
+Require Corelib.extraction.Extraction.
 Recursive Extraction term term'.
 Extraction TestCompile term term'.
 (*Unset Printing Primitive Projection Parameters.*)
@@ -250,3 +250,24 @@ Fail Check (@eq_refl _ 0 <: 0 = snd (pair 0 1)).
 
 Check (@eq_refl _ 0 <<: 0 = fst (pair 0 1)).
 Fail Check (@eq_refl _ 0 <<: 0 = snd (pair 0 1)).
+
+(* [unfold] tactic *)
+Module Unfold.
+  Record rec (P: Prop) := REC { v: unit }.
+  Set Printing All.
+  Set Printing Unfolded Projection As Match.
+
+  (* Testing that [unfold] can unfold compatibility constants. *)
+  Goal forall r: rec True, @v True r = tt.
+  Proof.
+    intros.
+    lazymatch goal with
+    | |- context C [@v _ ?r] =>
+        (* Carefully construct a term that definitely contains the compatibility constant. *)
+        let t := constr:(@v True) in
+        let g := context C [t r] in
+        change g
+    end.
+    progress unfold v.
+  Abort.
+End Unfold.

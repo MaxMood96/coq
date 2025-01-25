@@ -85,8 +85,8 @@ Notation "( x ; y )" := (existT _ x y) : fibration_scope.
 Notation pr1 := projT1.
 Notation pr2 := projT2.
 
-Notation "x .1" := (pr1 x) (at level 3, format "x '.1'") : fibration_scope.
-Notation "x .2" := (pr2 x) (at level 3, format "x '.2'") : fibration_scope.
+Notation "x .1" := (pr1 x) : fibration_scope.
+Notation "x .2" := (pr2 x) : fibration_scope.
 
 Notation compose := (fun g f x => g (f x)).
 
@@ -145,9 +145,9 @@ Class IsEquiv {A B : Type} (f : A -> B) := BuildIsEquiv {
   eisadj : forall x : A, eisretr (f x) = ap f (eissect x)
 }.
 
-Arguments eisretr {A B}%type_scope f%function_scope {_} _.
-Arguments eissect {A B}%type_scope f%function_scope {_} _.
-Arguments eisadj {A B}%type_scope f%function_scope {_} _.
+Arguments eisretr {A B}%_type_scope f%_function_scope {_} _.
+Arguments eissect {A B}%_type_scope f%_function_scope {_} _.
+Arguments eisadj {A B}%_type_scope f%_function_scope {_} _.
 
 Record Equiv A B := BuildEquiv {
   equiv_fun : A -> B ;

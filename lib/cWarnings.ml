@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -72,7 +72,7 @@ let get_status ~name = match get_warning name with
 
 type _ tag = ..
 
-type w = W : 'a tag * 'a -> w
+type w = W : 'a tag * Quickfix.t list * 'a -> w
 exception WarnError of w
 
 module DMap = PolyMap.Make (struct type nonrec 'a tag = 'a tag = .. end)
@@ -100,7 +100,7 @@ let create_msg warning () =
   let v = { Msg.tag = DMap.make(); warning; } in
   v
 
-let print (W (tag, w)) =
+let print (W (tag,_, w)) =
   let pp = try PrintMap.find tag !printers with Not_found -> assert false in
   pp w
 
@@ -108,12 +108,16 @@ let () = CErrors.register_handler (function
     | WarnError w -> Some (print w)
     | _ -> None)
 
-let warn { Msg.tag; warning } ?loc v =
+let () = Quickfix.register (function
+| WarnError (W(_,qf,_)) -> qf
+| _ -> [])
+
+let warn { Msg.tag; warning } ?loc ?(quickfix=[]) v =
   let tag = DMap.tag_of_onetag tag in
   match warning_status warning with
   | Disabled -> ()
-  | AsError -> Loc.raise ?loc (WarnError (W (tag, v)))
-  | Enabled -> Feedback.msg_warning ?loc (print (W (tag, v)))
+  | AsError -> Loc.raise ?loc (WarnError (W (tag,quickfix,v)))
+  | Enabled -> Feedback.msg_warning ?loc ~quickfix (print (W (tag,quickfix,v)))
 
 (** Flag handling *)
 
@@ -375,16 +379,46 @@ let create_hybrid ?from ?default ~name () =
 let create_in w pp =
   let msg = create_msg w () in
   let () = register_printer msg pp in
-  fun ?loc x -> warn ?loc msg x
+  fun ?loc ?quickfix x -> warn ?loc ?quickfix msg x
 
-let create ~name ?category ?default pp =
+let create_with_quickfix ~name ?category ?default pp =
   let from = Option.map (fun x -> [x]) category in
   let w = create_warning ?from ?default ~name () in
   create_in w pp
 
+let create ~name ?category ?default pp =
+  let f = create_with_quickfix ~name ?category ?default pp in
+  fun ?loc x -> f ?quickfix:None ?loc x
+
+let warn_unknown_warnings = create ~name:"unknown-warning" Pp.(fun flags ->
+    str "Could not enable unknown " ++
+    str (CString.plural (List.length flags) "warning") ++ spc() ++
+    prlist_with_sep spc str flags)
+
+let override_unknown_warning = ref false
+
+let warn_unknown_warnings ?loc flags =
+  if not !override_unknown_warning then warn_unknown_warnings ?loc flags
+
+let check_unknown_warnings flags =
+  let flags = flags_of_string flags in
+  let flags = List.filter_map (function
+      | Disabled, _ | _, All -> None
+      | (Enabled|AsError), Other name ->
+        if String.Map.mem name !graph then None
+        else Some name)
+      flags
+  in
+  if not (List.is_empty flags) then
+    warn_unknown_warnings flags
+
 module CoreCategories = struct
 
   let make name = create_category ~name ()
+
+  (* Update the list of core categories in
+     doc/sphinx/proof-engine/vernacular-commands.rst
+     when adding a new category here. *)
 
   let automation = make "automation"
   let bytecode_compiler = make "bytecode-compiler"
@@ -403,9 +437,11 @@ module CoreCategories = struct
   let parsing = make "parsing"
   let pedantic = make "pedantic"
   let records = make "records"
+  let rewrite_rules = make "rewrite-rules"
   let ssr = make "ssr"
   let syntax = make "syntax"
   let tactics = make "tactics"
+  let user_warn = make "user-warn"
   let vernacular = make "vernacular"
 
 end

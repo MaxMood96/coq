@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -61,7 +61,7 @@ type option_locality = OptDefault | OptLocal | OptExport | OptGlobal
 
 module MakeStringTable :
   functor
-    (A : sig
+    (_ : sig
        val key : option_name
        val title : string
        val member_message : string -> bool -> Pp.t
@@ -81,22 +81,28 @@ end
    the internal version of the vernacular "Test ...": it tells if a
    given object is in the table.  *)
 
+module type RefConvertArg = sig
+  type t
+  module Set : CSig.USetS with type elt = t
+  val encode : Environ.env -> Libnames.qualid -> t
+  val subst : Mod_subst.substitution -> t -> t
+
+  val check_local : Libobject.locality -> t -> unit
+  val discharge : t -> t
+  (** Elements which cannot be discharged should only be added with Local *)
+
+  val printer : t -> Pp.t
+  val key : option_name
+  val title : string
+  val member_message : t -> bool -> Pp.t
+end
+
 module MakeRefTable :
-  functor
-    (A : sig
-       type t
-       module Set : CSig.SetS with type elt = t
-       val encode : Environ.env -> Libnames.qualid -> t
-       val subst : Mod_subst.substitution -> t -> t
-       val printer : t -> Pp.t
-       val key : option_name
-       val title : string
-       val member_message : t -> bool -> Pp.t
-     end) ->
+  functor (A : RefConvertArg) ->
 sig
   val v : unit -> A.Set.t
   val active : A.t -> bool
-  val set : A.t -> bool -> unit
+  val set : Libobject.locality -> A.t -> bool -> unit
 end
 
 
@@ -114,7 +120,7 @@ end
 
 type 'a option_sig = {
   optstage   : Summary.Stage.t;
-  optdepr    : bool;
+  optdepr    : Deprecation.t option;
   (** whether the option is DEPRECATED *)
   optkey     : option_name;
   (** the low-level name of this option *)
@@ -138,26 +144,29 @@ val declare_string_option: ?preprocess:(string -> string) ->
 val declare_stringopt_option: ?preprocess:(string option -> string option) ->
                               string option option_sig -> unit
 
-(** Helpers to declare a reference controlled by an option. Read-only
-   as to avoid races. *)
-type 'a opt_decl = stage:Summary.Stage.t -> depr:bool -> key:option_name -> 'a
+(** Helpers to declare a reference controlled by an option. *)
 
-val declare_int_option_and_ref : (value:int -> (unit -> int)) opt_decl
-val declare_intopt_option_and_ref : (unit -> int option) opt_decl
-val declare_nat_option_and_ref : (value:int -> (unit -> int)) opt_decl
-val declare_bool_option_and_ref : (value:bool -> (unit -> bool)) opt_decl
-val declare_string_option_and_ref : (value:string -> (unit -> string)) opt_decl
-val declare_stringopt_option_and_ref : (unit -> string option) opt_decl
-val declare_interpreted_string_option_and_ref :
-  (value:'a -> (string -> 'a) -> ('a -> string) -> (unit -> 'a)) opt_decl
+(** Wrapper type to separate the function calls to register the option
+    at toplevel from the calls to read the option value. *)
+type 'a getter = { get : unit -> 'a }
+
+type 'a opt_decl = ?stage:Summary.Stage.t -> ?depr:Deprecation.t -> key:option_name -> value:'a -> unit -> 'a getter
+
+val declare_int_option_and_ref : int opt_decl
+val declare_intopt_option_and_ref : int option opt_decl
+val declare_nat_option_and_ref : int opt_decl
+val declare_bool_option_and_ref : bool opt_decl
+val declare_string_option_and_ref : string opt_decl
+val declare_stringopt_option_and_ref : string option opt_decl
+val declare_interpreted_string_option_and_ref : (string -> 'a) -> ('a -> string) -> 'a opt_decl
 
 (** {6 Special functions supposed to be used only in vernacentries.ml } *)
 
 module OptionMap : CSig.MapS with type key = option_name
 
 type 'a table_of_A =  {
-  add : Environ.env -> 'a -> unit;
-  remove : Environ.env -> 'a -> unit;
+  add : Environ.env -> Libobject.locality -> 'a -> unit;
+  remove : Environ.env -> Libobject.locality -> 'a -> unit;
   mem : Environ.env -> 'a -> unit;
   print : unit -> unit;
 }
@@ -205,7 +214,7 @@ val set_option_value : ?locality:option_locality -> ?stage:Summary.Stage.t ->
 
 (** Summary of an option status *)
 type option_state = {
-  opt_depr  : bool;
+  opt_depr  : Deprecation.t option;
   opt_value : option_value;
 }
 

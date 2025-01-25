@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -27,7 +27,7 @@ let interpretable_as_section_decl env sigma d1 d2 =
       try
         let _sigma = Evd.add_universe_constraints sigma cstr in
         true
-      with UState.UniversesDiffer -> false
+      with UGraph.UniverseInconsistency _ | UState.UniversesDiffer -> false
   in
   match d2, d1 with
   | LocalDef _, LocalAssum _ -> false
@@ -40,7 +40,7 @@ let name_op_to_name ~name_op ~name suffix =
   | Some s -> s
   | None -> Nameops.add_suffix name suffix
 
-let declare_abstract = ref (fun ~name ~poly ~kind ~sign ~secsign ~opaque ~solve_tac sigma concl ->
+let declare_abstract = ref (fun ~name ~poly ~sign ~secsign ~opaque ~solve_tac sigma concl ->
   CErrors.anomaly (Pp.str "Abstract declaration hook not registered"))
 
 let cache_term_by_tactic_then ~opaque ~name_op ?(goal_type=None) tac tacK =
@@ -48,16 +48,7 @@ let cache_term_by_tactic_then ~opaque ~name_op ?(goal_type=None) tac tacK =
   let open Tacmach in
   let open Proofview.Notations in
   Proofview.tclProofInfo [@ocaml.warning "-3"] >>= fun (name, poly) ->
-  (* This is important: The [Global] and [Proof Theorem] parts of the
-     goal_kind are not relevant here as build_constant_by_tactic does
-     use the noop terminator; but beware if some day we remove the
-     redundancy on constant declaration. This opens up an interesting
-     question, how does abstract behave when discharge is local for example?
-  *)
-  let suffix, kind = if opaque
-    then "_subproof", Decls.(IsProof Lemma)
-    else "_subterm", Decls.(IsDefinition Definition)
-  in
+  let suffix = if opaque then "_subproof" else "_subterm" in
   let name = name_op_to_name ~name_op ~name suffix in
   Proofview.Goal.enter begin fun gl ->
     let env = Proofview.Goal.env gl in
@@ -85,7 +76,7 @@ let cache_term_by_tactic_then ~opaque ~name_op ?(goal_type=None) tac tacK =
          tac)
     in
     let effs, sigma, lem, args, safe =
-      !declare_abstract ~name ~poly ~sign ~secsign ~kind ~opaque ~solve_tac sigma concl
+      !declare_abstract ~name ~poly ~sign ~secsign ~opaque ~solve_tac sigma concl
     in
     let solve =
       Proofview.tclEFFECTS effs <*>

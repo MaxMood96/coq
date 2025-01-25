@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -10,9 +10,9 @@
 (*                                                                      *)
 (* Micromega: A reflexive tactic using the Positivstellensatz           *)
 (*                                                                      *)
-(* * Mappings from Coq tactics to Caml function calls                   *)
+(* * Mappings from Rocq tactics to Caml function calls                  *)
 (*                                                                      *)
-(*  Frédéric Besson (Irisa/Inria) 2006-2008			        *)
+(*  Frédéric Besson (Irisa/Inria) 2006-2008			                    *)
 (*                                                                      *)
 (************************************************************************)
 
@@ -24,7 +24,7 @@ open Tacarg
 
 }
 
-DECLARE PLUGIN "coq-core.plugins.micromega"
+DECLARE PLUGIN "rocq-runtime.plugins.micromega"
 
 TACTIC EXTEND Lra_Q
 | [ "xlra_Q"  tactic(t) ] -> { Coq_micromega.xlra_Q (Tacinterp.tactic_of_value ist t) }

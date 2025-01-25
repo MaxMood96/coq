@@ -2,8 +2,8 @@
 
 _Overlays_ let you test pull requests that break the base version of
 external projects by applying PRs of the external project during CI
-testing (1 PR per broken external project).  Once Coq CI's tests of the
-external projects pass, the Coq PR can be merged, then the assignee must
+testing (1 PR per broken external project).  Once Rocq CI's tests of the
+external projects pass, the Rocq PR can be merged, then the assignee must
 ask the external projects to merge their PRs (for example by commenting
 in the external PRs).  External projects are then expected to merge their
 PRs promptly.
@@ -34,12 +34,12 @@ The github URL and base branch name for each external project are listed in
 [`ci-basic-overlay.sh`](../ci-basic-overlay.sh).  For example, the entry for
 `elpi` is
 ```
-project elpi "https://github.com/LPCIC/coq-elpi" "coq-master"
+project elpi "https://github.com/LPCIC/coq-elpi" "master"
 ```
 But substitute the name of your fork into the URL, e.g. `SkySkimmer/coq-elpi`
 rather than `LPCIC/coq-elpi`.  Use `#` to mark any comments.
 
-If the branch name in the external project differs from the Coq branch name,
+If the branch name in the external project differs from the Rocq branch name,
 include the external branch name as `[prbranch]` to apply it when you run
 the test suite locally, e.g. `make ci-elpi`.
 
@@ -49,8 +49,8 @@ Overlay files can be created automatically using the script
 ### Branching conventions
 
 We suggest you use the convention of identical branch names for the
-Coq branch and the CI project branch used in the overlay. For example,
-if your Coq PR is in your branch `more_efficient_tc` and
+Rocq branch and the CI project branch used in the overlay. For example,
+if your Rocq PR is in your branch `more_efficient_tc` and
 breaks `ltac2`, we suggest you create an `ltac2` overlay with a branch
 named `more_efficient_tc`.
 
@@ -64,13 +64,13 @@ named `more_efficient_tc`.
 - Make necessary changes, then rerun the script to verify they work.
 - From the `<job name>` subdirectory, commit your changes to a new
   branch, based on the base branch name listed in `ci-basic-overlay.sh`,
-  for example `coq-master` for elpi.
+  for example `master` for elpi.
 - If necessary, fork the external project from the project's github page.
   (Only needs to be done once, ever.)
 - Push to the external project and create a new PR.  Make sure you pick
   the correct base branch in the github GUI for the comparison
-  (e.g. `coq-master` for elpi).
-- Create the overlay file, add to your Coq PR, push the updated version and
+  (e.g. `master` for elpi).
+- Create the overlay file, add to your Rocq PR, push the updated version and
   verify that the external projects now pass.
 - When your PR is merged, the assignee notifies the maintainers of the
   external project to merge the changes you submitted.  This should happen

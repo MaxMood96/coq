@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -10,14 +10,14 @@
 
 val wit_debug : (bool, bool, bool) Genarg.genarg_type
 
-val debug : bool Pcoq.Entry.t
+val debug : bool Procq.Entry.t
 
 val wit_eauto_search_strategy_name :
   (Class_tactics.search_strategy, Class_tactics.search_strategy,
    Class_tactics.search_strategy)
   Genarg.genarg_type
 
-val eauto_search_strategy_name : Class_tactics.search_strategy Pcoq.Entry.t
+val eauto_search_strategy_name : Class_tactics.search_strategy Procq.Entry.t
 
 val wit_eauto_search_strategy :
   (Class_tactics.search_strategy option,
@@ -25,4 +25,4 @@ val wit_eauto_search_strategy :
    Class_tactics.search_strategy option)
   Genarg.genarg_type
 
-val eauto_search_strategy : Class_tactics.search_strategy option Pcoq.Entry.t
+val eauto_search_strategy : Class_tactics.search_strategy option Procq.Entry.t

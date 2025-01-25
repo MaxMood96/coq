@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -28,6 +28,7 @@ open Names
 open Constr
 open Vars
 open Declarations
+open Mod_declarations
 open Context.Rel.Declaration
 
 module NamedDecl = Context.Named.Declaration
@@ -78,14 +79,24 @@ type env = {
   env_globals       : Globals.t;
   env_named_context : named_context_val; (* section variables *)
   env_rel_context   : rel_context_val;
-  env_nb_rel        : int;
   env_universes : UGraph.t;
-  env_universes_lbound : UGraph.Bound.t;
-  irr_constants : Cset_env.t;
-  irr_inds : Indset_env.t;
+  env_qualities : Sorts.QVar.Set.t;
+  symb_pats : rewrite_rule list Cmap_env.t;
   env_typing_flags  : typing_flags;
+  vm_library : Vmlibrary.t;
   retroknowledge : Retroknowledge.retroknowledge;
+  rewrite_rules_allowed : bool;
+
+  (* caches *)
+  env_nb_rel        : int;
+  irr_constants : Sorts.relevance Cmap_env.t;
+  irr_inds : Sorts.relevance Indmap_env.t;
+  constant_hyps : Id.Set.t Cmap_env.t;
+  inductive_hyps : Id.Set.t Mindmap_env.t;
 }
+
+type rewrule_not_allowed = Symb | Rule
+exception RewriteRulesNotAllowed of rewrule_not_allowed
 
 let empty_named_context_val = {
   env_named_ctx = [];
@@ -105,15 +116,20 @@ let empty_env = {
     ; modules = MPmap.empty
     ; modtypes = MPmap.empty
     };
+  constant_hyps = Cmap_env.empty;
+  inductive_hyps = Mindmap_env.empty;
   env_named_context = empty_named_context_val;
   env_rel_context = empty_rel_context_val;
   env_nb_rel = 0;
   env_universes = UGraph.initial_universes;
-  env_universes_lbound = UGraph.Bound.Set;
-  irr_constants = Cset_env.empty;
-  irr_inds = Indset_env.empty;
+  env_qualities = Sorts.QVar.Set.empty;
+  irr_constants = Cmap_env.empty;
+  irr_inds = Indmap_env.empty;
+  symb_pats = Cmap_env.empty;
   env_typing_flags = Declareops.safe_flags Conv_oracle.empty;
+  vm_library = Vmlibrary.empty;
   retroknowledge = Retroknowledge.empty;
+  rewrite_rules_allowed = false;
 }
 
 
@@ -197,6 +213,10 @@ let lookup_named id env =
 let lookup_named_ctxt id ctxt =
   Id.Map.find id ctxt.env_named_map
 
+let record_global_hyps add kn hyps acc =
+  if CList.is_empty hyps then acc
+  else add kn (Context.Named.to_vars hyps) acc
+
 let fold_constants f env acc =
   Cmap_env.fold (fun c (body,_) acc -> f c body acc) env.env_globals.Globals.constants acc
 
@@ -216,6 +236,16 @@ let lookup_constant kn env =
 
 let mem_constant kn env = Cmap_env.mem kn env.env_globals.Globals.constants
 
+let add_rewrite_rules l env =
+  if not env.rewrite_rules_allowed then raise (RewriteRulesNotAllowed Rule);
+  let add c r = function
+    | None -> anomaly Pp.(str "Trying to add a rule to non-symbol " ++ Constant.print c ++ str".")
+    | Some rs -> Some (r::rs)
+  in
+  { env with
+    symb_pats = List.fold_left (fun symb_pats (c, r) -> Cmap_env.update c (add c r) symb_pats) env.symb_pats l
+  }
+
 (* Mutual Inductives *)
 let lookup_mind_key kn env =
   match Mindmap_env.find_opt kn env.env_globals.Globals.inductives with
@@ -225,6 +255,64 @@ let lookup_mind_key kn env =
 
 let lookup_mind kn env =
   fst (lookup_mind_key kn env)
+
+
+(** {6 Changes of representation of Case nodes} *)
+
+(** Provided:
+    - a universe instance [u]
+    - a term substitution [subst]
+    - name replacements [nas]
+    [instantiate_context u subst nas ctx] applies both [u] and [subst] to [ctx]
+    while replacing names using [nas] (order reversed)
+*)
+let instantiate_context u subst nas ctx =
+  let open Context.Rel.Declaration in
+  let get_binder i na =
+    Context.
+    { binder_name = nas.(i).binder_name;
+      binder_relevance = UVars.subst_instance_relevance u na.binder_relevance }
+  in
+  let rec instantiate i ctx = match ctx with
+  | [] -> assert (Int.equal i (-1)); []
+  | LocalAssum (na, ty) :: ctx ->
+    let ctx = instantiate (pred i) ctx in
+    let ty = substnl subst i (subst_instance_constr u ty) in
+    let na = get_binder i na in
+    LocalAssum (na, ty) :: ctx
+  | LocalDef (na, ty, bdy) :: ctx ->
+    let ctx = instantiate (pred i) ctx in
+    let ty = substnl subst i (subst_instance_constr u ty) in
+    let bdy = substnl subst i (subst_instance_constr u bdy) in
+    let na = get_binder i na in
+    LocalDef (na, ty, bdy) :: ctx
+  in
+  instantiate (Array.length nas - 1) ctx
+
+let expand_arity (mib, mip) (ind, u) params nas =
+  let open Context.Rel.Declaration in
+  let paramdecl = Vars.subst_instance_context u mib.mind_params_ctxt in
+  let params = Vars.subst_of_rel_context_instance paramdecl params in
+  let realdecls, _ = List.chop mip.mind_nrealdecls mip.mind_arity_ctxt in
+  let self =
+    let u = UVars.Instance.abstract_instance (UVars.Instance.length u) in
+    let args = Context.Rel.instance mkRel 0 mip.mind_arity_ctxt in
+    mkApp (mkIndU (ind, u), args)
+  in
+  let na = Context.make_annot Anonymous mip.mind_relevance in
+  let realdecls = LocalAssum (na, self) :: realdecls in
+  instantiate_context u params nas realdecls
+
+let expand_branch_contexts (mib, mip) u params br =
+  let paramdecl = Vars.subst_instance_context u mib.mind_params_ctxt in
+  let paramsubst = Vars.subst_of_rel_context_instance paramdecl params in
+  let build_one_branch i (nas, _) (ctx, _) =
+    let ctx, _ = List.chop mip.mind_consnrealdecls.(i) ctx in
+    let ctx = instantiate_context u paramsubst nas ctx in
+    ctx
+  in
+  Array.map2_i build_one_branch br mip.mind_nf_lc
+
 
 let mem_mind kn env = Mindmap_env.mem kn env.env_globals.Globals.inductives
 
@@ -257,12 +345,9 @@ let deactivated_guard env = not (typing_flags env).check_guarded
 let indices_matter env = env.env_typing_flags.indices_matter
 
 let universes env = env.env_universes
-let universes_lbound env = env.env_universes_lbound
 
 let set_universes g env =
   {env with env_universes=g}
-
-let set_universes_lbound env lbound = { env with env_universes_lbound = lbound }
 
 let named_context env = env.env_named_context.env_named_ctx
 let named_context_val env = env.env_named_context
@@ -312,7 +397,7 @@ let val_of_named_context ctxt =
 
 
 let eq_named_context_val c1 c2 =
-   c1 == c2 || Context.Named.equal Constr.equal (named_context_of_val c1) (named_context_of_val c2)
+   c1 == c2 || Context.Named.equal Sorts.relevance_equal Constr.equal (named_context_of_val c1) (named_context_of_val c2)
 
 (* A local const is evaluable if it is defined  *)
 
@@ -375,14 +460,29 @@ let check_constraints c env =
   UGraph.check_constraints c env.env_universes
 
 let add_universes ~lbound ~strict ctx g =
+  let _qs, us = UVars.Instance.to_array (UVars.UContext.instance ctx) in
   let g = Array.fold_left
-            (fun g v -> UGraph.add_universe ~lbound ~strict v g)
-            g (Univ.Instance.to_array (Univ.UContext.instance ctx))
+      (fun g v -> UGraph.add_universe ~lbound ~strict v g)
+      g us
   in
-    UGraph.merge_constraints (Univ.UContext.constraints ctx) g
+  UGraph.merge_constraints (UVars.UContext.constraints ctx) g
+
+let add_qualities qs known =
+  let open Sorts.Quality in
+  Array.fold_left (fun known q ->
+      match q with
+      | QVar q ->
+        let known' = Sorts.QVar.Set.add q known in
+        let () = if known == known' then CErrors.anomaly Pp.(str"multiply bound sort quality") in
+        known'
+      | QConstant _ -> CErrors.anomaly Pp.(str "constant quality in ucontext"))
+    known
+    qs
 
 let push_context ?(strict=false) ctx env =
-  map_universes (add_universes ~lbound:(universes_lbound env) ~strict ctx) env
+  let qs, _us = UVars.Instance.to_array (UVars.UContext.instance ctx) in
+  let env = { env with env_qualities = add_qualities qs env.env_qualities } in
+  map_universes (add_universes ~lbound:UGraph.Bound.Set ~strict ctx) env
 
 let add_universes_set ~lbound ~strict ctx g =
   let g = Univ.Level.Set.fold
@@ -392,12 +492,14 @@ let add_universes_set ~lbound ~strict ctx g =
   in UGraph.merge_constraints (Univ.ContextSet.constraints ctx) g
 
 let push_context_set ?(strict=false) ctx env =
-  map_universes (add_universes_set ~lbound:(universes_lbound env) ~strict ctx) env
+  map_universes (add_universes_set ~lbound:UGraph.Bound.Set ~strict ctx) env
+
+let push_floating_context_set ctx env =
+  map_universes (add_universes_set ~lbound:UGraph.Bound.Prop ~strict:false ctx) env
 
 let push_subgraph (levels,csts) env =
-  let lbound = universes_lbound env in
   let add_subgraph g =
-    let newg = Univ.Level.Set.fold (fun v g -> UGraph.add_universe ~lbound ~strict:false v g) levels g in
+    let newg = Univ.Level.Set.fold (fun v g -> UGraph.add_universe ~lbound:UGraph.Bound.Set ~strict:false v g) levels g in
     let newg = UGraph.merge_constraints csts newg in
     (if not (Univ.Constraints.is_empty csts) then
        let restricted = UGraph.constraints_for ~kept:(UGraph.domain g) newg in
@@ -457,6 +559,19 @@ let set_allow_sprop b env =
 
 let sprop_allowed env = env.env_typing_flags.sprop_allowed
 
+let allow_rewrite_rules env =
+  (* We need to be safe with reduction machines *)
+  let flags = typing_flags env in
+  let env = set_typing_flags
+    { flags with
+      enable_VM = false;
+      enable_native_compiler = false }
+    env
+  in
+  { env with rewrite_rules_allowed = true }
+
+let rewrite_rules_allowed env = env.rewrite_rules_allowed
+
 (* Global constants *)
 
 let no_link_info = NotLinked
@@ -468,11 +583,19 @@ let add_constant_key kn cb linkinfo env =
     { env.env_globals with
       Globals.constants = new_constants }
   in
-  let irr_constants = if cb.const_relevance == Sorts.Irrelevant
-    then Cset_env.add kn env.irr_constants
+  let irr_constants = if cb.const_relevance != Sorts.Relevant
+    then Cmap_env.add kn cb.const_relevance env.irr_constants
     else env.irr_constants
   in
-  { env with irr_constants; env_globals = new_globals }
+  let constant_hyps = record_global_hyps Cmap_env.add kn cb.const_hyps env.constant_hyps in
+  let symb_pats =
+    match cb.const_body with
+    | Symbol _ ->
+      if not env.rewrite_rules_allowed then raise (RewriteRulesNotAllowed Symb);
+      Cmap_env.add kn [] env.symb_pats
+    | _ -> env.symb_pats
+  in
+  { env with constant_hyps; irr_constants; symb_pats; env_globals = new_globals }
 
 let add_constant kn cb env =
   add_constant_key kn cb no_link_info env
@@ -481,24 +604,25 @@ let add_constant kn cb env =
 let constant_type env (kn,u) =
   let cb = lookup_constant kn env in
   let uctx = Declareops.constant_polymorphic_context cb in
-  let csts = Univ.AbstractContext.instantiate u uctx in
+  let csts = UVars.AbstractContext.instantiate u uctx in
   (subst_instance_constr u cb.const_type, csts)
 
 type const_evaluation_result =
   | NoBody
   | Opaque
-  | IsPrimitive of Univ.Instance.t * CPrimitives.t
+  | IsPrimitive of UVars.Instance.t * CPrimitives.t
+  | HasRules of UVars.Instance.t * bool * rewrite_rule list
 
 exception NotEvaluableConst of const_evaluation_result
 
 let constant_value_and_type env (kn, u) =
   let cb = lookup_constant kn env in
   let uctx = Declareops.constant_polymorphic_context cb in
-  let cst = Univ.AbstractContext.instantiate u uctx in
+  let cst = UVars.AbstractContext.instantiate u uctx in
   let b' = match cb.const_body with
     | Def l_body -> Some (subst_instance_constr u l_body)
     | OpaqueDef _ -> None
-    | Undef _ | Primitive _ -> None
+    | Undef _ | Primitive _ | Symbol _ -> None
   in
   b', subst_instance_constr u cb.const_type, cst
 
@@ -519,6 +643,10 @@ let constant_value_in env (kn,u) =
     | OpaqueDef _ -> raise (NotEvaluableConst Opaque)
     | Undef _ -> raise (NotEvaluableConst NoBody)
     | Primitive p -> raise (NotEvaluableConst (IsPrimitive (u,p)))
+    | Symbol b ->
+        match Cmap_env.find_opt kn env.symb_pats with
+        | Some r -> raise (NotEvaluableConst (HasRules (u, b, r)))
+        | None -> assert false
 
 let constant_opt_value_in env cst =
   try Some (constant_value_in env cst)
@@ -530,12 +658,18 @@ let evaluable_constant kn env =
     match cb.const_body with
     | Def _ -> true
     | OpaqueDef _ -> false
-    | Undef _ | Primitive _ -> false
+    | Undef _ | Primitive _ | Symbol _ -> false
 
 let is_primitive env c =
   let cb = lookup_constant c env in
   match cb.Declarations.const_body with
   | Declarations.Primitive _ -> true
+  | _ -> false
+
+let is_symbol env c =
+  let cb = lookup_constant c env in
+  match cb.Declarations.const_body with
+  | Declarations.Symbol _ -> true
   | _ -> false
 
 let get_primitive env c =
@@ -554,6 +688,11 @@ let is_float64_type env c =
   | None -> false
   | Some c' -> Constant.CanOrd.equal c c'
 
+let is_string_type env c =
+  match env.retroknowledge.Retroknowledge.retro_string with
+  | None -> false
+  | Some c' -> Constant.CanOrd.equal c c'
+
 let is_array_type env c =
   match env.retroknowledge.Retroknowledge.retro_array with
   | None -> false
@@ -561,14 +700,21 @@ let is_array_type env c =
 
 let is_primitive_type env c =
   (* dummy match to force an update if we add a primitive type *)
-  let _ = function CPrimitives.(PTE(PT_int63)) | CPrimitives.(PTE(PT_float64)) | CPrimitives.(PTE(PT_array)) -> () in
-  is_int63_type env c || is_float64_type env c || is_array_type env c
+  let _ =
+    function
+    | CPrimitives.(PTE(PT_int63))
+    | CPrimitives.(PTE(PT_float64))
+    | CPrimitives.(PTE(PT_string))
+    | CPrimitives.(PTE(PT_array)) -> ()
+  in
+  is_int63_type env c || is_float64_type env c || is_array_type env c ||
+  is_string_type env c
 
 let polymorphic_constant cst env =
   Declareops.constant_is_polymorphic (lookup_constant cst env)
 
 let polymorphic_pconstant (cst,u) env =
-  if Univ.Instance.is_empty u then false
+  if UVars.Instance.is_empty u then false
   else polymorphic_constant cst env
 
 let type_in_type_constant cst env =
@@ -582,8 +728,9 @@ let lookup_projection p env =
   match mib.mind_record with
   | NotRecord | FakeRecord -> anomaly ~label:"lookup_projection" Pp.(str "not a projection")
   | PrimRecord infos ->
-    let _,_,_,typs = infos.(i) in
-    typs.(Projection.arg p)
+    let _,_,rs,typs = infos.(i) in
+    let arg = Projection.arg p in
+    rs.(arg), typs.(arg)
 
 let get_projection env ind ~proj_arg =
   let mib = lookup_mind (fst ind) env in
@@ -598,7 +745,7 @@ let polymorphic_ind (mind,_i) env =
   Declareops.inductive_is_polymorphic (lookup_mind mind env)
 
 let polymorphic_pind (ind,u) env =
-  if Univ.Instance.is_empty u then false
+  if UVars.Instance.is_empty u then false
   else polymorphic_ind ind env
 
 let type_in_type_ind (mind,_i) env =
@@ -609,14 +756,8 @@ let template_polymorphic_ind (mind,i) env =
   | TemplateArity _ -> true
   | RegularArity _ -> false
 
-let template_polymorphic_variables (mind, _) env =
-  match (lookup_mind mind env).mind_template with
-  | Some { Declarations.template_param_levels = l; _ } ->
-    List.map_filter (fun level -> level) l
-  | None -> []
-
 let template_polymorphic_pind (ind,u) env =
-  if not (Univ.Instance.is_empty u) then false
+  if not (UVars.Instance.is_empty u) then false
   else template_polymorphic_ind ind env
 
 let add_mind_key kn (mind, _ as mind_key) env =
@@ -626,11 +767,12 @@ let add_mind_key kn (mind, _ as mind_key) env =
       Globals.inductives = new_inds; }
   in
   let irr_inds = Array.fold_left_i (fun i irr_inds mip ->
-      if mip.mind_relevance == Sorts.Irrelevant
-      then Indset_env.add (kn, i) irr_inds
+      if mip.mind_relevance != Sorts.Relevant
+      then Indmap_env.add (kn, i) mip.mind_relevance irr_inds
       else irr_inds) env.irr_inds mind.mind_packets
   in
-  { env with irr_inds; env_globals = new_globals }
+  let inductive_hyps = record_global_hyps Mindmap_env.add kn mind.mind_hyps env.inductive_hyps in
+  { env with inductive_hyps; irr_inds; env_globals = new_globals }
 
 let add_mind kn mib env =
   let li = ref no_link_info in add_mind_key kn (mib, li) env
@@ -638,12 +780,10 @@ let add_mind kn mib env =
 (* Lookup of section variables *)
 
 let lookup_constant_variables c env =
-  let cmap = lookup_constant c env in
-  Context.Named.to_vars cmap.const_hyps
+  Option.default Id.Set.empty (Cmap_env.find_opt c env.constant_hyps)
 
 let lookup_inductive_variables (kn,_i) env =
-  let mis = lookup_mind kn env in
-  Context.Named.to_vars mis.mind_hyps
+  Option.default Id.Set.empty (Mindmap_env.find_opt kn env.inductive_hyps)
 
 let lookup_constructor_variables (ind,_) env =
   lookup_inductive_variables ind env
@@ -656,7 +796,7 @@ let constant_context env c =
 let universes_of_global env r =
   let open GlobRef in
     match r with
-    | VarRef _ -> Univ.AbstractContext.empty
+    | VarRef _ -> UVars.AbstractContext.empty
     | ConstRef c -> constant_context env c
     | IndRef (mind,_) | ConstructRef ((mind,_),_) ->
       let mib = lookup_mind mind env in
@@ -714,14 +854,12 @@ let keep_hyps env needed =
 
 (* Modules *)
 
-let add_modtype mtb env =
-  let mp = mtb.mod_mp in
+let add_modtype mp mtb env =
   let new_modtypes = MPmap.add mp mtb env.env_globals.Globals.modtypes in
   let new_globals = { env.env_globals with Globals.modtypes = new_modtypes } in
   { env with env_globals = new_globals }
 
-let shallow_add_module mb env =
-  let mp = mb.mod_mp in
+let shallow_add_module mp mb env =
   let new_mods = MPmap.add mp mb env.env_globals.Globals.modules in
   let new_globals = { env.env_globals with Globals.modules = new_mods } in
   { env with env_globals = new_globals }
@@ -813,14 +951,6 @@ let is_template_polymorphic env r =
   | IndRef ind -> template_polymorphic_ind ind env
   | ConstructRef cstr -> template_polymorphic_ind (inductive_of_constructor cstr) env
 
-let get_template_polymorphic_variables env r =
-  let open Names.GlobRef in
-  match r with
-  | VarRef _id -> []
-  | ConstRef _c -> []
-  | IndRef ind -> template_polymorphic_variables ind env
-  | ConstructRef cstr -> template_polymorphic_variables (inductive_of_constructor cstr) env
-
 let is_type_in_type env r =
   let open Names.GlobRef in
   match r with
@@ -828,6 +958,18 @@ let is_type_in_type env r =
   | ConstRef c -> type_in_type_constant c env
   | IndRef ind -> type_in_type_ind ind env
   | ConstructRef cstr -> type_in_type_ind (inductive_of_constructor cstr) env
+
+let vm_library env = env.vm_library
+
+let set_vm_library lib env =
+  { env with vm_library = lib }
+
+let link_vm_library lib env =
+  let vm_library = Vmlibrary.link lib env.vm_library in
+  { env with vm_library }
+
+let lookup_vm_code idx env =
+  Vmlibrary.resolve idx env.vm_library
 
 let set_retroknowledge env r = { env with retroknowledge = r }
 
@@ -837,6 +979,7 @@ sig
   val equal : env -> t -> t -> bool
   val compare : env -> t -> t -> int
   val hash : env -> t -> int
+  val canonize : env -> t -> t
 end
 
 module QConstant =
@@ -845,6 +988,7 @@ struct
   let equal _env c1 c2 = Constant.CanOrd.equal c1 c2
   let compare _env c1 c2 = Constant.CanOrd.compare c1 c2
   let hash _env c = Constant.CanOrd.hash c
+  let canonize _env c = Constant.canonize c
 end
 
 module QMutInd =
@@ -853,6 +997,7 @@ struct
   let equal _env c1 c2 = MutInd.CanOrd.equal c1 c2
   let compare _env c1 c2 = MutInd.CanOrd.compare c1 c2
   let hash _env c = MutInd.CanOrd.hash c
+  let canonize _env c = MutInd.canonize c
 end
 
 module QInd =
@@ -861,6 +1006,7 @@ struct
   let equal _env c1 c2 = Ind.CanOrd.equal c1 c2
   let compare _env c1 c2 = Ind.CanOrd.compare c1 c2
   let hash _env c = Ind.CanOrd.hash c
+  let canonize _env c = Ind.canonize c
 end
 
 module QConstruct =
@@ -869,6 +1015,7 @@ struct
   let equal _env c1 c2 = Construct.CanOrd.equal c1 c2
   let compare _env c1 c2 = Construct.CanOrd.compare c1 c2
   let hash _env c = Construct.CanOrd.hash c
+  let canonize _env c = Construct.canonize c
 end
 
 module QProjection =
@@ -877,12 +1024,14 @@ struct
   let equal _env c1 c2 = Projection.CanOrd.equal c1 c2
   let compare _env c1 c2 = Projection.CanOrd.compare c1 c2
   let hash _env c = Projection.CanOrd.hash c
+  let canonize _env c = Projection.canonize c
   module Repr =
   struct
     type t = Projection.Repr.t
     let equal _env c1 c2 = Projection.Repr.CanOrd.equal c1 c2
     let compare _env c1 c2 = Projection.Repr.CanOrd.compare c1 c2
     let hash _env c = Projection.Repr.CanOrd.hash c
+    let canonize _env c = Projection.Repr.canonize c
   end
 end
 
@@ -892,4 +1041,15 @@ struct
   let equal _env c1 c2 = GlobRef.CanOrd.equal c1 c2
   let compare _env c1 c2 = GlobRef.CanOrd.compare c1 c2
   let hash _env c = GlobRef.CanOrd.hash c
+  let canonize _env c = GlobRef.canonize c
+end
+
+module Internal = struct
+  let for_checking_pseudo_sort_poly env =
+    let q = Sorts.QVar.make_var 0 in
+    assert (not (Sorts.QVar.Set.mem q env.env_qualities));
+    let env = map_universes UGraph.Internal.for_checking_pseudo_sort_poly env in
+    { env with env_qualities = Sorts.QVar.Set.add q env.env_qualities }
+
+  let is_above_prop env q = UGraph.Internal.is_above_prop env.env_universes q
 end

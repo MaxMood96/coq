@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -9,7 +9,7 @@
 (************************************************************************)
 
 let version () =
-  Printf.printf "The Coq Proof Assistant, version %s\n" Coq_config.version;
+  Printf.printf "The Rocq Prover, version %s\n" Coq_config.version;
   Printf.printf "compiled with OCaml %s\n" Coq_config.caml_version
 
 let machine_readable_version () =
@@ -20,7 +20,7 @@ let machine_readable_version () =
 
 let print_usage_common co command =
   output_string co command;
-  output_string co "Coq options are:\n";
+  output_string co "Rocq options are:\n";
   output_string co
  "  -I dir                 look for ML files in dir\
 \n  -include dir           (idem)\
@@ -31,36 +31,40 @@ let print_usage_common co command =
 \n  -coqlib dir            set the coq standard library directory\
 \n  -exclude-dir f         exclude subdirectories named f for option -R\
 \n\
-\n  -boot                  don't bind the `Coq.` prefix to the default -coqlib dir\
-\n  -noinit                don't load Coq.Init.Prelude on start \
+\n  -boot                  don't bind the `Corelib.` prefix to the default -coqlib dir\
+\n  -noinit                don't load Corelib.Init.Prelude on start\
 \n  -nois                  (idem)\
-\n  -compat X.Y            provides compatibility support for Coq version X.Y\
+\n  -compat X.Y            same as -compat-from Corelib RocqXY (or CoqXY when X is 8)\
+\n  -compat-from root lib  same as -require-import-from root lib, except that\
+\n                         a non existing file only produces a warning\
 \n\
-\n  -load-vernac-source f  load Coq file f.v (Load \"f\".)\
+\n  -load-vernac-source f  load Rocq file f.v (Load \"f\".)\
 \n  -l f                   (idem)\
-\n  -load-vernac-source-verbose f  load Coq file f.v (Load Verbose \"f\".)\
+\n  -load-vernac-source-verbose f  load Rocq file f.v (Load Verbose \"f\".)\
 \n  -lv f	           (idem)\
-\n  -load-vernac-object lib\
-\n                         load Coq library lib (Require lib)\
-\n  -rfrom root lib        load Coq library lib (From root Require lib.)\
+\n  -require lib           load Rocq library lib (Require lib)\
 \n  -require-import lib, -ri lib\
-\n                         load and import Coq library lib\
+\n                         load and import Rocq library lib\
 \n                         (equivalent to Require Import lib.)\
 \n  -require-export lib, -re lib\
-\n                         load and transitively import Coq library lib\
+\n                         load and transitively import Rocq library lib\
 \n                         (equivalent to Require Export lib.)\
+\n  -require-from root lib, -rfrom root lib
+\n                         load Rocq library lib (From root Require lib.)\
 \n  -require-import-from root lib, -rifrom root lib\
-\n                         load and import Coq library lib\
+\n                         load and import Rocq library lib\
 \n                         (equivalent to From root Require Import lib.)\
 \n  -require-export-from root lib, -refrom root lib\
-\n                         load and transitively import Coq library lib\
+\n                         load and transitively import Rocq library lib\
 \n                         (equivalent to From root Require Export lib.)\
+\n  -load-vernac-object lib\
+\n                         (obsolete synonym of -require lib)\
 \n\
-\n  -where                 print Coq's standard library location and exit\
-\n  -config, --config      print Coq's configuration information and exit\
-\n  -v, --version          print Coq version and exit\
-\n  -print-version         print Coq version in easy to parse format and exit\
-\n  -list-tags             print highlight color tags known by Coq and exit\
+\n  -where                 print Rocq's core library location and exit\
+\n  -config, --config      print Rocq's configuration information and exit\
+\n  -v, --version          print Rocq version and exit\
+\n  -print-version         print Rocq version in easy to parse format and exit\
+\n  -list-tags             print highlight color tags known by Rocq and exit\
 \n\
 \n  -quiet                 unset display of extra information (implies -w \"-all\")\
 \n  -w (w1,..,wn)          configure display of warnings\
@@ -71,7 +75,7 @@ let print_usage_common co command =
 \n                         use the vernac command \"Test Debug\" to see all\
 \n\
 \n  -color (yes|no|auto)   configure color output\
-\n  -emacs                 tells Coq it is executed under Emacs\
+\n  -emacs                 tells Rocq it is executed under Emacs\
 \n\
 \n  -q                     skip loading of rcfile\
 \n  -init-file f           set the rcfile to f\
@@ -80,6 +84,7 @@ let print_usage_common co command =
 \n  -impredicative-set     set sort Set impredicative\
 \n  -allow-sprop           allow using the proof irrelevant SProp sort\
 \n  -disallow-sprop        forbid using the proof irrelevant SProp sort\
+\n  -allow-rewrite-rules   allows declaring symbols and rewrite rules\
 \n  -indices-matter        levels of indices (and nonuniform parameters) contribute to the level of inductives\
 \n  -type-in-type          disable universe consistency checking\
 \n  -mangle-names x        mangle auto-generated names using prefix x\

@@ -1,18 +1,20 @@
-# Coq Code of Conduct #
+# Rocq Code of Conduct #
 
-The Coq development team and the user community are made up of a mixture of
+The Rocq development team and the user community are made up of a mixture of
 professionals and volunteers from all over the world.
 Diversity brings variety of perspectives that can be very valuable, but it can
 also lead to communication issues and unhappiness. Therefore, we have a few
-ground rules that we ask people to adhere to.
+ground rules that we ask people to adhere to in order to make
+participation in our community a positive experience for
+everyone.
 These rules apply equally to core developers (who should lead by example),
 occasional contributors and those seeking help and guidance.
-Their goal is that everyone feels safe and welcome when contributing to Coq or
-interacting with others in Coq related forums.
+Their goal is that everyone feels safe and welcome when contributing to Rocq or
+interacting with others in Rocq related forums.
 
-These rules apply to all spaces managed by the Coq development team.
+These rules apply to all spaces managed by the Rocq development team.
 This includes the GitHub repository, the Discourse forum, the Zulip chat, the mailing lists,
-physical events like Coq working groups and workshops, and any other forums
+physical events like Rocq working groups and workshops, and any other forums
 created or managed by the development team which the community uses for
 communication. In addition, violations of these rules outside these spaces may
 affect a person's ability to participate within them.
@@ -32,7 +34,7 @@ affect a person's ability to participate within them.
   behavior and poor manners. We might all experience some frustration now and
   then, but we cannot allow that frustration to turn into a personal attack.
   It's important to remember that a community where people feel uncomfortable
-  or threatened is not a productive one. Members of the Coq development team
+  or threatened is not a productive one. Members of the Rocq development team
   and user community should be respectful when dealing with other members as
   well as with people outside the community.
 - **Be careful in the words that you choose.**
@@ -53,15 +55,21 @@ affect a person's ability to participate within them.
   Consider what image your words will give to outsiders of the development
   team / the user community as a whole. Try to avoid references to private
   knowledge to be understandable by anyone.
-- **Coq online forums are only to discuss Coq-related subjects.**
+- **Rocq online forums are only to discuss Rocq-related subjects.**
   Unrelated political discussions or long digressions are unwelcome,
   even for illustration or comparison purposes.
 - **When we disagree, try to understand why.**
-  Disagreements, both social and technical, happen all the time and Coq is no
+  Disagreements, both social and technical, happen all the time and Rocq is no
   exception. It is important that we resolve disagreements and differing views
   constructively. Remember that we are different. Different people
   have different perspectives on issues. Being unable to understand why someone
   holds a viewpoint doesn't mean that they're wrong.
+- **Be considerate of others' resources, including time and attention.**
+  Long messages, for example, take more time for others to read and respond to, and
+  make it harder to determine what the most important points are,
+  risking miscommunication when multiple participants have different
+  views about what issue is being discussed. Short, concise messages are often more
+  efficient and help prevent communication misunderstandings.
 - **It is human to make errors, and please try not to take things personally.**
   Please do not answer aggressively to problematic behavior and simply
   signal the issue. If actions have been taken with you (e.g. bans or simple
@@ -73,11 +81,45 @@ affect a person's ability to participate within them.
   bad day, so please take this opportunity to question yourself, cool down if
   necessary and do not persist in the exact same behavior you have been
   reported for.
+- **Default to using public rather than personal (member-to-member) communication.**
+  Personal communication channels (e.g., direct messages on Zulip or
+  personal emails) limit the visibility of interactions for other users and
+  contributors, preventing them from benefiting from shared
+  knowledge. Additionally, unsolicited private communication can
+  sometimes be perceived as too intrusive.
+- **Be mindful to avoid repeated actions that form a pattern of harassment.**
+  Harassment is not limited to any single source or type of
+  behavior. It typically arises from repeated actions that may seem
+  harmless individually but, over time, contribute to a hostile
+  environment.
+
+## Interaction on Rocq forums (Zulip, Discourse, etc.) ##
+
+Anyone is welcome to ask questions and bring answers, provided they
+respect the aforementioned rules. In addition we ask that
+- you do your best to put your questions into their context by
+  providing Rocq code or pointers to it, and enough indications to
+  understand where the Rocq goals or error message come from.
+- if you are running through educational material, we kindly ask you
+  to explicitly state it, and that answers do not solve such exercises
+  for you, but only provide hints.
+
+Admins and moderators will, at their discretion, review and remove
+some content, and provide indications or warnings to users. Repeatedly
+not taking into accounts these warnings may result into a temporary or
+permanent ban.
+
+Based on forum histories, short technical questions with brief code examples
+in the proper context are the most likely to receive useful answers. In
+contrast, long and open-ended questions or comments usually see less engagement.
+This is not to say that long questions or comments that otherwise abide by the
+rules are discouraged, only that users should carefully set expectations about
+what answers they are likely to receive.
 
 ## Enforcement ##
 
 If you believe someone is violating the code of conduct, we ask that you report
-it by emailing the Coq Code of Conduct enforcement team at
+it by emailing the Rocq Code of Conduct enforcement team at
 <coq-conduct@inria.fr> or, at your discretion, any member of the team.
 Confidentiality with regard to the reporter of an
 incident will be maintained while dealing with it.
@@ -87,9 +129,17 @@ yourself with a behavior that you consider hurtful. This applies to members of
 the enforcement team as well, who shouldn't deal by themselves with violations
 in discussions in which they are a participant.
 
+The enforcement team will take all interactions into account when
+assessing potential code of conduct violations, including any personal
+communications brought to their attention.
+
 Depending on the violation, the team can choose to address a private or public
 warning to the offender, request an apology, or ban them for a short or a long
-period from interacting on one or all of our forums.
+period from interacting on one or all spaces managed by the Rocq
+development team (both online and offline).
+The ban may apply to anyone, including members of the Rocq development
+team, in which case the developer will lose their privileges for the
+duration of the ban and may need to rebuild trust to regain them.
 
 Except in case of serious violations, the team will always try a pedagogical
 approach first (the offender does not necessarily realize immediately why their

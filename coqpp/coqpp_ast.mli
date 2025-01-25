@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -106,7 +106,7 @@ type classification =
 | ClassifName of string
 
 type vernac_rule = {
-  vernac_atts : (string * string) list option;
+  vernac_atts : (string * code) list option;
   vernac_state : string option;
   vernac_toks : ext_token list;
   vernac_class : code option;
@@ -150,7 +150,7 @@ type argument_ext = {
 type node =
 | Code of code
 | Comment of string
-| DeclarePlugin of string
+| DeclarePlugin of string option
 | GramExt of grammar_ext
 | VernacExt of vernac_ext
 | VernacArgumentExt of vernac_argument_ext

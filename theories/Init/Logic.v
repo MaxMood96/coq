@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -322,6 +322,7 @@ Section ex2_Projections.
 End ex2_Projections.
 
 Definition all (A:Type) (P:A -> Prop) := forall x:A, P x.
+Register all as core.all.
 
 (* Rule order is important to give printing priority to fully typed exists *)
 

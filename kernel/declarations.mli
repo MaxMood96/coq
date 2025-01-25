@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -25,13 +25,16 @@ open Constr
     In truly universe polymorphic mode, we always use RegularArity.
 *)
 
+type template_pseudo_sort_poly = TemplatePseudoSortPoly | TemplateUnivOnly
+
 type template_arity = {
   template_level : Sorts.t;
 }
 
 type template_universes = {
-  template_param_levels : Univ.Level.t option list;
+  template_param_arguments : bool list;
   template_context : Univ.ContextSet.t;
+  template_pseudo_sort_poly : template_pseudo_sort_poly;
 }
 
 type ('a, 'b) declaration_arity =
@@ -47,15 +50,16 @@ type inline = int option
     transparent body, or an opaque one *)
 
 (* Global declarations (i.e. constants) can be either: *)
-type ('a, 'opaque) constant_def =
+type ('a, 'opaque, 'rules) constant_def =
   | Undef of inline                       (** a global assumption *)
   | Def of 'a                             (** or a transparent global definition *)
   | OpaqueDef of 'opaque                  (** or an opaque global definition *)
   | Primitive of CPrimitives.t (** or a primitive operation *)
+  | Symbol of 'rules                      (** or a symbol *)
 
 type universes =
   | Monomorphic
-  | Polymorphic of Univ.AbstractContext.t
+  | Polymorphic of UVars.AbstractContext.t
 
 (** The [typing_flags] are instructions to the type-checker which
     modify its behaviour. The typing flags used in the type-checking
@@ -103,13 +107,14 @@ type typing_flags = {
 
 (* some contraints are in constant_constraints, some other may be in
  * the OpaqueDef *)
-type 'opaque pconstant_body = {
+type ('opaque, 'bytecode) pconstant_body = {
     const_hyps : Constr.named_context; (** younger hyp at top *)
-    const_univ_hyps : Univ.Instance.t;
-    const_body : (Constr.t, 'opaque) constant_def;
+    const_univ_hyps : UVars.Instance.t;
+    const_body : (Constr.t, 'opaque, bool) constant_def;
+                    (** [bool] is for [unfold_fix] in symbols *)
     const_type : types;
     const_relevance : Sorts.relevance;
-    const_body_code : Vmemitcodes.body_code option;
+    const_body_code : 'bytecode;
     const_universes : universes;
     const_inline_code : bool;
     const_typing_flags : typing_flags; (** The typing options which
@@ -117,17 +122,17 @@ type 'opaque pconstant_body = {
                                            type-checking. *)
 }
 
-type constant_body = Opaqueproof.opaque pconstant_body
+type constant_body = (Opaqueproof.opaque, Vmlibrary.indirect_code option) pconstant_body
 
 (** {6 Representation of mutual inductive types in the kernel } *)
-type nested_type =
-| NestedInd of inductive
-| NestedPrimitive of Constant.t
+
+type recarg_type =
+| RecArgInd of inductive
+| RecArgPrim of Constant.t
 
 type recarg =
 | Norec
-| Mrec of inductive
-| Nested of nested_type
+| Mrec of recarg_type
 
 type wf_paths = recarg Rtree.t
 
@@ -164,6 +169,15 @@ type regular_inductive_arity = {
 
 type inductive_arity = (regular_inductive_arity, template_arity) declaration_arity
 
+type squash_info =
+  | AlwaysSquashed
+  | SometimesSquashed of Sorts.Quality.Set.t
+  (** A sort polymorphic inductive [I@{...|...|...} : ... -> Type@{ s|...}]
+      is squashed at a given instantiation if any quality in the list is not smaller than [s].
+
+      NB: if [s] is a variable SometimesSquashed contains SProp
+      ie non ground instantiations are squashed. *)
+
 (** {7 Datas specific to a single type of a block of mutually inductive type } *)
 type one_inductive_body = {
 (** {8 Primitive datas } *)
@@ -198,7 +212,8 @@ type one_inductive_body = {
 
     mind_nrealdecls : int; (** Length of realargs context (with let, no params) *)
 
-    mind_kelim : Sorts.family; (** Highest allowed elimination sort *)
+    mind_squashed : squash_info option;
+    (** Is elimination restricted to the inductive's sort? *)
 
     mind_nf_lc : (rel_context * types) array;
  (** Head normalized constructor types so that their conclusion
@@ -209,7 +224,7 @@ type one_inductive_body = {
      (possibly with let-ins). This context is internally represented
      as a list [[cstrdecl_ij{q_ij};...;cstrdecl_ij1;paramdecl_m;...;paramdecl_1]]
      such that the constructor in fine has type [forall paramdecls,
-     forall cstrdecls_ij, Ii params realargs_ij]] with [params] referring to
+     forall cstrdecls_ij, Ii params realargs_ij] with [params] referring to
      the assumptions of [paramdecls] and [realargs_ij] being the
      "indices" specific to the constructor. *)
 
@@ -245,13 +260,13 @@ type mutual_inductive_body = {
 
     mind_record : record_info; (** The record information *)
 
-    mind_finite : recursivity_kind;  (** Whether the type is inductive or coinductive *)
+    mind_finite : recursivity_kind;  (** Whether the type is inductive, coinductive or non-recursive *)
 
     mind_ntypes : int;  (** Number of types in the block *)
 
     mind_hyps : Constr.named_context;  (** Section hypotheses on which the block depends *)
 
-    mind_univ_hyps : Univ.Instance.t; (** Section polymorphic universes. *)
+    mind_univ_hyps : UVars.Instance.t; (** Section polymorphic universes. *)
 
     mind_nparams : int;  (** Number of expected parameters including non-uniform ones (i.e. length of mind_params_ctxt w/o let-in) *)
 
@@ -263,9 +278,9 @@ type mutual_inductive_body = {
 
     mind_template : template_universes option;
 
-    mind_variance : Univ.Variance.t array option; (** Variance info, [None] when non-cumulative. *)
+    mind_variance : UVars.Variance.t array option; (** Variance info, [None] when non-cumulative. *)
 
-    mind_sec_variance : Univ.Variance.t array option;
+    mind_sec_variance : UVars.Variance.t array option;
     (** Variance info for section polymorphic universes. [None]
        outside sections. The final variance once all sections are
        discharged is [mind_sec_variance ++ mind_variance]. *)
@@ -277,7 +292,61 @@ type mutual_inductive_body = {
 
 type mind_specif = mutual_inductive_body * one_inductive_body
 
+(** {6 Rewrite rules } *)
+
+type quality_pattern = Sorts.Quality.pattern =
+  | PQVar of int option | PQConstant of Sorts.Quality.constant
+
+type instance_mask = UVars.Instance.mask
+
+type sort_pattern = Sorts.pattern =
+  | PSProp | PSSProp | PSSet | PSType of int option | PSQSort of int option * int option
+
+(** Patterns are internally represented as pairs of a head-pattern and a list of eliminations
+    Eliminations correspond to elements of the stack in a reduction machine,
+    they represent a pattern with a hole, to be filled with the head-pattern
+*)
+type 'arg head_pattern =
+  | PHRel     of int
+  | PHSort    of sort_pattern
+  | PHSymbol  of Constant.t * instance_mask
+  | PHInd     of inductive * instance_mask
+  | PHConstr  of constructor * instance_mask
+  | PHInt     of Uint63.t
+  | PHFloat   of Float64.t
+  | PHString  of Pstring.t
+  | PHLambda  of 'arg array * 'arg
+  | PHProd    of 'arg array * 'arg
+
+type pattern_elimination =
+  | PEApp     of pattern_argument array
+  | PECase    of inductive * instance_mask * pattern_argument * pattern_argument array
+  | PEProj    of Projection.Repr.t
+
+and head_elimination = pattern_argument head_pattern * pattern_elimination list
+
+and pattern_argument =
+  | EHole of int
+  | EHoleIgnored
+  | ERigid of head_elimination
+
+type rewrite_rule = {
+  nvars : int * int * int;
+  lhs_pat : instance_mask * pattern_elimination list;
+  rhs : constr;
+}
+
+(** {6 Representation of rewrite rules in the kernel } *)
+
+(** [(c, { lhs_pat = (u, elims); rhs })] in this list stands for [(PHSymbol (c,u), elims) ==> rhs] *)
+type rewrite_rules_body = {
+  rewrules_rules : (Constant.t * rewrite_rule) list;
+}
+
 (** {6 Module declarations } *)
+
+type mod_body = [ `ModBody ]
+type mod_type = [ `ModType ]
 
 (** Functor expressions are forced to be on top of other expressions *)
 
@@ -306,15 +375,16 @@ type 'uconstr functor_alg_expr =
 
 (** A module expression is an algebraic expression, possibly functorized. *)
 
-type module_expression = (constr * Univ.AbstractContext.t option) functor_alg_expr
+type module_expression = (constr * UVars.AbstractContext.t option) functor_alg_expr
 
 (** A component of a module structure *)
 
-type structure_field_body =
+type ('mod_body, 'mod_type) structure_field_body =
   | SFBconst of constant_body
   | SFBmind of mutual_inductive_body
-  | SFBmodule of module_body
-  | SFBmodtype of module_type_body
+  | SFBrules of rewrite_rules_body
+  | SFBmodule of 'mod_body
+  | SFBmodtype of 'mod_type
 
 (** A module structure is a list of labeled components.
 
@@ -322,55 +392,4 @@ type structure_field_body =
     a [structure_body], once for a module ([SFBmodule] or [SFBmodtype])
     and once for an object ([SFBconst] or [SFBmind]) *)
 
-and structure_body = (Label.t * structure_field_body) list
-
-(** A module signature is a structure, with possibly functors on top of it *)
-
-and module_signature = (module_type_body,structure_body) functorize
-
-and module_implementation =
-  | Abstract (** no accessible implementation *)
-  | Algebraic of module_expression (** non-interactive algebraic expression *)
-  | Struct of structure_body (** interactive body living in the parameter context of [mod_type] *)
-  | FullStruct (** special case of [Struct] : the body is exactly [mod_type] *)
-
-and 'a generic_module_body =
-  { mod_mp : ModPath.t; (** absolute path of the module *)
-    mod_expr : 'a; (** implementation *)
-    mod_type : module_signature; (** expanded type *)
-    mod_type_alg : module_expression option; (** algebraic type *)
-    mod_delta : Mod_subst.delta_resolver; (**
-      quotiented set of equivalent constants and inductive names *)
-    mod_retroknowledge : 'a module_retroknowledge }
-
-(** For a module, there are five possible situations:
-    - [Declare Module M : T] then [mod_expr = Abstract; mod_type_alg = Some T]
-    - [Module M := E] then [mod_expr = Algebraic E; mod_type_alg = None]
-    - [Module M : T := E] then [mod_expr = Algebraic E; mod_type_alg = Some T]
-    - [Module M. ... End M] then [mod_expr = FullStruct; mod_type_alg = None]
-    - [Module M : T. ... End M] then [mod_expr = Struct; mod_type_alg = Some T]
-    And of course, all these situations may be functors or not. *)
-
-and module_body = module_implementation generic_module_body
-
-(** A [module_type_body] is just a [module_body] with no implementation and
-    also an empty [mod_retroknowledge]. Its [mod_type_alg] contains
-    the algebraic definition of this module type, or [None]
-    if it has been built interactively. *)
-
-and module_type_body = unit generic_module_body
-
-and _ module_retroknowledge =
-| ModBodyRK :
-  Retroknowledge.action list -> module_implementation module_retroknowledge
-| ModTypeRK : unit module_retroknowledge
-
-(** Extra invariants :
-
-    - No [MEwith] inside a [mod_expr] implementation : the 'with' syntax
-      is only supported for module types
-
-    - A module application is atomic, for instance ((M N) P) :
-      * the head of [MEapply] can only be another [MEapply] or a [MEident]
-      * the argument of [MEapply] is now directly forced to be a [ModPath.t].
-*)
+and ('mod_body, 'mod_type) structure_body = (Label.t * ('mod_body, 'mod_type) structure_field_body) list

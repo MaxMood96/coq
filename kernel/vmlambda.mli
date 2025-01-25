@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,11 +11,13 @@
 open Vmvalues
 open Environ
 
-type lambda = structured_values Genlambda.lambda
+type lval
+type lambda = lval Genlambda.lambda
 
-exception TooLargeInductive of Pp.t
+val get_lval : lval -> structured_values
+val as_value : int -> lambda array -> lval option
 
-val lambda_of_constr : optimize:bool -> env -> Genlambda.evars -> Constr.t -> lambda
+val lambda_of_constr : env -> Genlambda.evars -> Constr.t -> lambda
 
 (** Dump the VM lambda code after compilation (for debugging purposes) *)
 val dump_lambda : bool ref

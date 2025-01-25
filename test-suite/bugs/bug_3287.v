@@ -1,4 +1,4 @@
-Require Coq.extraction.Extraction.
+Require Corelib.extraction.Extraction.
 
 Module Foo.
 (* Definition foo := (I,I). *)

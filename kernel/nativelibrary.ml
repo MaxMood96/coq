@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -10,6 +10,7 @@
 
 open Names
 open Declarations
+open Mod_declarations
 open Mod_subst
 open Modops
 open Nativecode
@@ -38,22 +39,27 @@ and translate_field mp env acc (l,x) =
         let msg = Printf.sprintf "Compiling inductive %s..." (Id.to_string id) in
         Pp.str msg));
      compile_mind_field mp l acc mb
+  | SFBrules rrb ->
+     (debug_native_compiler (fun () ->
+        let msg = Printf.sprintf "Not Compiling rules %s..." (Label.to_string l) in
+        Pp.str msg));
+     compile_rewrite_rules env l acc rrb
   | SFBmodule md ->
-     let mp = md.mod_mp in
+     let mp = MPdot (mp, l) in
      (debug_native_compiler (fun () ->
         let msg =
           Printf.sprintf "Compiling module %s..." (ModPath.to_string mp)
         in
         Pp.str msg));
-     translate_mod mp env md.mod_type acc
+     translate_mod mp env (mod_type md) acc
   | SFBmodtype mdtyp ->
-     let mp = mdtyp.mod_mp in
+     let mp = MPdot (mp, l) in
      (debug_native_compiler (fun () ->
         let msg =
           Printf.sprintf "Compiling module type %s..." (ModPath.to_string mp)
         in
         Pp.str msg));
-     translate_mod mp env mdtyp.mod_type acc
+     translate_mod mp env (mod_type mdtyp) acc
 
 let dump_library mp env mod_expr =
   debug_native_compiler (fun () -> Pp.str "Compiling library...");

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,6 +8,6 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-val parse_args : init:Stm.AsyncOpts.stm_opt -> string list -> Stm.AsyncOpts.stm_opt * string list
+val parse_args : Coqargs.t -> string list -> Stm.AsyncOpts.stm_opt * string list
 
 val usage : string

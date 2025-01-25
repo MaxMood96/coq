@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -102,7 +102,7 @@ let subgoals_tys sigma (relctx, concl) =
  *    by eqid *)
 
 let get_eq_type env sigma =
-  Evd.fresh_global env sigma Coqlib.(lib_ref "core.eq.type")
+  Evd.fresh_global env sigma Rocqlib.(lib_ref "core.eq.type")
 
 type elim_what =
 | EConstr of
@@ -149,7 +149,7 @@ let mkTpat env sigma0 (sigma, t) = (* takes a term, refreshes it and makes a T p
 
 let redex_of_pattern env p = match redex_of_pattern p with
 | None -> CErrors.anomaly (Pp.str "pattern without redex.")
-| Some (sigma, e) -> Evarutil.nf_evar sigma e, Evd.evar_universe_context sigma
+| Some (sigma, e) -> Evarutil.nf_evar sigma e, Evd.ustate sigma
 
 let unif_redex env sigma0 nsigma p t = (* t is a hint for the redex of p *)
   let t, evs, ucst = abs_evars env sigma0 (nsigma, fire_subst nsigma t) in
@@ -201,14 +201,15 @@ let find_eliminator env sigma ~concl ~is_case ?elim oc c_gen =
     let sigma, c_ty = Typing.type_of env sigma c in
     let ((kn, i),_ as indu), unfolded_c_ty =
       Tacred.reduce_to_quantified_ind env sigma c_ty in
-    let sort = Retyping.get_sort_family_of env sigma concl in
+    let sort = Retyping.get_sort_of env sigma concl in
     let sigma, elim, elimty =
       if not is_case then
-        let sigma, elim = Evd.fresh_global env sigma (Indrec.lookup_eliminator env (kn,i) sort) in
+        let sigma, elim = Evd.fresh_global env sigma
+            (Indrec.lookup_eliminator env (kn,i) (EConstr.ESorts.family sigma sort))
+        in
         let elimty = Retyping.get_type_of env sigma elim in
         sigma, elim, elimty
       else
-        let indu = (fst indu, EConstr.EInstance.kind sigma (snd indu)) in
         let sigma, case = Indrec.build_case_analysis_scheme env sigma indu true sort in
         let (ind, indty) = Indrec.eval_case_analysis case in
         (sigma, ind, indty)
@@ -368,13 +369,13 @@ let generate_pred env sigma0 ~concl patterns predty eqid is_rec deps elim_args n
       let sigma, eq = get_eq_type env sigma in
       let sigma, gen_eq_tac, eq_ty =
         let refl = EConstr.mkApp (eq, [|t; c; c|]) in
-        let new_concl = EConstr.mkArrow refl Sorts.Relevant (EConstr.Vars.lift 1 concl0) in
+        let new_concl = EConstr.mkArrow refl EConstr.ERelevance.relevant (EConstr.Vars.lift 1 concl0) in
         let new_concl = fire_subst sigma new_concl in
         let sigma, erefl = mkRefl env sigma t c in
         let erefl = fire_subst sigma erefl in
         let erefl_ty = Retyping.get_type_of env sigma erefl in
         let eq_ty = Retyping.get_type_of env sigma erefl_ty in
-        let ucst = Evd.evar_universe_context sigma in
+        let ucst = Evd.ustate sigma in
         let evds = Evar.Map.bind (Evd.find_undefined sigma) @@
           Evd.evars_of_term sigma new_concl in
         let gen_eq_tac =
@@ -396,7 +397,7 @@ let generate_pred env sigma0 ~concl patterns predty eqid is_rec deps elim_args n
       in
       let rel = k + if c_is_head_p then 1 else 0 in
       let sigma, src = mkProt env sigma eq_ty EConstr.(mkApp (eq,[|t; c; mkRel rel|])) in
-      let concl = EConstr.mkArrow src Sorts.Relevant (EConstr.Vars.lift 1 concl) in
+      let concl = EConstr.mkArrow src EConstr.ERelevance.relevant (EConstr.Vars.lift 1 concl) in
       let clr = if deps <> [] then clr else [] in
       sigma, concl, gen_eq_tac, clr
   | _ -> sigma, concl, Tacticals.tclIDTAC, clr in
@@ -529,7 +530,7 @@ let revtoptac n0 =
   let n = nb_prod sigma concl - n0 in
   let dc, cl = EConstr.decompose_prod_n_decls sigma n concl in
   let ty = EConstr.it_mkProd_or_LetIn cl (List.rev dc) in
-  let dc' = dc @ [Context.Rel.Declaration.LocalAssum(make_annot (Name rev_id) Sorts.Relevant, ty)] in
+  let dc' = dc @ [Context.Rel.Declaration.LocalAssum(make_annot (Name rev_id) EConstr.ERelevance.relevant, ty)] in
   Refine.refine ~typecheck:true begin fun sigma ->
     let f = EConstr.it_mkLambda_or_LetIn (mkEtaApp (EConstr.mkRel (n + 1)) (-n) 1) dc' in
     let sigma, ev = Evarutil.new_evar env sigma ty in
@@ -572,7 +573,7 @@ let injectl2rtac sigma c = match EConstr.kind sigma c with
 let is_injection_case env sigma c =
   let sigma, cty = Typing.type_of env sigma c in
   let (mind,_) = Tacred.eval_to_quantified_ind env sigma cty in
-  Coqlib.check_ind_ref "core.eq.type" mind
+  Rocqlib.check_ref "core.eq.type" (GlobRef.IndRef mind)
 
 let perform_injection c =
   let open Proofview.Notations in
@@ -588,7 +589,7 @@ let perform_injection c =
   let cl = Proofview.Goal.concl gl in
   let n = List.length dc in
   let c_eq = mkEtaApp c n 2 in
-  let cl1 = EConstr.mkLambda EConstr.(make_annot Anonymous Sorts.Relevant, mkArrow eqt Sorts.Relevant cl, mkApp (mkRel 1, [|c_eq|])) in
+  let cl1 = EConstr.mkLambda EConstr.(make_annot Anonymous ERelevance.relevant, mkArrow eqt ERelevance.relevant cl, mkApp (mkRel 1, [|c_eq|])) in
   let id = injecteq_id in
   let id_with_ebind = (EConstr.mkVar id, NoBindings) in
   let injtac = Tacticals.tclTHEN (introid id) (injectidl2rtac id id_with_ebind) in

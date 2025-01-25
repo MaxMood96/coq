@@ -47,14 +47,6 @@ Module No.
   Fail Definition box_lti A := Box A : Type@{i}.
 End No.
 
-Module DefaultProp.
-  Inductive identity (A : Type) (a : A) : A -> Type := id_refl : identity A a a.
-
-  (* By default template polymorphism does not interact with inductives
-     which naturally fall in Prop *)
-  Check (identity nat 0 0 : Prop).
-End DefaultProp.
-
 Module ExplicitTemplate.
   #[universes(template)]
   Inductive identity@{i} (A : Type@{i}) (a : A) : A -> Type@{i} := id_refl : identity A a a.
@@ -200,13 +192,42 @@ End TemplateUnit.
 
 Module TemplateParamUnit.
 
-(* In theory, A could be template but the upper layers don't mark it as such *)
+(* template where the univ doesn't appear in the conclusion (here Prop) *)
 Set Warnings "+no-template-universe".
-Fail #[universes(template)] Inductive foo (A : Type) := Foo.
+Inductive foo (A : Type) := Foo.
 
-Set Warnings "-no-template-universe".
-#[universes(template)] Inductive foo (A : Type) := Foo.
+Polymorphic Definition foo'@{u|} (A:Type@{u}) : Prop := foo A.
 
 Check (foo unit : Prop).
 
 End TemplateParamUnit.
+
+Module TemplateAlg.
+
+  Inductive foo (A:Type) (B :Type) := C (_:A).
+
+  Check foo True nat : Prop.
+
+  Check fun A => foo A nat : Prop.
+  Fail Check fun A:Set => foo A nat : Prop.
+
+  Goal Prop.
+    let c := constr:(forall A, prod A A) in
+    exact c.
+  Defined.
+
+  Universes u v.
+
+  Axiom U : Type@{u}.
+  Axiom V : Type@{v}.
+
+  Check foo (U * V) True : Type@{max(u,v)}.
+
+End TemplateAlg.
+
+Module TemplateNoExtraCsts.
+
+  Polymorphic Definition opt'@{u|} (A:Type@{u}) := option A.
+  Polymorphic Definition some@{u|} (A:Type@{u}) (x:A) : opt' A := Some x.
+
+End TemplateNoExtraCsts.
