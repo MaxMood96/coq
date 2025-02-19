@@ -1,5 +1,5 @@
 ##########################################################################
-##         #   The Coq Proof Assistant / The Coq Development Team       ##
+##         #      The Rocq Prover / The Rocq Development Team           ##
 ##  v      #         Copyright INRIA, CNRS and contributors             ##
 ## <O___,, # (see version control and CREDITS file for authors & dates) ##
 ##   \VV/  ###############################################################
@@ -20,6 +20,7 @@ could imagine extending it.
 
 import os
 import re
+import shlex
 from itertools import chain
 from collections import defaultdict
 
@@ -233,12 +234,11 @@ class CoqObject(ObjectDescription):
             signode['first'] = (not self.names)
             self._record_name(name, targetid, signode)
         else:
-            # todo: make the following a real error or warning
-            # todo: then maybe the above "if" is not needed
-            names_in_subdomain = self.subdomain_data()
-            if name in names_in_subdomain:
-                print("Duplicate", self.subdomain, "name: ", name)
-            # self._warn_if_duplicate_name(names_in_subdomain, name, signode)
+            # We don't warn for duplicates in the SSReflect chapter, because
+            # it's the style of this chapter to repeat all the defined
+            # objects at the end.
+            if self.env.docname != 'proof-engine/ssreflect-proof-language':
+                self._warn_if_duplicate_name(self.subdomain_data(), name, signode)
         return targetid
 
     def _add_index_entry(self, name, target):
@@ -685,13 +685,13 @@ class CoqtopDirective(Directive):
 
     Usage::
 
-       .. coqtop:: options…
+       .. rocqtop:: options…
 
           Coq code to send to coqtop
 
     Example::
 
-       .. coqtop:: in reset
+       .. rocqtop:: in reset
 
           Print nat.
           Definition a := 1.
@@ -715,8 +715,12 @@ class CoqtopDirective(Directive):
       - ``warn``: Don't die if a command emits a warning
       - ``restart``: Send a ``Restart`` command before running this block (only works in proof mode)
       - ``abort``: Send an ``Abort All`` command after running this block (leaves all pending proofs if any)
+      - ``extra-foo``: if environment variable 'COQRST_EXTRA' is set to `all`
+        or to a `,`-separated list containing `foo` this is ignored, otherwise behaves as ``fail``
+        This is typically used to showcase examples of things outside coq-core or rocq-core.
+        `foo` should be the name of the external requirement, e.g. `stdlib` or `mathcomp`.
 
-    ``coqtop``\ 's state is preserved across consecutive ``.. coqtop::`` blocks
+    ``coqtop``\ 's state is preserved across consecutive ``.. rocqtop::`` blocks
     of the same document (``coqrst`` creates a single ``coqtop`` process per
     reST source file).  Use the ``reset`` option to reset Coq's state.
     """
@@ -725,7 +729,7 @@ class CoqtopDirective(Directive):
     optional_arguments = 0
     final_argument_whitespace = True
     option_spec = { 'name': directives.unchanged }
-    directive_name = "coqtop"
+    directive_name = "rocqtop"
 
     def run(self):
         # Uses a ‘container’ instead of a ‘literal_block’ to disable
@@ -742,13 +746,13 @@ class CoqdocDirective(Directive):
 
     Usage::
 
-       .. coqdoc::
+       .. rocqdoc::
 
           Coq code to highlight
 
     Example::
 
-       .. coqdoc::
+       .. rocqdoc::
 
           Definition test := 1.
     """
@@ -758,7 +762,7 @@ class CoqdocDirective(Directive):
     optional_arguments = 0
     final_argument_whitespace = True
     option_spec = { 'name': directives.unchanged }
-    directive_name = "coqdoc"
+    directive_name = "rocqdoc"
 
     def run(self):
         # Uses a ‘container’ instead of a ‘literal_block’ to disable
@@ -785,7 +789,7 @@ class ExampleDirective(BaseAdmonition):
 
           The following adds ``plus_comm`` to the ``plu`` database:
 
-          .. coqdoc::
+          .. rocqdoc::
 
              Hint Resolve plus_comm : plu.
     """
@@ -954,6 +958,10 @@ class CoqtopBlocksTransform(Transform):
         return isinstance(node, nodes.Element) and 'coqtop_options' in node
 
     @staticmethod
+    def is_coqtop_args_field(node):
+        return isinstance(node, nodes.field) and node.children[0].rawsource == 'COQTOP_ARGS'
+
+    @staticmethod
     def split_lines(source):
         r"""Split Coq input into chunks, which may include single- or
         multi-line comments.  Nested comments are not supported.
@@ -1001,22 +1009,28 @@ class CoqtopBlocksTransform(Transform):
         opt_warn = 'warn' in options
         opt_restart = 'restart' in options
         opt_abort = 'abort' in options
+        opt_extra = set([opt for opt in options if opt.startswith('extra-')])
         options = options - {'reset', 'fail', 'warn', 'restart', 'abort'}
+        options = set([opt for opt in options if not (opt.startswith('extra-'))])
 
         unexpected_options = list(options - {'all', 'none', 'in', 'out'})
         if unexpected_options:
             loc = os.path.basename(get_node_location(node))
-            raise ExtensionError("{}: Unexpected options for .. coqtop:: {}".format(loc,unexpected_options))
+            raise ExtensionError("{}: Unexpected options for .. rocqtop:: {}".format(loc,unexpected_options))
 
         # Display options
         if len(options) != 1:
             loc = os.path.basename(get_node_location(node))
-            raise ExtensionError("{}: Exactly one display option must be passed to .. coqtop::".format(loc))
+            raise ExtensionError("{}: Exactly one display option must be passed to .. rocqtop::".format(loc))
 
         opt_all = 'all' in options
         opt_input = 'in' in options
         opt_output = 'out' in options
 
+        # if 'extra' is given and not a subset of env variable 'COQRST_EXTRA',
+        # allow errors
+        env_extra = os.environ.get('COQRST_EXTRA', '')
+        opt_fail = opt_fail or (env_extra != 'all' and len(opt_extra - set(env_extra.split(','))) != 0)
         return {
             'reset': opt_reset,
             'fail': opt_fail,
@@ -1094,7 +1108,9 @@ class CoqtopBlocksTransform(Transform):
         """Add coqtop's responses to a Sphinx AST
 
         Finds nodes to process using is_coqtop_block."""
-        with CoqTop(color=True) as repl:
+        arg_fields = self.document.traverse(CoqtopBlocksTransform.is_coqtop_args_field)
+        additional_args = [arg for field in arg_fields for arg in shlex.split(field.children[1].rawsource)]
+        with CoqTop(color=True, args=additional_args) as repl:
             repl.send_initial_options()
             for node in self.document.traverse(CoqtopBlocksTransform.is_coqtop_block):
                 try:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 ##########################################################################
-##         #   The Coq Proof Assistant / The Coq Development Team       ##
+##         #      The Rocq Prover / The Rocq Development Team           ##
 ##  v      #         Copyright INRIA, CNRS and contributors             ##
 ## <O___,, # (see version control and CREDITS file for authors & dates) ##
 ##   \VV/  ###############################################################
@@ -9,7 +9,7 @@
 ##         #     (see LICENSE file for the text of the license)         ##
 ##########################################################################
 #
-# Coq documentation build configuration file, created by
+# Rocq documentation build configuration file, created by
 # sphinx-quickstart on Wed May 11 11:23:13 2016.
 #
 # This file is execfile()d with the current directory set to its
@@ -50,7 +50,7 @@ with open("refman-preamble.rst") as s:
 # -- General configuration ------------------------------------------------
 
 # If your documentation needs a minimal Sphinx version, state it here.
-needs_sphinx = '3.0.2'
+needs_sphinx = '4.5.0'
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
@@ -111,9 +111,9 @@ def setup(app):
 master_doc = "index"
 
 # General information about the project.
-project = 'Coq'
-copyright = '1999-2021, Inria, CNRS and contributors'
-author = 'The Coq Development Team'
+project = 'The Rocq Prover'
+copyright = '1999-2024, Inria, CNRS and contributors'
+author = 'The Rocq Development Team'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -199,7 +199,7 @@ html_theme = 'sphinx_rtd_theme'
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
-PDF_URL = "https://github.com/coq/coq/releases/download/V{version}/coq-{version}-reference-manual.pdf"
+PDF_URL = "https://github.com/coq/coq/releases/download/V{version}/rocq-{version}-reference-manual.pdf"
 html_theme_options = {
     'collapse_navigation': False
 }
@@ -211,26 +211,30 @@ html_context = {
     'conf_py_path': '/doc/sphinx/',
     # Versions and downloads listed in the versions menu (see _templates/versions.html)
     'versions': [
-        ("dev", "https://coq.github.io/doc/master/refman/"),
-        ("stable", "https://coq.inria.fr/distrib/current/refman/"),
-        ("8.17", "https://coq.github.io/doc/v8.17/refman/"),
-        ("8.16", "https://coq.inria.fr/distrib/V8.16.1/refman/"),
-        ("8.15", "https://coq.inria.fr/distrib/V8.15.2/refman/"),
-        ("8.14", "https://coq.inria.fr/distrib/V8.14.1/refman/"),
-        ("8.13", "https://coq.inria.fr/distrib/V8.13.2/refman/"),
-        ("8.12", "https://coq.inria.fr/distrib/V8.12.2/refman/"),
-        ("8.11", "https://coq.inria.fr/distrib/V8.11.2/refman/"),
-        ("8.10", "https://coq.inria.fr/distrib/V8.10.2/refman/"),
-        ("8.9", "https://coq.inria.fr/distrib/V8.9.1/refman/"),
-        ("8.8", "https://coq.inria.fr/distrib/V8.8.2/refman/"),
-        ("8.7", "https://coq.inria.fr/distrib/V8.7.2/refman/"),
-        ("8.6", "https://coq.inria.fr/distrib/V8.6.1/refman/"),
-        ("8.5", "https://coq.inria.fr/distrib/V8.5pl3/refman/"),
-        ("8.4", "https://coq.inria.fr/distrib/V8.4pl6/refman/"),
-        ("8.3", "https://coq.inria.fr/distrib/V8.3pl5/refman/"),
-        ("8.2", "https://coq.inria.fr/distrib/V8.2pl3/refman/"),
-        ("8.1", "https://coq.inria.fr/distrib/V8.1pl6/refman/"),
-        ("8.0", "https://coq.inria.fr/distrib/V8.0/doc/")
+        ("dev", "https://rocq-prover.org/doc/master/refman/"),
+        ("stable", "https://rocq-prover.org/refman/"),
+        ("9.0", "https://rocq-prover.org/doc/v9.0/refman/"),
+        ("8.20", "https://rocq-prover.org/doc/V8.20.1/refman/"),
+        ("8.19", "https://rocq-prover.org/doc/V8.19.2/refman/"),
+        ("8.18", "https://rocq-prover.org/doc/V8.18.0/refman/"),
+        ("8.17", "https://rocq-prover.org/doc/V8.17.1/refman/"),
+        ("8.16", "https://rocq-prover.org/doc/V8.16.1/refman/"),
+        ("8.15", "https://rocq-prover.org/doc/V8.15.2/refman/"),
+        ("8.14", "https://rocq-prover.org/doc/V8.14.1/refman/"),
+        ("8.13", "https://rocq-prover.org/doc/V8.13.2/refman/"),
+        ("8.12", "https://rocq-prover.org/doc/V8.12.2/refman/"),
+        ("8.11", "https://rocq-prover.org/doc/V8.11.2/refman/"),
+        ("8.10", "https://rocq-prover.org/doc/V8.10.2/refman/"),
+        ("8.9", "https://rocq-prover.org/doc/V8.9.1/refman/"),
+        ("8.8", "https://rocq-prover.org/doc/V8.8.2/refman/"),
+        ("8.7", "https://rocq-prover.org/doc/V8.7.2/refman/"),
+        ("8.6", "https://rocq-prover.org/doc/V8.6.1/refman/"),
+        ("8.5", "https://rocq-prover.org/doc/V8.5pl3/refman/"),
+        ("8.4", "https://rocq-prover.org/doc/V8.4pl6/refman/"),
+        ("8.3", "https://rocq-prover.org/doc/V8.3pl5/refman/"),
+        ("8.2", "https://rocq-prover.org/doc/V8.2pl3/refman/"),
+        ("8.1", "https://rocq-prover.org/doc/V8.1pl6/refman/"),
+        ("8.0", "https://rocq-prover.org/doc/V8.0/doc/")
     ],
     'downloads': ([("PDF", PDF_URL.format(version=version))]
                   if coq_config.is_a_released_version else [])
@@ -371,11 +375,11 @@ latex_additional_files = [
     "_static/coqnotations.sty"
 ]
 
-latex_documents = [('index', 'CoqRefMan.tex', 'The Coq Reference Manual', author, 'manual')]
+latex_documents = [('index', f'rocq-{version}-reference-manual.tex', 'The Rocq Prover Reference Manual', author, 'manual')]
 
 # The name of an image file (relative to this directory) to place at the top of
 # the title page.
-# latex_logo = "../../ide/coq.png"
+latex_logo = "../../ide/rocqide/coq.png"
 
 # If true, show page references after internal links.
 #latex_show_pagerefs = False

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -35,7 +35,7 @@ let cl_typ_ord t1 t2 = match t1, t2 with
   | CL_CONST c1, CL_CONST c2 -> Constant.CanOrd.compare c1 c2
   | CL_PROJ c1, CL_PROJ c2 -> Projection.Repr.CanOrd.compare c1 c2
   | CL_IND i1, CL_IND i2 -> Ind.CanOrd.compare i1 i2
-  | _ -> pervasives_compare t1 t2 (** OK *)
+  | _ -> Stdlib.compare t1 t2 (** OK *)
 
 let cl_typ_eq t1 t2 = Int.equal (cl_typ_ord t1 t2) 0
 
@@ -64,7 +64,6 @@ module CoeTypMap = GlobRef.Map_env
 
 type coe_info_typ = {
   coe_value : GlobRef.t;
-  coe_typ : Constr.t;
   coe_local : bool;
   coe_reversible : bool;
   coe_is_identity : bool;
@@ -152,6 +151,9 @@ let class_exists cl = ClTypMap.mem cl !class_tab
 
 let coercion_info coe = CoeTypMap.find coe !coercion_tab
 
+let coercion_type env sigma (coe,u) =
+  Retyping.get_type_of env sigma (EConstr.mkRef (coe.coe_value,u))
+
 let coercion_exists coe = CoeTypMap.mem coe !coercion_tab
 
 (* find_class_type : evar_map -> constr -> cl_typ * universe_list * constr list *)
@@ -162,13 +164,13 @@ let find_class_type env sigma t =
   match EConstr.kind sigma t' with
     | Var id -> CL_SECVAR id, EInstance.empty, args
     | Const (sp,u) -> CL_CONST sp, u, args
-    | Proj (p, c) when not (Projection.unfolded p) ->
+    | Proj (p, _, c) when not (Projection.unfolded p) ->
       let revparams =
         let open Inductiveops in
         let t = Retyping.get_type_of env sigma c in
         let IndType (fam,_) = find_rectype env sigma t in
         let _, params = dest_ind_family fam in
-        List.rev_map EConstr.of_constr params
+        List.rev params
       in
       CL_PROJ (Projection.repr p), EInstance.empty, (List.rev_append revparams (c :: args))
     | Ind (ind_sp,u) -> CL_IND ind_sp, u, args
@@ -176,6 +178,17 @@ let find_class_type env sigma t =
     | Sort _ -> CL_SORT, EInstance.empty, []
     |  _ -> raise Not_found
 
+let class_of_global_reference = function
+  | GlobRef.VarRef id -> CL_SECVAR id
+  | GlobRef.ConstRef kn -> CL_CONST kn
+  | GlobRef.IndRef ind -> CL_IND ind
+  | GlobRef.ConstructRef _ -> raise Not_found
+
+let find_class_glob_type c = match DAst.get c with
+  | Glob_term.GRef (ref,_) -> class_of_global_reference ref
+  | Glob_term.GProd _ -> CL_FUN
+  | Glob_term.GSort _ -> CL_SORT
+  |  _ -> raise Not_found
 
 let subst_cl_typ env subst ct = match ct with
     CL_SORT
@@ -189,7 +202,7 @@ let subst_cl_typ env subst ct = match ct with
       if c' == c then ct else (match t with
           | None -> CL_CONST c'
           | Some t ->
-            pi1 (find_class_type env Evd.empty (EConstr.of_constr t.Univ.univ_abstracted_value)))
+            pi1 (find_class_type env Evd.empty (EConstr.of_constr t.UVars.univ_abstracted_value)))
   | CL_IND i ->
       let i' = subst_ind subst i in
         if i' == i then ct else CL_IND i'
@@ -303,8 +316,10 @@ let install_path_comparator f = path_comparator := f
 
 let compare_path env sigma cl p q = !path_comparator env sigma cl p q
 
+let warning_ambiguous_path = "ambiguous-paths"
+
 let warn_ambiguous_path =
-  CWarnings.create ~name:"ambiguous-paths" ~category:CWarnings.CoreCategories.coercions
+  CWarnings.create ~name:warning_ambiguous_path ~category:CWarnings.CoreCategories.coercions
     (fun l -> prlist_with_sep fnl (fun (c,p,q) ->
          str"New coercion path " ++ print_path (c,p) ++
          if List.is_empty q then
@@ -332,7 +347,16 @@ let add_coercion_in_graph env sigma ?(update=false) ic =
   let ambig_paths :
     ((cl_typ * cl_typ) * inheritance_path * inheritance_path) list ref =
     ref [] in
+  let warn = match CWarnings.get_warning warning_ambiguous_path with
+  | There w ->
+    begin match CWarnings.warning_status w with
+    | Disabled -> false
+    | Enabled | AsError -> true
+    end
+  | NotThere | OtherType -> assert false
+  in
   let check_coherence (i, j as ij) p q =
+    if warn then
     let i_info = class_info i in
     let j_info = class_info j in
     let between_ij = ClTypSet.inter i_info.cl_reachable_from j_info.cl_reachable_to in
@@ -350,7 +374,7 @@ let add_coercion_in_graph env sigma ?(update=false) ic =
       ambig_paths := (ij, p, q) :: !ambig_paths
   in
   let try_add_new_path (i,j as ij) p =
-    if cl_typ_eq i j then check_coherence ij p [];
+    let () = if cl_typ_eq i j then check_coherence ij p [] in
     if not (cl_typ_eq i j) || different_class_params env i then
       if update then let () = add_path ij p in true else
         match lookup_path_between_class ij with
@@ -404,14 +428,13 @@ let add_coercion_in_graph env sigma ?(update=false) ic =
 let subst_coercion subst c =
   let env = Global.env () in
   let coe = subst_coe_typ subst c.coe_value in
-  let typ = subst_mps subst c.coe_typ in
   let cls = subst_cl_typ env subst c.coe_source in
   let clt = subst_cl_typ env subst c.coe_target in
   let clp = Option.Smart.map (subst_proj_repr subst) c.coe_is_projection in
   if c.coe_value == coe && c.coe_source == cls && c.coe_target == clt &&
      c.coe_is_projection == clp
   then c
-  else { c with coe_value = coe; coe_typ = typ; coe_source = cls; coe_target = clt;
+  else { c with coe_value = coe; coe_source = cls; coe_target = clt;
                 coe_is_projection = clp; }
 
 (* Computation of the class arity *)
@@ -469,6 +492,20 @@ module CoercionPrinting =
     module Set = GlobRef.Set
     let encode _env = coercion_of_reference
     let subst = subst_coe_typ
+
+    let check_local local = let open GlobRef in function
+      | ConstRef _ | ConstructRef _ | IndRef _ -> ()
+      | VarRef x -> match local with
+        | Libobject.Local -> ()
+        | Export | SuperGlobal ->
+          let local = if local = Export then "export" else "global" in
+          CErrors.user_err
+            Pp.(Id.print x ++ str " cannot be added with locality " ++ str local ++ str ".")
+
+    let discharge = let open GlobRef in function
+      | ConstRef _ | ConstructRef _ | IndRef _ as x -> x
+      | VarRef _ as x -> assert (not (Lib.is_in_section x)); x
+
     let printer x = Nametab.pr_global_env Id.Set.empty x
     let key = ["Printing";"Coercion"]
     let title = "Explicitly printed coercions: "

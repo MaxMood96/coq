@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -82,6 +82,8 @@ val import_modules : export:Lib.export_flag -> (Libobject.open_filter * ModPath.
 
 val register_library : library_name -> library_objects -> unit
 
+val close_section : unit -> unit
+
 end
 
 module Interp : sig
@@ -130,7 +132,7 @@ val end_modtype : unit -> ModPath.t
 val register_library :
   library_name ->
   Safe_typing.compiled_library -> library_objects -> Safe_typing.vodigest ->
-  Univ.ContextSet.t ->
+  Vmlibrary.on_disk ->
   unit
 
 (** [import_module export mp] imports the module [mp].
@@ -149,13 +151,15 @@ val import_modules : export:Lib.export_flag -> (Libobject.open_filter * ModPath.
 
 val declare_include : module_expr list -> unit
 
+val close_section : unit -> unit
+
 end
 
 val start_library : library_name -> unit
 
 val end_library :
   output_native_objects:bool -> library_name ->
-  Safe_typing.compiled_library * library_objects * library_objects * Nativelib.native_library
+  Safe_typing.compiled_library * library_objects * library_objects * Vmlibrary.compiled_library * Nativelib.native_library * Library_info.t
 
 (** append a function to be executed at end_library *)
 val append_end_library_hook : (unit -> unit) -> unit
@@ -179,7 +183,7 @@ val debug_print_modtab : unit -> Pp.t
     bound module hasn't an atomic type. *)
 
 val process_module_binding :
-  MBId.t -> (Constr.t * Univ.AbstractContext.t option) Declarations.module_alg_expr -> unit
+  MBId.t -> (Constr.t * UVars.AbstractContext.t option) Declarations.module_alg_expr -> unit
 
 (** Compatibility layer *)
 

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,7 +8,7 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-open Pcoq
+open Procq
 
 (* Main entry for extensions *)
 let simple_tactic = Entry.make "simple_tactic"
@@ -21,15 +21,13 @@ let constr_with_bindings =
 let bindings =
   Entry.make "bindings"
 let hypident = Entry.make "hypident"
-let constr_may_eval = Entry.make "constr_may_eval"
 let constr_eval = Entry.make "constr_eval"
 let uconstr =
   Entry.make "uconstr"
 let quantified_hypothesis =
   Entry.make "quantified_hypothesis"
 let destruction_arg = Entry.make "destruction_arg"
-let int_or_var = Entry.make "int_or_var"
-let nat_or_var = Entry.make "nat_or_var"
+let nat_or_var = G_redexpr.nat_or_var
 let simple_intropattern =
   Entry.make "simple_intropattern"
 let in_clause = Entry.make "in_clause"
@@ -40,7 +38,6 @@ let clause_dft_concl =
 (* Main entries for ltac *)
 let tactic_value = Entry.make "tactic_value"
 let ltac_expr = Entry.make "ltac_expr"
-let binder_tactic = Entry.make "binder_tactic"
 
 let tactic = Entry.make "tactic"
 
@@ -50,6 +47,7 @@ let tactic_eoi = eoi_entry tactic
 let () =
   let open Stdarg in
   let open Tacarg in
+  let open G_redexpr in
   register_grammar wit_int_or_var (int_or_var);
   register_grammar wit_nat_or_var (nat_or_var);
   register_grammar wit_intro_pattern (simple_intropattern); (* To remove at end of deprecation phase *)

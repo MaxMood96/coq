@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -36,20 +36,6 @@ let equal_file f1 f2 =
   String.equal
     (absolute_file_name ~filename_concat (Filename.basename f1) (Some (Filename.dirname f1)))
     (absolute_file_name ~filename_concat (Filename.basename f2) (Some (Filename.dirname f2)))
-
-(** Files found in the loadpaths.
-    For the ML files, the string is the basename without extension.
-*)
-
-let same_path_opt s s' =
-  let nf s = (* ./foo/a.ml and foo/a.ml are the same file *)
-    if Filename.is_implicit s
-    then System.("." // s)
-    else s
-  in
-  let s = match s with None -> "." | Some s -> nf s in
-  let s' = match s' with None -> "." | Some s' -> nf s' in
-  s = s'
 
 (** [find_dir_logpath dir] Return the logical path of directory [dir]
     if it has been given one. Raise [Not_found] otherwise. In
@@ -95,9 +81,6 @@ let register_dir_logpath, find_dir_logpath =
     (see discussion at PR #14718)
 *)
 
-let warning_cannot_open_dir dir =
-  Warning.give "cannot open %s" dir
-
 let add_directory recur add_file phys_dir log_dir =
   let root = (phys_dir, log_dir) in
   let stack = ref [] in
@@ -123,7 +106,7 @@ let add_directory recur add_file phys_dir log_dir =
         System.process_directory f phys_dir
       end
     else
-      warning_cannot_open_dir phys_dir
+      System.warn_cannot_open_dir phys_dir
   in
   aux phys_dir log_dir;
   List.iter (fun (phys_dir, log_dir, f) -> add_file root phys_dir log_dir f) !subdirfiles;
@@ -157,12 +140,6 @@ let rec cuts recur = function
     ([],if recur then suffixes true l else [true,l]) ::
     List.map (fun (fromtail,suffixes) -> (dir::fromtail,suffixes)) (cuts true tail)
 
-let warning_ml_clash x s suff s' suff' =
-  if suff = suff' && not (same_path_opt s s') then
-    Warning.give "%s%s already found in %s (discarding %s%s)\n" x suff
-    (match s with None -> "." | Some d -> d)
-    System.((match s' with None -> "." | Some d -> d) // x) suff
-
 type result =
   | ExactMatches of filename list
   | PartialMatchesInSameRoot of root * filename list
@@ -170,38 +147,30 @@ type result =
 module State = struct
 
   type t =
-    { mllib : (string, dir * string) Hashtbl.t
-    ; mlpack : (string, dir * string) Hashtbl.t
-    ; vfiles : (dirpath * dirpath, result) Hashtbl.t
+    { vfiles : (dirpath * dirpath, result) Hashtbl.t
     ; coqlib : (dirpath * dirpath, result) Hashtbl.t
     ; other : (dirpath * dirpath, result) Hashtbl.t
     ; boot : bool
+    ; mutable worker : string option
     }
 
-  let make ~boot =
-    { mllib = Hashtbl.create 19
-    ; mlpack = Hashtbl.create 19
-    ; vfiles = Hashtbl.create 19
+  let make ~worker ~boot =
+    { vfiles = Hashtbl.create 4101
     ; coqlib = Hashtbl.create 19
-    ; other = Hashtbl.create 19
+    ; other = Hashtbl.create 17317
     ; boot
+    ; worker
     }
-
-  let gen_add h x s suff =
-    try
-      let s',suff' = Hashtbl.find h x in warning_ml_clash x s' suff' s suff
-    with Not_found -> Hashtbl.add h x (s,suff)
-
-  let gen_search h x =
-    try Some (fst (Hashtbl.find h x))
-    with Not_found -> None
 
 end
 
-let add_mllib_known { State.mllib ; _ } = State.gen_add mllib
-let search_mllib_known { State.mllib ; _ } = State.gen_search mllib
-let add_mlpack_known { State.mlpack ; _ } = State.gen_add mlpack
-let search_mlpack_known { State.mlpack ; _ } = State.gen_search mlpack
+let get_worker_path st =
+  match st.State.worker with
+  | Some w -> w
+  | None ->
+    let w = Fl.Internal.get_worker_path () in
+    st.worker <- Some w;
+    w
 
 let add_set f l = f :: CList.remove equal_file f l
 
@@ -236,16 +205,10 @@ let search_other_known st ?from s =
   with Not_found -> None
 
 let is_in_coqlib st ?from s =
-  try let _ = search_table st.State.coqlib ?from s in true with Not_found -> false
-
-let add_caml_known st _ phys_dir _ f =
-  let basename, suff = get_extension f [".mllib"; ".mlpack"; ".cmxs"] in
-  match suff with
-    | ".mllib" -> add_mllib_known st basename (Some phys_dir) suff
-    | ".mlpack" -> add_mlpack_known st basename (Some phys_dir) suff
-    (* Installed gloally *)
-    | ".cmxs" -> add_mlpack_known st basename (Some phys_dir) suff
-    | _ -> ()
+  try let _ = search_table st.State.coqlib ?from s in true
+  with Not_found -> match from with Some _ -> false | None ->
+  try let _ = search_table st.State.coqlib ~from:["Stdlib"] s in true
+  with Not_found -> false
 
 let add_paths recur root table phys_dir log_dir basename =
   let name = log_dir@[basename] in
@@ -256,16 +219,16 @@ let add_paths recur root table phys_dir log_dir basename =
 
 let add_coqlib_known st recur root phys_dir log_dir f =
   let root = (phys_dir, log_dir) in
-  match get_extension f [".vo"; ".vio"; ".vos"] with
-    | (basename, (".vo" | ".vio" | ".vos")) ->
+  match get_extension f [".vo"; ".vos"] with
+    | (basename, (".vo" | ".vos")) ->
         add_paths recur root st.State.coqlib phys_dir log_dir basename
     | _ -> ()
 
 let add_known st recur root phys_dir log_dir f =
-  match get_extension f [".v"; ".vo"; ".vio"; ".vos"] with
+  match get_extension f [".v"; ".vo"; ".vos"] with
     | (basename,".v") ->
         add_paths recur root st.State.vfiles phys_dir log_dir basename
-    | (basename, (".vo" | ".vio" | ".vos")) when not st.State.boot ->
+    | (basename, (".vo" | ".vos")) when not st.State.boot ->
         add_paths recur root st.State.vfiles phys_dir log_dir basename
     | (f,_) ->
         add_paths recur root st.State.other phys_dir log_dir f
@@ -282,10 +245,6 @@ let add_rec_dir_no_import add_file phys_dir log_dir =
 (** -R semantic: go in subdirs and suffixes of logical paths are known. *)
 let add_rec_dir_import add_file phys_dir log_dir =
   add_directory true (add_file true) phys_dir log_dir
-
-(** -I semantic: do not go in subdirs. *)
-let add_caml_dir st phys_dir =
-  add_directory false (add_caml_known st) phys_dir []
 
 let split_period = Str.split (Str.regexp (Str.quote "."))
 

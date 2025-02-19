@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -54,10 +54,10 @@ Inductive sigT2 (A:Type) (P Q:A -> Type) : Type :=
 
 (* Notations *)
 
-Arguments sig (A P)%type.
-Arguments sig2 (A P Q)%type.
-Arguments sigT (A P)%type.
-Arguments sigT2 (A P Q)%type.
+Arguments sig (A P)%_type.
+Arguments sig2 (A P Q)%_type.
+Arguments sigT (A P)%_type.
+Arguments sigT2 (A P Q)%_type.
 
 Notation "{ x | P }" := (sig (fun x => P)) : type_scope.
 Notation "{ x | P & Q }" := (sig2 (fun x => P) (fun x => Q)) : type_scope.

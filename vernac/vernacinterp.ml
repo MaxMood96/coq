@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -13,114 +13,49 @@ open Synterp
 
 let vernac_pperr_endline = CDebug.create ~name:"vernacinterp" ()
 
-let interp_typed_vernac (Vernacextend.TypedVernac { inprog; outprog; inproof; outproof; run })
-    ~pm ~stack =
-  let open Vernacextend in
-  let module LStack = Vernacstate.LemmaStack in
-  let proof = Option.map LStack.get_top stack in
-  let pm', proof' = run
-      ~pm:(InProg.cast (NeList.head pm) inprog)
-      ~proof:(InProof.cast proof inproof)
-  in
-  let pm = OutProg.cast pm' outprog pm in
-  let stack = let open OutProof in
-    match stack, outproof with
-    | stack, No -> stack
-    | None, Close -> assert false
-    | Some stack, Close -> snd (LStack.pop stack)
-    | None, Update -> assert false
-    | Some stack, Update -> Some (LStack.map_top ~f:(fun _ -> proof') stack)
-    | stack, New -> Some (LStack.push stack proof')
-  in
-  stack, pm
-
-(* Timeout *)
-let vernac_timeout ~timeout (f : 'a -> 'b) (x : 'a) : 'b =
-  match Control.timeout timeout f x with
-  | None -> Exninfo.iraise (Exninfo.capture CErrors.Timeout)
-  | Some x -> x
-
-(* Fail *)
-
-(* Restoring the state is the caller's responsibility *)
-let with_fail f : (Loc.t option * Pp.t, unit) result =
-  try
-    let _ = f () in
-    Error ()
-  with
-  (* Fail Timeout is a common pattern so we need to support it. *)
-  | e ->
-    (* The error has to be printed in the failing state *)
-    let _, info as exn = Exninfo.capture e in
-    if CErrors.is_anomaly e && e != CErrors.Timeout then Exninfo.iraise exn;
-    Ok (Loc.get_loc info, CErrors.iprint exn)
-
 let real_error_loc ~cmdloc ~eloc =
   if Loc.finer eloc cmdloc then eloc
   else cmdloc
 
-(* We restore the state always *)
-let with_fail ~loc ~st f =
-  let res = with_fail f in
-  Vernacstate.Interp.invalidate_cache ();
-  Vernacstate.unfreeze_full_state st;
-  match res with
-  | Error () ->
-    CErrors.user_err (Pp.str "The command has not failed!")
-  | Ok (eloc, msg) ->
-    let loc = if !Synterp.test_mode then real_error_loc ~cmdloc:loc ~eloc else None in
-    if not !Flags.quiet || !Synterp.test_mode
-    then Feedback.msg_notice ?loc Pp.(str "The command has indeed failed with message:" ++ fnl () ++ msg)
-
-let with_succeed ~st f =
-  let () = ignore (f ()) in
-  Vernacstate.Interp.invalidate_cache ();
-  Vernacstate.unfreeze_full_state st;
-  if not !Flags.quiet
-  then Feedback.msg_notice Pp.(str "The command has succeeded and its effects have been reverted.")
-
 let locate_if_not_already ?loc (e, info) =
   (e, Option.cata (Loc.add_loc info) info (real_error_loc ~cmdloc:loc ~eloc:(Loc.get_loc info)))
 
-let interp_control_entry ~loc (f : control_entry) ~st
-    (fn : st:Vernacstate.t -> Vernacstate.LemmaStack.t option * Declare.OblState.t NeList.t) =
-  match f with
-  | ControlFail { st = synterp_st } ->
-    with_fail ~loc ~st (fun () -> Vernacstate.Synterp.unfreeze synterp_st; fn ~st);
-    st.Vernacstate.interp.lemmas, st.Vernacstate.interp.program
-  | ControlSucceed { st = synterp_st } ->
-    with_succeed ~st (fun () -> Vernacstate.Synterp.unfreeze synterp_st; fn ~st);
-    st.Vernacstate.interp.lemmas, st.Vernacstate.interp.program
-  | ControlTimeout { remaining } ->
-    vernac_timeout ~timeout:remaining (fun () -> fn ~st) ()
-  | ControlTime { synterp_duration } ->
-    let result = System.measure_duration (fun () -> fn ~st) () in
-    let result = Result.map (fun (v,d) -> v, System.duration_add d synterp_duration) result in
-    Feedback.msg_notice @@ System.fmt_transaction_result result;
-    begin match result with
-    | Ok (v,_) -> v
-    | Error (exn, _) -> Exninfo.iraise exn
-    end
-  | ControlRedirect s ->
-    Topfmt.with_output_to_file s (fun () -> fn ~st) ()
+let with_interp_state ~unfreeze_transient st =
+  let with_local_state synterp_st f =
+    unfreeze_transient synterp_st;
+    let v = f () in
+    Vernacstate.Interp.invalidate_cache ();
+    Vernacstate.unfreeze_full_state st;
+    (), v
+  in
+  { VernacControl.with_local_state }
 
-let warnings_att =
-  Attributes.attribute_of_list [
-    "warnings", Attributes.payload_parser ~cat:(^) ~name:"warnings";
-    "warning", Attributes.payload_parser ~cat:(^) ~name:"warning";
-  ]
+let interp_control_gen ~loc ~st ~unfreeze_transient control f =
+  let noop = st.Vernacstate.interp.lemmas, st.Vernacstate.interp.program in
+  let control, res =
+    VernacControl.under_control ~loc
+      ~with_local_state:(with_interp_state ~unfreeze_transient st)
+      control
+      ~noop
+      f
+  in
+  if VernacControl.after_last_phase ~loc control
+  then noop
+  else res
 
-let with_generic_atts atts f =
-  let atts, warnings = Attributes.parse_with_extra warnings_att atts in
-  match warnings with
-  | None -> f ~atts
-  | Some warnings -> CWarnings.with_warn warnings (fun () -> f ~atts) ()
+(* [loc] is the [Loc.t] of the vernacular command being interpreted. *)
+let rec interp_expr ?loc ~st cmd =
+  let before_univs = Global.universes () in
+  let pstack, pm = with_generic_atts ~check:false cmd.attrs (fun ~atts ->
+      interp_expr_core ?loc ~atts ~st cmd.expr)
+  in
+  let after_univs = Global.universes () in
+  if before_univs == after_univs then pstack, pm
+  else
+    let f = Declare.Proof.update_sigma_univs after_univs in
+    Option.map (Vernacstate.LemmaStack.map ~f) pstack, pm
 
-(* "locality" is the prefix "Local" attribute, while the "local" component
- * is the outdated/deprecated "Local" attribute of some vernacular commands
- * still parsed as the obsolete_locality grammar entry for retrocompatibility.
- * loc is the Loc.t of the vernacular command being interpreted. *)
-let rec interp_expr ?loc ~atts ~st c =
+and interp_expr_core ?loc ~atts ~st c =
   match c with
 
   (* The STM should handle that, but LOAD bypasses the STM... *)
@@ -142,11 +77,17 @@ let rec interp_expr ?loc ~atts ~st c =
     let fv = Vernacentries.translate_vernac ?loc ~atts v in
     let stack = st.Vernacstate.interp.lemmas in
     let program = st.Vernacstate.interp.program in
-    interp_typed_vernac ~pm:program ~stack fv
+    let {Vernactypes.prog; proof; opaque_access=(); }, () = Vernactypes.run fv {
+        prog=program;
+        proof=stack;
+        opaque_access=();
+      }
+    in
+    proof, prog
 
 and vernac_load ~verbosely entries =
   (* Note that no proof should be open here, so the state here is just token for now *)
-  let st = Vernacstate.freeze_full_state ~marshallable:false in
+  let st = Vernacstate.freeze_full_state () in
   let v_mod = if verbosely then Flags.verbosely else Flags.silently in
   let interp_entry (stack, pm) (CAst.{ loc; v = cmd }, synterp_st) =
     Vernacstate.Synterp.unfreeze synterp_st;
@@ -165,19 +106,14 @@ and vernac_load ~verbosely entries =
   stack, pm
 
 and interp_control ~st ({ CAst.v = cmd; loc }) =
-  List.fold_right (fun flag fn -> interp_control_entry ~loc flag fn)
-    cmd.control
-    (fun ~st ->
-       let before_univs = Global.universes () in
-       let pstack, pm = with_generic_atts cmd.attrs (fun ~atts ->
-           interp_expr ?loc ~atts ~st cmd.expr)
-       in
-       let after_univs = Global.universes () in
-       if before_univs == after_univs then pstack, pm
-       else
-         let f = Declare.Proof.update_sigma_univs after_univs in
-         Option.map (Vernacstate.LemmaStack.map ~f) pstack, pm)
-    ~st
+  Util.try_finally (fun () ->
+      Loc.set_current_command_loc loc;
+      interp_control_gen ~loc ~st cmd.control
+        ~unfreeze_transient:Vernacstate.Synterp.unfreeze
+        (fun () -> interp_expr ?loc ~st cmd))
+    ()
+    (fun () -> Loc.set_current_command_loc None)
+    ()
 
 (* XXX: This won't properly set the proof mode, as of today, it is
    controlled by the STM. Thus, we would need access information from
@@ -195,17 +131,16 @@ let interp_qed_delayed ~proof ~st pe =
       | Admitted ->
         Declare.Proof.save_lemma_admitted_delayed ~pm ~proof
       | Proved (_,idopt) ->
-        let pm, _ = Declare.Proof.save_lemma_proved_delayed ~pm ~proof ~idopt in
+        let pm = Declare.Proof.save_lemma_proved_delayed ~pm ~proof ~idopt in
         pm)
       pm
   in
   stack, pm
 
 let interp_qed_delayed_control ~proof ~st ~control { CAst.loc; v=pe } =
-  List.fold_right (fun flag fn -> interp_control_entry ~loc flag fn)
-    control
-    (fun ~st -> interp_qed_delayed ~proof ~st pe)
-    ~st
+  interp_control_gen ~loc ~st control
+    ~unfreeze_transient:(fun () -> ())
+    (fun () -> interp_qed_delayed ~proof ~st pe)
 
 (* General interp with management of state *)
 
@@ -215,7 +150,7 @@ let interp_gen ~verbosely ~st ~interp_fn cmd =
     let v_mod = if verbosely then Flags.verbosely else Flags.silently in
     let ontop = v_mod (interp_fn ~st) cmd in
     Vernacstate.Declare.set ontop [@ocaml.warning "-3"];
-    Vernacstate.Interp.freeze_interp_state ~marshallable:false
+    Vernacstate.Interp.freeze_interp_state ()
   with exn ->
     let exn = Exninfo.capture exn in
     let exn = locate_if_not_already ?loc:cmd.CAst.loc exn in
@@ -223,20 +158,35 @@ let interp_gen ~verbosely ~st ~interp_fn cmd =
     Exninfo.iraise exn
 
 (* Regular interp *)
-let interp ?(verbosely=true) ~st cmd =
+let interp ~intern ?(verbosely=true) ~st cmd =
   Vernacstate.unfreeze_full_state st;
   vernac_pperr_endline Pp.(fun () -> str "interpreting: " ++ Ppvernac.pr_vernac_expr cmd.CAst.v.expr);
-  let entry = Synterp.synterp_control cmd in
-  let interp = interp_gen ~verbosely ~st ~interp_fn:interp_control entry in
-  Vernacstate.{ synterp = Vernacstate.Synterp.freeze ~marshallable:false; interp }
+  let entry = NewProfile.profile "synterp" (fun () -> Synterp.synterp_control ~intern cmd) () in
+  let interp = NewProfile.profile "interp" (fun () -> interp_gen ~verbosely ~st ~interp_fn:interp_control entry) () in
+  Vernacstate.{ synterp = Vernacstate.Synterp.freeze (); interp }
 
 let interp_entry ?(verbosely=true) ~st entry =
   Vernacstate.unfreeze_full_state st;
   interp_gen ~verbosely ~st ~interp_fn:interp_control entry
 
+module Intern = struct
+
+  let fs_intern dp =
+    match Loadpath.locate_absolute_library dp with
+    | Ok file ->
+      Feedback.feedback @@ Feedback.FileDependency (Some file, Names.DirPath.to_string dp);
+      let res, provenance = Library.intern_from_file file in
+      Result.iter (fun _ ->
+          Feedback.feedback @@ Feedback.FileLoaded (Names.DirPath.to_string dp, file)) res;
+      res, provenance
+    | Error e ->
+      Loadpath.Error.raise dp e
+end
+
+let fs_intern = Intern.fs_intern
+
 let interp_qed_delayed_proof ~proof ~st ~control (CAst.{loc; v = pe } as e) : Vernacstate.Interp.t =
-  let cmd = CAst.make ?loc { control; expr = VernacSynPure (VernacEndProof pe); attrs = [] } in
-  let CAst.{ loc; v = entry } = Synterp.synterp_control cmd in
-  let control = entry.control in
-  interp_gen ~verbosely:false ~st
-    ~interp_fn:(interp_qed_delayed_control ~proof ~control) e
+  NewProfile.profile "interp-delayed-qed" (fun () ->
+      interp_gen ~verbosely:false ~st
+        ~interp_fn:(interp_qed_delayed_control ~proof ~control) e)
+    ()

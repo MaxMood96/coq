@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -37,7 +37,6 @@ type coe_typ = GlobRef.t
 (** This is the type of infos for declared coercions *)
 type coe_info_typ = {
   coe_value : GlobRef.t;
-  coe_typ : Constr.t;
   coe_local : bool;
   coe_reversible : bool;
   coe_is_identity : bool;
@@ -61,6 +60,8 @@ val class_nparams : cl_typ -> int
     its universe instance and its arguments *)
 val find_class_type : env -> evar_map -> types -> cl_typ * EInstance.t * constr list
 
+val find_class_glob_type : 'a Glob_term.glob_constr_g -> cl_typ
+
 (** raises [Not_found] if not convertible to a class *)
 val class_of : env -> evar_map -> types -> types * cl_typ
 
@@ -75,6 +76,8 @@ val declare_coercion : env -> evar_map -> ?update:bool -> coe_info_typ -> unit
 val coercion_exists : coe_typ -> bool
 
 val coercion_info : coe_typ -> coe_info_typ
+
+val coercion_type : Environ.env -> Evd.evar_map -> coe_info_typ EConstr.puniverses -> EConstr.t
 
 (** {6 Lookup functions for coercion paths } *)
 
@@ -112,6 +115,6 @@ val coercions : unit -> coe_info_typ list
    be hidden, [None] otherwise; it raises [Not_found] if not a coercion *)
 val hide_coercion : coe_typ -> int option
 
-module ClTypSet : Set.S with type elt = cl_typ
+module ClTypSet : CSet.ExtS with type elt = cl_typ
 
 val reachable_from : cl_typ -> ClTypSet.t

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -9,7 +9,6 @@
 (************************************************************************)
 
 open Names
-open Mod_subst
 open Genarg
 
 module Store : Store.S
@@ -17,7 +16,7 @@ module Store : Store.S
 type intern_variable_status = {
   intern_ids : Id.Set.t;
   notation_variable_status :
-    (bool ref * Notation_term.subscopes option ref *
+    (bool ref * Notation_term.subscopes option ref * Notation_term.notation_var_binders option ref *
        Notation_term.notation_var_internalization_type)
       Id.Map.t
 }
@@ -47,14 +46,13 @@ val intern : ('raw, 'glb, 'top) genarg_type -> ('raw, 'glb) intern_fun
 
 val generic_intern : (raw_generic_argument, glob_generic_argument) intern_fun
 
-(** {5 Substitution functions} *)
+(** {5 Internalization in tactic patterns} *)
 
-type 'glb subst_fun = substitution -> 'glb -> 'glb
-(** The type of functions used for substituting generic arguments. *)
+type ('raw,'glb) intern_pat_fun = ?loc:Loc.t -> ('raw,'glb) intern_fun
 
-val substitute : ('raw, 'glb, 'top) genarg_type -> 'glb subst_fun
+val intern_pat : ('raw, 'glb, 'top) genarg_type -> ('raw, 'glb) intern_pat_fun
 
-val generic_substitute : glob_generic_argument subst_fun
+val generic_intern_pat : (raw_generic_argument, glob_generic_argument) intern_pat_fun
 
 (** {5 Notation functions} *)
 
@@ -69,8 +67,9 @@ val generic_substitute_notation : glob_generic_argument ntn_subst_fun
 val register_intern0 : ('raw, 'glb, 'top) genarg_type ->
   ('raw, 'glb) intern_fun -> unit
 
-val register_subst0 : ('raw, 'glb, 'top) genarg_type ->
-  'glb subst_fun -> unit
+val register_intern_pat : ('raw, 'glb, 'top) genarg_type ->
+  ('raw, 'glb) intern_pat_fun -> unit
+
 
 val register_ntn_subst0 : ('raw, 'glb, 'top) genarg_type ->
   'glb ntn_subst_fun -> unit

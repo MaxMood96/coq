@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -10,7 +10,7 @@
 
 (**
 Computes the differences between 2 Pp's and adds additional tags to a Pp
-to highlight them.  Strings are split into tokens using the Coq lexer,
+to highlight them.  Strings are split into tokens using the Rocq lexer,
 then the lists of tokens are diffed using the Myers algorithm.  A fixup routine,
 shorten_diff_span, shortens the span of the diff result in some cases.
 

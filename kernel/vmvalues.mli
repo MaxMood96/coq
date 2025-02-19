@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -37,11 +37,13 @@ val cofix_evaluated_tag : tag
 type structured_constant =
   | Const_sort of Sorts.t
   | Const_ind of inductive
+  | Const_evar of Evar.t
   | Const_b0 of tag
-  | Const_univ_level of Univ.Level.t
+  | Const_univ_instance of UVars.Instance.t
   | Const_val of structured_values
   | Const_uint of Uint63.t
   | Const_float of Float64.t
+  | Const_string of Pstring.t
 
 val pp_struct_const : structured_constant -> Pp.t
 
@@ -83,7 +85,7 @@ type vswitch = {
     sw_env : vm_env
   }
 
-external mkAccuCode : int -> tcode = "coq_makeaccu"
+external mkAccuCode : int -> tcode = "rocq_makeaccu"
 
 val fun_code : vfun -> tcode
 val fix_code : vfix -> tcode
@@ -137,13 +139,15 @@ val val_of_atom : atom -> values
 val val_of_int : int -> structured_values
 val val_of_block : tag -> structured_values array -> structured_values
 val val_of_uint : Uint63.t -> structured_values
+val val_of_float : Float64.t -> structured_values
+val val_of_string : Pstring.t -> structured_values
 
 external val_of_annot_switch : annot_switch -> values = "%identity"
 
 (** Destructors *)
 
 val whd_val : values -> kind
-val uni_lvl_val : values -> Univ.Level.t
+val uni_instance : values -> UVars.Instance.t
 
 (** Arguments *)
 
@@ -156,7 +160,7 @@ val dom : vprod -> values
 val codom : vprod -> vfun
 
 (** Fun *)
-external closure_arity : vfun -> int = "coq_closure_arity"
+external closure_arity : vfun -> int = "rocq_closure_arity"
 
 (** Fix *)
 
@@ -192,3 +196,10 @@ val parray_get_default : values
 val parray_set : values
 val parray_copy : values
 val parray_length : values
+
+val pstring_make : values
+val pstring_length : values
+val pstring_get : values
+val pstring_sub : values
+val pstring_cat : values
+val pstring_compare : values

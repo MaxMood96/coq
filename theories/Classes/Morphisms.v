@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -14,10 +14,10 @@
    Institution: LRI, CNRS UMR 8623 - University Paris Sud
 *)
 
-Require Import Coq.Program.Basics.
-Require Import Coq.Program.Tactics.
-Require Import Coq.Relations.Relation_Definitions.
-Require Export Coq.Classes.RelationClasses.
+Require Import Corelib.Program.Basics.
+Require Import Corelib.Program.Tactics.
+Require Import Corelib.Relations.Relation_Definitions.
+Require Export Corelib.Classes.RelationClasses.
 
 Generalizable Variables A eqA B C D R RA RB RC m f x y.
 Local Obligation Tactic := try solve [ simpl_relation ].
@@ -96,7 +96,7 @@ End Proper.
 Definition pointwise_relation A {B} (R : relation B) : relation (A -> B) :=
   fun f g => forall a, R (f a) (g a).
 
-(** We let Coq infer these relations when a default relation should
+(** We let Rocq infer these relations when a default relation should
   be found on the function space. *)
 Lemma rewrite_relation_pointwise {A B R} `{RewriteRelation B R}:
   RewriteRelation (@pointwise_relation A B R).
@@ -182,8 +182,8 @@ Module ProperNotations.
 
 End ProperNotations.
 
-Arguments Proper {A}%type R%signature m.
-Arguments respectful {A B}%type (R R')%signature _ _.
+Arguments Proper {A}%_type R%_signature m.
+Arguments respectful {A B}%_type (R R')%_signature _ _.
 
 Export ProperNotations.
 
@@ -284,8 +284,8 @@ Section Relations.
 End Relations.
 
 Global Typeclasses Opaque respectful pointwise_relation forall_relation.
-Arguments forall_relation {A P}%type sig%signature _ _.
-Arguments pointwise_relation A%type {B}%type R%signature _ _.
+Arguments forall_relation {A P}%_type sig%_signature _ _.
+Arguments pointwise_relation A%_type {B}%_type R%_signature _ _.
   
 #[global]
 Hint Unfold Reflexive : core.
@@ -334,7 +334,7 @@ Section GenericInstances.
   Let U := Type.
   Context {A B C : U}.
 
-  (** We can build a PER on the Coq function space if we have PERs on the domain and
+  (** We can build a PER on the Rocq function space if we have PERs on the domain and
    codomain. *)
   
   Program Instance respectful_per `(PER A R, PER B R') : PER (R ==> R').
@@ -493,15 +493,8 @@ Section GenericInstances.
     unfold respectful, relation_equivalence, predicate_equivalence in * ; simpl in *.
     split ; intros H1 x3 y1 H2.
     
-    - rewrite <- H0.
-      apply H1.
-      rewrite H.
-      assumption.
-
-    - rewrite H0.
-      apply H1.
-      rewrite <- H.
-      assumption.
+    - now apply H0, H1, H.
+    - now apply H0, H1, H.
   Qed.
 
   (** [R] is Reflexive, hence we can build the needed proof. *)
@@ -603,10 +596,8 @@ Proof.
   intros x y H y0 y1 e; destruct e.
   reduce in H.
   split ; red ; intros H0.
-  - setoid_rewrite <- H.
-    apply H0.
-  - setoid_rewrite H.
-    apply H0.
+  - apply H, H0.
+  - apply H, H0.
 Qed.
 
 Ltac proper_reflexive :=
@@ -649,8 +640,7 @@ Section Normalize.
 
   Lemma proper_normalizes_proper `(Normalizes R0 R1, Proper A R1 m) : Proper R0 m.
   Proof.
-    rewrite normalizes.
-    assumption.
+    eapply proper_proper; eauto.
   Qed.
 
   Lemma flip_atom R : Normalizes R (flip (flip R)).
@@ -759,7 +749,8 @@ split; compute.
   + intro Hxz.
     apply Hxy'.
     apply partial_order_antisym; auto.
-    rewrite Hxz; auto.
+    eapply PartialOrder_proper; eauto.
+    apply reflexivity.
 Qed.
 
 
@@ -775,8 +766,10 @@ split.
 - intros x. right. reflexivity.
 - intros x y z [Hxy|Hxy] [Hyz|Hyz].
   + left. transitivity y; auto.
-  + left. rewrite <- Hyz; auto.
-  + left. rewrite Hxy; auto.
+  + left. eapply H1; eauto.
+    * apply reflexivity.
+    * now apply symmetry.
+  + left. eapply H1; try eassumption. now apply reflexivity.
   + right. transitivity y; auto.
 Qed.
 
@@ -800,3 +793,16 @@ Hint Extern 4 (StrictOrder (relation_conjunction _ _)) =>
 #[global]
 Hint Extern 4 (PartialOrder _ (relation_disjunction _ _)) => 
   class_apply StrictOrder_PartialOrder : typeclass_instances.
+
+(* Register bindings for the generalized rewriting tactic *)
+
+Register forall_relation as rewrite.prop.forall_relation.
+Register pointwise_relation as rewrite.prop.pointwise_relation.
+Register respectful as rewrite.prop.respectful.
+Register forall_def as rewrite.prop.forall_def.
+Register do_subrelation as rewrite.prop.do_subrelation.
+Register apply_subrelation as rewrite.prop.apply_subrelation.
+Register RewriteRelation as rewrite.prop.RewriteRelation.
+Register Proper as rewrite.prop.Proper.
+Register proper_prf as rewrite.prop.proper_prf.
+Register ProperProxy as rewrite.prop.ProperProxy.

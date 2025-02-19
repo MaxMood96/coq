@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -16,8 +16,10 @@ module Prefs : sig
 type t =
   { prefix : string option
   (** root prefix for installation  *)
-  ; interactive : bool
+  ; quiet : bool
   (** whether to display a summary *)
+  ; interactive : bool
+  (** whether to ask for unspecified values *)
   ; libdir : string option
   (** override $prefix/lib/coq *)
   ; configdir : string option
@@ -33,15 +35,13 @@ type t =
   ; natdynlink : bool
   (** native dynlink enabled [only relevant to coq_makefile] *)
   ; browser : string option
-  (** override default browser command [for CoqIDE] *)
+  (** override default browser command [for RocqIDE] *)
   ; bytecodecompiler : bool
-  (** Enable/disable Coq's VM *)
+  (** Enable/disable Rocq's VM *)
   ; nativecompiler : nativecompiler
-  (** Enable/disable Coq's native compiler *)
+  (** Enable/disable Rocq's native compiler *)
   ; coqwebsite : string
-  (** Override Coq's website, used by distributions  *)
-  ; warn_error : bool
-  (** Enable/disable warn-error in makefile build *)
+  (** Override Rocq's website, used by distributions  *)
   ; debug : bool
   (** Debug package and environment detection *)
   }

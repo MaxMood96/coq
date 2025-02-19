@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -247,7 +247,7 @@ let pp_mon o (m, i) =
 module Poly : (* A polynomial is a map of monomials *)
               (*
     This is probably a naive implementation
-    (expected to be fast enough - Coq is probably the bottleneck)
+    (expected to be fast enough - Rocq is probably the bottleneck)
     *The new ring contribution is using a sparse Horner representation.
     *)
 sig
@@ -420,7 +420,7 @@ module LinPoly = struct
       (fun p vr n -> Poly.add (MonT.retrieve vr) n p)
       (Poly.constant Q.zero) v
 
-  let coq_poly_of_linpol cst p =
+  let rocq_poly_of_linpol cst p =
     let pol_of_mon m =
       Monomial.fold
         (fun x v p ->
@@ -478,6 +478,8 @@ module LinPoly = struct
 
   let search_linear p l = min_list (search_all_linear p l)
 
+  let mul_cst c p = Vect.mul c p
+
   let product p1 p2 =
     linpol_of_pol (Poly.product (pol_of_linpol p1) (pol_of_linpol p2))
 
@@ -494,9 +496,6 @@ module LinPoly = struct
       ISet.empty p
 
   let monomials p = Vect.fold (fun acc v _ -> ISet.add v acc) ISet.empty p
-
-  let degree v =
-    Vect.fold (fun acc v vl -> max acc (Monomial.degree (MonT.retrieve v))) 0 v
 
   let pp_goal typ o l =
     let vars =
@@ -680,7 +679,7 @@ module ProofFormat = struct
       max (max (max i j) k) (proof_max_def prf)
 
   (** [pr_rule_def_cut id pr] gives an explicit [id] to cut rules.
-      This is because the Coq proof format only accept they as a proof-step *)
+      This is because the Rocq proof format only accept they as a proof-step *)
   let pr_rule_def_cut m id p =
     let rec pr_rule_def_cut m id = function
       | Annot (_, p) -> pr_rule_def_cut m id p
@@ -915,45 +914,44 @@ module ProofFormat = struct
       (fun prf x n -> add_proof (mul_cst_proof n (IMap.find x env)) prf)
       Zero vect
 
-  module Env = struct
+  module Env :
+  sig
+    type t
+    val make : int -> t
+    val id_of_def : int -> t -> int
+    val id_of_hyp : int -> t -> int
+    val push_ref : t -> t
+    val push_def : int -> t -> t
+  end =
+  struct
 
+    (* Environments are of the form refs @ defs @ hyps *)
     type t =
       {
         lref  : int;
-        lhyps : prf_rule list
+        ndefs : int; (* Size of ldefs *)
+        ldefs : int Int.Map.t;
+        nhyps : int;
       }
 
-    let output_hyp_or_def o = function
-      | Hyp i -> Printf.fprintf o "Hyp %i" i
-      | Def i -> Printf.fprintf o "Def %i" i
-      | _ -> ()
+    let push_ref { nhyps; ndefs; lref; ldefs } =
+      { nhyps; ndefs; lref = lref + 1; ldefs }
 
-    let output_hyps o l = pp_list "," output_hyp_or_def o l
+    let push_def i { nhyps; ndefs; lref; ldefs } =
+      let () = if lref <> 0 then failwith "Cannot push def" in
+      { nhyps; ndefs = ndefs + 1; lref; ldefs = Int.Map.add i ndefs ldefs }
 
-    let push_ref {lref;lhyps} =
-      {lref = lref +1 ; lhyps}
+    let make n = { nhyps = n; ndefs = 0; lref = 0; ldefs = Int.Map.empty }
 
-    let push_def i {lref;lhyps} =
-      if lref <> 0 then failwith "Cannot push def";
-      {lref=lref;lhyps = Def i :: lhyps}
+    let id_of_def def { nhyps; ndefs; lref; ldefs } =
+      try
+        let pos = Int.Map.find def ldefs in
+        lref + (ndefs - pos - 1)
+      with Not_found -> failwith "Cannot find def"
 
-    let of_list l  = {lref = 0 ;lhyps = List.map (fun i -> Hyp i) l}
-    let of_listi l = {lref = 0 ;lhyps = List.mapi (fun i _ -> Hyp i) l}
-
-    let id_of_hyp hyp {lref;lhyps} =
-      let rec xid_of_hyp i l' =
-        match l' with
-        | [] ->
-          Printf.fprintf stdout "\nid_of_hyp: %a notin [%a]\n" output_hyp_or_def
-            hyp output_hyps lhyps;
-          flush stdout;
-          failwith "Cannot find hyp or def"
-        | hyp' :: l' -> if hyp = hyp' then i else xid_of_hyp (i + 1) l'
-      in
-      match hyp with
-      | Ref i -> i
-      | _     -> xid_of_hyp lref lhyps
-
+    let id_of_hyp h { nhyps; ndefs; lref; ldefs } =
+      if 0 <= h && h < nhyps then lref + ndefs + h
+      else failwith "Cannot find hyp"
 
   end
 
@@ -961,16 +959,18 @@ module ProofFormat = struct
   let cmpl_prf_rule norm (cst : Q.t -> 'a) env prf =
     let rec cmpl env = function
       | Annot (s, p) -> cmpl env p
-      | (Hyp _ | Def _| Ref _) as h -> Mc.PsatzIn (CamlToCoq.nat (Env.id_of_hyp h env))
+      | Ref i -> Mc.PsatzIn (CamlToCoq.nat i)
+      | Hyp h -> Mc.PsatzIn (CamlToCoq.nat (Env.id_of_hyp h env))
+      | Def d -> Mc.PsatzIn (CamlToCoq.nat (Env.id_of_def d env))
       | Cst i -> Mc.PsatzC (cst i)
       | Zero -> Mc.PsatzZ
       | MulPrf (p1, p2) -> Mc.PsatzMulE (cmpl env p1, cmpl env p2)
       | AddPrf (p1, p2) -> Mc.PsatzAdd (cmpl env p1, cmpl env p2)
       | LetPrf (p1, p2) -> Mc.PsatzLet (cmpl env p1, cmpl (Env.push_ref env) p2)
       | MulC (lp, p) ->
-        let lp = norm (LinPoly.coq_poly_of_linpol cst lp) in
+        let lp = norm (LinPoly.rocq_poly_of_linpol cst lp) in
         Mc.PsatzMulC (lp, cmpl env p)
-      | Square lp -> Mc.PsatzSquare (norm (LinPoly.coq_poly_of_linpol cst lp))
+      | Square lp -> Mc.PsatzSquare (norm (LinPoly.rocq_poly_of_linpol cst lp))
       | _ -> failwith "Cuts should already be compiled"
     in
     cmpl env prf
@@ -981,7 +981,7 @@ module ProofFormat = struct
   let cmpl_pol_z lp =
     try
       let cst x = CamlToCoq.bigint (Q.num x) in
-      Mc.normZ (LinPoly.coq_poly_of_linpol cst lp)
+      Mc.normZ (LinPoly.rocq_poly_of_linpol cst lp)
     with x ->
       Printf.printf "cmpl_pol_z %s %a\n" (Printexc.to_string x) LinPoly.pp lp;
       raise x
@@ -1012,73 +1012,18 @@ module ProofFormat = struct
   let compile_proof env prf =
     let id = 1 + proof_max_def prf in
     let _, prf = normalise_proof id prf in
-    cmpl_proof (Env.of_list env) prf
+    cmpl_proof env prf
 
-  let rec eval_prf_rule env = function
-    | Annot (s, p) -> eval_prf_rule env p
-    | Hyp i | Def i | Ref i -> env i
-    | Cst n -> (
-      ( Vect.set 0 n Vect.null
-      , match Q.compare n Q.zero with
-        | 0 -> Ge
-        | 1 -> Gt
-        | _ -> failwith "eval_prf_rule : negative constant" ) )
-    | Zero -> (Vect.null, Ge)
-    | Square v -> (LinPoly.product v v, Ge)
-    | MulC (v, p) -> (
-      let p1, o = eval_prf_rule env p in
-      match o with
-      | Eq -> (LinPoly.product v p1, Eq)
-      | _ ->
-        Printf.fprintf stdout "MulC(%a,%a) invalid 2d arg %a %s" Vect.pp v
-          output_prf_rule p Vect.pp p1 (string_of_op o);
-        failwith "eval_prf_rule : not an equality" )
-    | Gcd (g, p) ->
-      let v, op = eval_prf_rule env p in
-      (Vect.div (Q.of_bigint g) v, op)
-    | MulPrf (p1, p2) ->
-      let v1, o1 = eval_prf_rule env p1 in
-      let v2, o2 = eval_prf_rule env p2 in
-      (LinPoly.product v1 v2, opMult o1 o2)
-    | AddPrf (p1, p2) ->
-      let v1, o1 = eval_prf_rule env p1 in
-      let v2, o2 = eval_prf_rule env p2 in
-      (LinPoly.addition v1 v2, opAdd o1 o2)
-    | CutPrf p -> eval_prf_rule env p
-    | LetPrf (p1, p2) ->
-      let v1, o1 = eval_prf_rule env p1 in
-      let v2, o2 =
-        eval_prf_rule (fun i -> if i = 0 then (v1, o1) else env (i - 1)) p2
-      in
-      (v2, o2)
-
-  let is_unsat (p, o) =
-    let c, r = Vect.decomp_cst p in
-    if Vect.is_null r then not (eval_op o c Q.zero) else false
-
-  let rec eval_proof env p =
-    match p with
-    | Done -> failwith "Proof is not finished"
-    | Step (i, prf, rst) ->
-      let p, o = eval_prf_rule (fun i -> IMap.find i env) prf in
-      if is_unsat (p, o) then true
-      else if rst = Done then begin
-        Printf.fprintf stdout "Last inference %a %s\n" LinPoly.pp p
-          (string_of_op o);
-        false
-      end
-      else eval_proof (IMap.add i (p, o) env) rst
-    | Split (i, v, p1, p2) -> failwith "Not implemented"
-    | Enum (i, r1, v, r2, l) ->
-      let _ = eval_prf_rule (fun i -> IMap.find i env) r1 in
-      let _ = eval_prf_rule (fun i -> IMap.find i env) r2 in
-      (* Should check bounds *)
-      failwith "Not implemented"
-    | ExProof _ -> failwith "Not implemented"
 end
 
 module WithProof = struct
   type t = (LinPoly.t * op) * ProofFormat.prf_rule
+
+  let repr p = p
+
+  let proof p = snd p
+
+  let polynomial ((p, _), _) = p
 
   (* The comparison ignores proofs on purpose *)
   let compare : t -> t -> int =
@@ -1115,6 +1060,15 @@ module WithProof = struct
       ((Vect.mul Q.minus_one p1, o1), ProofFormat.mul_cst_proof Q.minus_one prf1)
     | _ -> failwith "neg: invalid proof"
 
+  let mul_cst c ((p1, o1), prf1) =
+    let () = match o1 with
+    | Eq -> ()
+    | Gt | Ge -> assert (c >/ Q.zero)
+    in
+    let p = LinPoly.mul_cst c p1 in
+    let prf = ProofFormat.mul_cst_proof c prf1 in
+    ((p, o1), prf)
+
   let mult p ((p1, o1), prf1) =
     match o1 with
     | Eq -> ((LinPoly.product p p1, o1), ProofFormat.sMulC p prf1)
@@ -1127,6 +1081,12 @@ module WithProof = struct
           Printf.printf "mult_error %a [*] %a\n" LinPoly.pp p output
             ((p1, o1), prf1);
         raise InvalidProof )
+
+  let def p op i = ((p, op), ProofFormat.Def i)
+
+  let mkhyp p op i = ((p, op), ProofFormat.Hyp i)
+
+  let square p q = ((p, Ge), ProofFormat.Square q)
 
   let cutting_plane ((p, o), prf) =
     let c, p' = Vect.decomp_cst p in
@@ -1230,15 +1190,6 @@ module WithProof = struct
     let pred v = if strict then v =/ Q.one || v =/ Q.minus_one else true in
     match o with Eq -> LinPoly.search_linear pred p | _ -> None
 
-  let subst1 sys0 =
-    let oeq, sys' = extract (is_substitution true) sys0 in
-    match oeq with
-    | None -> sys0
-    | Some (v, pc) -> (
-      match simplify (linear_pivot sys0 pc v) sys' with
-      | None -> sys0
-      | Some sys' -> sys' )
-
   let sort (sys : t list) =
     let size ((p, o), prf) =
       let _, p' = Vect.decomp_cst p in
@@ -1317,21 +1268,6 @@ module BoundWithProof =
 struct
 
 type t = Vect.Bound.t * op * ProofFormat.prf_rule
-
-let bound_compare b1 b2 =
-  let open Vect.Bound in
-  let {cst = k1; var = v1; coeff = c1} = b1 in
-  let {cst = k2; var = v2; coeff = c2} = b2 in
-  let c = Int.compare v1 v2 in
-  if c <> 0 then c
-  else
-    let c = Q.compare k1 k2 in
-    if c <> 0 then c
-    else Q.compare c1 c2
-
-let compare (p1, o1, _) (p2, o2, _) =
-  let c = bound_compare p1 p2 in
-  if c = 0 then compare_op o1 o2 else c
 
 let make ((p, o), prf) = match Vect.Bound.of_vect p with
 | None -> None

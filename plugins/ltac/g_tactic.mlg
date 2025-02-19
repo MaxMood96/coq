@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,7 +8,7 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-DECLARE PLUGIN "coq-core.plugins.ltac"
+DECLARE PLUGIN "rocq-runtime.plugins.ltac"
 
 {
 
@@ -26,38 +26,41 @@ open Tactypes
 open Tactics
 open Inv
 open Locus
+open G_redexpr
 
-open Pcoq
+open Procq
 
 
-let all_with delta = Redops.make_red_flag [FBeta;FMatch;FFix;FCofix;FZeta;delta]
+let all_with ~head delta =
+  let all = [FBeta;FMatch;FFix;FCofix;FZeta;delta] in
+  Redops.make_red_flag (if head then FHead :: all else all)
 
 let err () = raise Gramlib.Stream.Failure
 
 (* Hack to parse "(x:=t)" as an explicit argument without conflicts with the *)
 (* admissible notation "(x t)" *)
 let test_lpar_id_coloneq =
-  let open Pcoq.Lookahead in
+  let open Procq.Lookahead in
   to_entry "lpar_id_coloneq" begin
     lk_kw "(" >> lk_ident >> lk_kw ":="
   end
 
 (* Hack to recognize "(x)" *)
 let test_lpar_id_rpar =
-  let open Pcoq.Lookahead in
+  let open Procq.Lookahead in
   to_entry "lpar_id_coloneq" begin
     lk_kw "(" >> lk_ident >> lk_kw ")"
   end
 
 (* idem for (x:=t) and (1:=t) *)
 let test_lpar_idnum_coloneq =
-  let open Pcoq.Lookahead in
+  let open Procq.Lookahead in
   to_entry "test_lpar_idnum_coloneq" begin
     lk_kw "(" >> (lk_ident <+> lk_nat) >> lk_kw ":="
   end
 
 let test_leftsquarebracket_equal =
-  let open Pcoq.Lookahead in
+  let open Procq.Lookahead in
   to_entry "test_leftsquarebracket_equal" begin
     lk_kw "[" >> lk_kw "=" >> check_no_space
   end
@@ -67,7 +70,7 @@ open Extraargs
 
 (* idem for (x1..xn:t) [n^2 complexity but exceptional use] *)
 let check_for_coloneq =
-  Pcoq.Entry.(of_parser "lpar_id_colon"
+  Procq.Entry.(of_parser "lpar_id_colon"
     { parser_fun = fun kwstate strm ->
       let rec skip_to_rpar p n =
         match List.last (Gramlib.LStream.npeek kwstate n strm) with
@@ -91,7 +94,7 @@ let check_for_coloneq =
       | _ -> err () })
 
 let lookup_at_as_comma =
-  let open Pcoq.Lookahead in
+  let open Procq.Lookahead in
   to_entry "lookup_at_as_comma" begin
     lk_kws [",";"at";"as"]
   end
@@ -109,7 +112,7 @@ let mk_fix_tac (loc,id,bl,ann,ty) =
           (try List.index Names.Name.equal x.CAst.v ids
           with Not_found -> user_err ~loc Pp.(str "No such fix variable."))
       | _ -> user_err ~loc Pp.(str "Cannot guess decreasing argument of fix.") in
-  let bl = List.map (fun (nal,bk,t) -> CLocalAssum (nal,bk,t)) bl in
+  let bl = List.map (fun (nal,bk,t) -> CLocalAssum (nal,None,bk,t)) bl in
   (id,n, CAst.make ~loc @@ CProdN(bl,ty))
 
 let mk_cofix_tac (loc,id,bl,ann,ty) =
@@ -118,7 +121,7 @@ let mk_cofix_tac (loc,id,bl,ann,ty) =
         (Pp.str"Annotation forbidden in cofix expression."))
       ann
   in
-  let bl = List.map (fun (nal,bk,t) -> CLocalAssum (nal,bk,t)) bl in
+  let bl = List.map (fun (nal,bk,t) -> CLocalAssum (nal,None,bk,t)) bl in
   (id,if bl = [] then ty else CAst.make ~loc @@ CProdN(bl,ty))
 
 (* Functions overloaded by quotifier *)
@@ -154,7 +157,7 @@ let mkTacCase with_evar = function
 let rec mkCLambdaN_simple_loc ?loc bll c =
   match bll with
   | ({CAst.loc = loc1}::_ as idl,bk,t) :: bll ->
-      CAst.make ?loc @@ CLambdaN ([CLocalAssum (idl,bk,t)],mkCLambdaN_simple_loc ?loc:(Loc.merge_opt loc1 loc) bll c)
+      CAst.make ?loc @@ CLambdaN ([CLocalAssum (idl,None,bk,t)],mkCLambdaN_simple_loc ?loc:(Loc.merge_opt loc1 loc) bll c)
   | ([],_,_) :: bll -> mkCLambdaN_simple_loc ?loc bll c
   | [] -> c
 
@@ -193,34 +196,18 @@ let merge_occurrences loc cl = function
 
 let deprecated_conversion_at_with =
   CWarnings.create
-    ~name:"conversion_at_with" ~category:CWarnings.CoreCategories.deprecated
+    ~name:"conversion_at_with" ~category:Deprecation.Version.v8_14
     (fun () -> Pp.str "The syntax [at ... with ...] is deprecated. Use [with ... at ...] instead.")
 
-(* 8.17 *)
-let deprecated_clear_modifier =
-  CWarnings.create
-    ~name:"deprecated-clear-modifier" ~category:CWarnings.CoreCategories.deprecated
-    (fun () -> Pp.strbrk "The undocumented clear modifier \">\" is deprecated. Open an issue at https://github.com/coq/coq/issues/new if you actually depend on this feature in your work.")
-
 (* Auxiliary grammar rules *)
-
-open Pvernac.Vernac_
 
 }
 
 GRAMMAR EXTEND Gram
   GLOBAL: simple_tactic constr_with_bindings quantified_hypothesis
-  bindings red_expr int_or_var nat_or_var open_constr uconstr
+  bindings open_constr uconstr
   simple_intropattern in_clause clause_dft_concl hypident destruction_arg;
 
-  int_or_var:
-    [ [ n = integer  -> { ArgArg n }
-      | id = identref -> { ArgVar id } ] ]
-  ;
-  nat_or_var:
-    [ [ n = natural  -> { ArgArg n }
-      | id = identref -> { ArgVar id } ] ]
-  ;
   (* An identifier or a quotation meta-variable *)
   id_or_meta:
     [ [ id = identref -> { id } ] ]
@@ -239,10 +226,7 @@ GRAMMAR EXTEND Gram
     ] ]
   ;
   constr_with_bindings_arg:
-    [ [ ">"; c = constr_with_bindings ->
-      { deprecated_clear_modifier (); (* 8.17 *)
-        (Some true,c) }
-      | c = constr_with_bindings -> { (None,c) } ] ]
+    [ [ c = constr_with_bindings -> { (None,c) } ] ]
   ;
   quantified_hypothesis:
     [ [ id = ident -> { NamedHyp (CAst.make ~loc id) }
@@ -254,25 +238,6 @@ GRAMMAR EXTEND Gram
       | c1 = constr; "at"; occs = occs_nums; "with"; c2 = constr ->
           { deprecated_conversion_at_with ();  (* 8.14 *)
           (Some (occs,c1), c2) } ] ]
-  ;
-  occs_nums:
-    [ [ nl = LIST1 nat_or_var -> { OnlyOccurrences nl }
-      | "-"; nl = LIST1 nat_or_var -> { AllOccurrencesBut nl } ] ]
-  ;
-  occs:
-    [ [ "at"; occs = occs_nums -> { occs } | -> { AllOccurrences } ] ]
-  ;
-  pattern_occ:
-    [ [ c = constr; nl = occs -> { (nl,c) } ] ]
-  ;
-  ref_or_pattern_occ:
-    (* If a string, it is interpreted as a ref
-       (anyway a Coq string does not reduce) *)
-    [ [ c = smart_global; nl = occs -> { nl,Inl c }
-      | c = constr; nl = occs -> { nl,Inr c } ] ]
-  ;
-  unfold_occ:
-    [ [ c = smart_global; nl = occs -> { (nl,c) } ] ]
   ;
   intropatterns:
     [ [ l = LIST0 intropattern -> { l } ] ]
@@ -341,42 +306,6 @@ GRAMMAR EXTEND Gram
   with_bindings:
     [ [ "with"; bl = bindings -> { bl } | -> { NoBindings } ] ]
   ;
-  red_flag:
-    [ [ IDENT "beta" -> { [FBeta] }
-      | IDENT "iota" -> { [FMatch;FFix;FCofix] }
-      | IDENT "match" -> { [FMatch] }
-      | IDENT "fix" -> { [FFix] }
-      | IDENT "cofix" -> { [FCofix] }
-      | IDENT "zeta" -> { [FZeta] }
-      | IDENT "delta"; d = delta_flag -> { [d] }
-    ] ]
-  ;
-  delta_flag:
-    [ [ "-"; "["; idl = LIST1 smart_global; "]" -> { FDeltaBut idl }
-      | "["; idl = LIST1 smart_global; "]" -> { FConst idl }
-      | -> { FDeltaBut [] }
-    ] ]
-  ;
-  strategy_flag:
-    [ [ s = LIST1 red_flag -> { Redops.make_red_flag (List.flatten s) }
-      | d = delta_flag -> { all_with d }
-    ] ]
-  ;
-  red_expr:
-    [ [ IDENT "red" -> { Red false }
-      | IDENT "hnf" -> { Hnf }
-      | IDENT "simpl"; d = delta_flag; po = OPT ref_or_pattern_occ -> { Simpl (all_with d,po) }
-      | IDENT "cbv"; s = strategy_flag -> { Cbv s }
-      | IDENT "cbn"; s = strategy_flag -> { Cbn s }
-      | IDENT "lazy"; s = strategy_flag -> { Lazy s }
-      | IDENT "compute"; delta = delta_flag -> { Cbv (all_with delta) }
-      | IDENT "vm_compute"; po = OPT ref_or_pattern_occ -> { CbvVm po }
-      | IDENT "native_compute"; po = OPT ref_or_pattern_occ -> { CbvNative po }
-      | IDENT "unfold"; ul = LIST1 unfold_occ SEP "," -> { Unfold ul }
-      | IDENT "fold"; cl = LIST1 constr -> { Fold cl }
-      | IDENT "pattern"; pl = LIST1 pattern_occ SEP"," -> { Pattern pl }
-      | s = IDENT -> { ExtraRedExpr s } ] ]
-  ;
   hypident:
     [ [ id = id_or_meta ->
         { let id : lident = id in
@@ -440,7 +369,7 @@ GRAMMAR EXTEND Gram
   ;
   simple_binder:
     [ [ na=name -> { ([na],Default Glob_term.Explicit, CAst.make ~loc @@
-                    CHole (Some (Evar_kinds.BinderType na.CAst.v), IntroAnonymous)) }
+                    CHole (Some (GBinderType na.CAst.v))) }
       | "("; nal=LIST1 name; ":"; c=lconstr; ")" -> { (nal,Default Glob_term.Explicit,c) }
     ] ]
   ;
@@ -675,11 +604,12 @@ GRAMMAR EXTEND Gram
 
       (* Conversion *)
       | IDENT "red"; cl = clause_dft_concl ->
-          { CAst.make ~loc @@ TacAtom (TacReduce (Red false, cl)) }
+          { CAst.make ~loc @@ TacAtom (TacReduce (Red, cl)) }
       | IDENT "hnf"; cl = clause_dft_concl ->
           { CAst.make ~loc @@ TacAtom (TacReduce (Hnf, cl)) }
-      | IDENT "simpl"; d = delta_flag; po = OPT ref_or_pattern_occ; cl = clause_dft_concl ->
-          { CAst.make ~loc @@ TacAtom (TacReduce (Simpl (all_with d, po), cl)) }
+      | IDENT "simpl"; h = OPT [ IDENT "head" -> { () } ]; d = delta_flag;
+        po = OPT ref_or_pattern_occ; cl = clause_dft_concl ->
+          { CAst.make ~loc @@ TacAtom (TacReduce (Simpl (all_with ~head:(Option.has_some h) d, po), cl)) }
       | IDENT "cbv"; s = strategy_flag; cl = clause_dft_concl ->
           { CAst.make ~loc @@ TacAtom (TacReduce (Cbv s, cl)) }
       | IDENT "cbn"; s = strategy_flag; cl = clause_dft_concl ->
@@ -687,7 +617,7 @@ GRAMMAR EXTEND Gram
       | IDENT "lazy"; s = strategy_flag; cl = clause_dft_concl ->
           { CAst.make ~loc @@ TacAtom (TacReduce (Lazy s, cl)) }
       | IDENT "compute"; delta = delta_flag; cl = clause_dft_concl ->
-          { CAst.make ~loc @@ TacAtom (TacReduce (Cbv (all_with delta), cl)) }
+          { CAst.make ~loc @@ TacAtom (TacReduce (Cbv (all_with ~head:false delta), cl)) }
       | IDENT "vm_compute"; po = OPT ref_or_pattern_occ; cl = clause_dft_concl ->
           { CAst.make ~loc @@ TacAtom (TacReduce (CbvVm po, cl)) }
       | IDENT "native_compute"; po = OPT ref_or_pattern_occ; cl = clause_dft_concl ->

@@ -13,9 +13,17 @@
  (modules render_line_results)
  (libraries unix table str clib))
 
+(library
+ (name benchlib)
+ (modules :standard \ render_results render_line_results rocqtimelog2html table)
+ (libraries unix str clib zarith yojson))
+
 (executable
- (name timelog2html)
- (public_name coqtimelog2html)
- (package coq-core)
- (modules timelog2html)
- (libraries unix str clib zarith))
+ (name rocqtimelog2html)
+ (modules rocqtimelog2html)
+ (libraries benchlib))
+
+(install
+ (section libexec)
+ (package rocq-devtools)
+ (files (rocqtimelog2html.exe as timelog2html)))

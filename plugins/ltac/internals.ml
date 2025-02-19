@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -37,7 +37,7 @@ let mytclWithHoles tac with_evars c =
 
 (**********************************************************************)
 (* replace, discriminate, injection, simplify_eq                      *)
-(* cutrewrite, dependent rewrite                                      *)
+(* dependent rewrite                                      *)
 
 let with_delayed_uconstr ist c tac =
   let flags = Pretyping.{
@@ -48,13 +48,16 @@ let with_delayed_uconstr ist c tac =
     expand_evars = true;
     program_mode = false;
     polymorphic = false;
+    undeclared_evars_patvars = false;
+    patvars_abstract = false;
+    unconstrained_sorts = false;
  } in
   let c = Tacinterp.type_uconstr ~flags ist c in
   Tacticals.tclDELAYEDWITHHOLES false c tac
 
-let replace_in_clause_maybe_by ist c1 c2 cl tac =
+let replace_in_clause_maybe_by ist dir_opt c1 c2 cl tac =
   with_delayed_uconstr ist c1
-  (fun c1 -> Equality.replace_in_clause_maybe_by c1 c2 cl (Option.map (Tacinterp.tactic_of_value ist) tac))
+  (fun c1 -> Equality.replace_in_clause_maybe_by dir_opt c1 c2 cl (Option.map (Tacinterp.tactic_of_value ist) tac))
 
 let replace_term ist dir_opt c cl =
   with_delayed_uconstr ist c (fun c -> Equality.replace_term dir_opt c cl)
@@ -84,6 +87,9 @@ let constr_flags () = Pretyping.{
   expand_evars = true;
   program_mode = false;
   polymorphic = false;
+  undeclared_evars_patvars = false;
+  patvars_abstract = false;
+  unconstrained_sorts = false;
 }
 
 let refine_tac ist ~simple ~with_classes c =
@@ -130,7 +136,7 @@ let rewrite_except h =
   end
 
 
-let refl_equal () = Coqlib.lib_ref "core.eq.type"
+let refl_equal () = Rocqlib.lib_ref "core.eq.type"
 
 (* This is simply an implementation of the case_eq tactic.  this code
   should be replaced by a call to the tactic but I don't know how to
@@ -140,14 +146,16 @@ let  mkCaseEq a  : unit Proofview.tactic =
     let type_of_a = Tacmach.pf_get_type_of gl a in
     Tacticals.pf_constr_of_global (delayed_force refl_equal) >>= fun req ->
     Tacticals.tclTHENLIST
-         [Tactics.generalize [(mkApp(req, [| type_of_a; a|]))];
+         [Generalize.generalize [(mkApp(req, [| type_of_a; a|]))];
           Proofview.Goal.enter begin fun gl ->
             let concl = Proofview.Goal.concl gl in
             let env = Proofview.Goal.env gl in
             (* FIXME: this looks really wrong. Does anybody really use
                this tactic? *)
-            let (_, c) = Tacred.pattern_occs [Locus.OnlyOccurrences [1], a] env (Evd.from_env env) concl in
-            change_concl c
+            let ans = Tacred.pattern_occs [Locus.OnlyOccurrences [1], a] env (Evd.from_env env) concl in
+            match ans with
+            | NoChange -> Proofview.tclUNIT ()
+            | Changed (_, c) -> change_concl c
           end;
           simplest_case a]
   end
@@ -343,7 +351,7 @@ let declare_equivalent_keys c c' =
     let evd = Evd.from_env env in
     let (evd, c) = Constrintern.interp_open_constr env evd c in
     let kind c = EConstr.kind evd c in
-    Keys.constr_key kind c
+    Keys.constr_key env kind c
   in
   let k1 = get_key c in
   let k2 = get_key c' in

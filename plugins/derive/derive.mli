@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -13,7 +13,8 @@
     [f:=?x]. When the proof ends, [f] is defined as the value of [?x]
     and [lemma] as the proof. *)
 val start_deriving
-  :  Names.Id.t
+  :  atts:Vernacentries.DefAttributes.t
+  -> Constrexpr.local_binder_expr list
   -> Constrexpr.constr_expr
   -> Names.Id.t
   -> Declare.Proof.t

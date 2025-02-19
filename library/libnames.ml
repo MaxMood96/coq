@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -87,6 +87,8 @@ type full_path = {
 let dirpath sp = sp.dirpath
 let basename sp = sp.basename
 
+let full_path_is_ident sp = DirPath.is_empty (dirpath sp)
+
 let make_path pa id = { dirpath = pa; basename = id }
 
 let repr_path { dirpath = pa; basename = id } = (pa,id)
@@ -154,7 +156,7 @@ let qualid_of_dirpath ?loc dir =
 let qualid_of_lident lid = qualid_of_ident ?loc:lid.CAst.loc lid.CAst.v
 
 let qualid_is_ident qid =
-  DirPath.is_empty qid.CAst.v.dirpath
+  full_path_is_ident qid.CAst.v
 
 let qualid_basename qid =
   qid.CAst.v.basename
@@ -168,6 +170,6 @@ let idset_mem_qualid qid s =
 (* Default paths *)
 
 (*s Roots of the space of absolute names *)
-let coq_string = "Coq"
-let coq_root = Id.of_string coq_string
+let rocq_init_string = "Corelib"
+let rocq_init_root = Id.of_string rocq_init_string
 let default_root_prefix = DirPath.empty

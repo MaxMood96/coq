@@ -33,8 +33,8 @@ In both v8.4 And v8.5, the goal is unchanged.
 *)
 Admitted.
 
-Require Import List.
-Lemma foo n (l k : list nat) : k ++ skipn n l = skipn n l.
+Require Import TestSuite.list.
+Lemma foo n (l k : list nat) : app k (skipn n l) = skipn n l.
 Proof. f_equal.
 (*
   8.4: leaves the goal unchanged, i.e. k ++ skipn n l = skipn n l
@@ -43,7 +43,6 @@ Proof. f_equal.
 *)
 Abort.
 
-Require Import List.
 Fixpoint replicate {A} (n : nat) (x : A) : list A :=
   match n with 0 => nil | S n => x :: replicate n x end.
 Lemma bar {A} n m (x : A) :
@@ -53,8 +52,8 @@ Proof. intros. f_equal.
 (* 8.5: one goal, n = m - n *)
 Abort.
 
-Variable F : nat -> Set.
-Variable X : forall n, F (n + 1).
+Parameter F : nat -> Set.
+Parameter X : forall n, F (n + 1).
 
 Definition sequator{X Y: Set}{eq:X=Y}(x:X) : Y := eq_rec _ _ x _ eq.
 Definition tequator{X Y}{eq:X=Y}(x:X) : Y := eq_rect _ _ x _ eq.
@@ -99,7 +98,7 @@ Goal @eq Type nat nat.
 congruence.
 Qed.
 
-Variable T : Type.
+Parameter T : Type.
 
 Goal @eq Type T T.
 congruence.

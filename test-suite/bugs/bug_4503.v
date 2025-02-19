@@ -1,4 +1,5 @@
-Require Coq.Classes.RelationClasses.
+Require RelationClasses.
+Require TestSuite.relationclasses.
 
 Class PreOrder (A : Type) (r : A -> A -> Type) : Type :=
 { refl : forall x, r x x }.
@@ -22,7 +23,7 @@ Set Universe Polymorphism.
 Class ILogic@{L} (A : Type@{L}) : Type := mkILogic
 {
   lentails: A -> A -> Prop;
-  lentailsPre:> RelationClasses.PreOrder lentails
+  lentailsPre:: RelationClasses.PreOrder lentails
 }.
 
 

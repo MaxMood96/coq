@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -24,14 +24,20 @@ val notation_with_optional_scope_eq : notation_with_optional_scope -> notation_w
 val notation_eq : notation -> notation -> bool
 (** Equality on [notation]. *)
 
+val notation_binder_kind_eq : notation_binder_kind -> notation_binder_kind -> bool
+(** Equality on [notation_binder_kind]. *)
+
 val interpretation_eq : interpretation -> interpretation -> bool
 (** Equality on [interpretation]. *)
 
 val notation_entry_level_eq : notation_entry_level -> notation_entry_level -> bool
 (** Equality on [notation_entry_level]. *)
 
-type level = notation_entry * entry_level * entry_relative_level list
-  (* first argument is InCustomEntry s for custom entries *)
+val notation_entry_relative_level_eq : notation_entry_relative_level -> notation_entry_relative_level -> bool
+(** Equality on [notation_entry_relative_level]. *)
+
+type level = notation_entry_level * entry_relative_level list
+(** The "signature" of a rule: its level together with the levels of its subentries *)
 
 val level_eq : level -> level -> bool
 (** Equality on [level]. *)
@@ -47,21 +53,18 @@ type 'a interp_rule_gen =
 type interp_rule = KerName.t interp_rule_gen
 
 val remove_uninterpretation : interp_rule -> interpretation -> unit
-val declare_uninterpretation : ?also_in_cases_pattern:bool -> interp_rule -> interpretation -> unit
+val declare_uninterpretation : interp_rule -> interpretation -> unit
 
 type notation_applicative_status =
   | AppBoundedNotation of int
   | AppUnboundedNotation
   | NotAppNotation
 
-type notation_rule = interp_rule * interpretation * notation_applicative_status
-
-(** Return printing key *)
-type key
-val glob_prim_constr_key : 'a Glob_term.glob_constr_g -> Names.GlobRef.t option
-val glob_constr_keys : glob_constr -> key list
-val cases_pattern_key : cases_pattern -> key
-val notation_constr_key : Notation_term.notation_constr -> key * notation_applicative_status
+type notation_rule = {
+  not_rule : interp_rule;
+  not_patt : interpretation;
+  not_status : notation_applicative_status;
+}
 
 (** Return the possible notations for a given term *)
 val uninterp_notations : 'a glob_constr_g -> notation_rule list

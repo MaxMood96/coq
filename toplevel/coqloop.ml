@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -23,7 +23,8 @@ type input_buffer = {
   mutable str : Bytes.t; (* buffer of already read characters *)
   mutable len : int;    (* number of chars in the buffer *)
   mutable bols : int list; (* offsets in str of beginning of lines *)
-  mutable tokens : Pcoq.Parsable.t; (* stream of tokens *)
+  mutable stream : (unit,char) Gramlib.Stream.t; (* stream of chars *)
+  mutable tokens : Procq.Parsable.t; (* stream of tokens *)
   mutable start : int } (* stream count of the first char of the buffer *)
 
 (* Double the size of the buffer. *)
@@ -33,10 +34,23 @@ let resize_buffer ibuf = let open Bytes in
   blit ibuf.str 0 nstr 0 (length ibuf.str);
   ibuf.str <- nstr
 
+let peek_to_newline ibuf =
+  (* peek to see a newline following the latest command
+     cf #19355 *)
+  let rec aux n =
+    let l = Gramlib.Stream.npeek () n ibuf.stream in
+    if List.length l < n then ()
+    else match CList.last l with
+      | '\n' -> ()
+      | ' ' | '\t' -> aux (n+1)
+      | _ -> (* nonblank character: the latest command is not the last on this line *) ()
+  in
+  aux 1
+
 (* Delete all irrelevant lines of the input buffer. Keep the last line
    in the buffer (useful when there are several commands on the same line). *)
-
 let resynch_buffer ibuf =
+  let () = peek_to_newline ibuf in
   match ibuf.bols with
     | ll::_ ->
         let new_len = ibuf.len - ll in
@@ -54,7 +68,7 @@ let emacs_prompt_endstring   () = if !print_emacs then "</prompt>" else ""
 
 (* Read a char in an input channel, displaying a prompt at every
    beginning of line. *)
-let prompt_char doc ic ibuf count =
+let prompt_char doc ic ibuf () =
   let bol = match ibuf.bols with
     | ll::_ -> Int.equal ibuf.len ll
     | [] -> Int.equal ibuf.len 0
@@ -69,15 +83,6 @@ let prompt_char doc ic ibuf count =
     Some c
   with End_of_file ->
     None
-
-(* Reinitialize the char stream (after a Drop) *)
-
-let reset_input_buffer doc ic ibuf =
-  ibuf.str <- Bytes.empty;
-  ibuf.len <- 0;
-  ibuf.bols <- [];
-  ibuf.tokens <- Pcoq.Parsable.make (Gramlib.Stream.from (prompt_char doc ic ibuf));
-  ibuf.start <- 0
 
 (* Functions to print underlined locations from an input buffer. *)
 module TopErr = struct
@@ -99,7 +104,11 @@ let get_bols_of_loc ibuf (bp,ep) =
         let nafter = if ll < ep then add_line (ll,ba) after else after in
         lines_rec ll nafter fl
   in
-  let (fl,ll) = lines_rec ibuf.len ([],None) ibuf.bols in
+  let bols = match ibuf.bols with
+    | [] -> [ibuf.len+1] (* no newline at the end of the command, pretend there was one *)
+    | _ :: _ as bols -> bols
+  in
+  let (fl,ll) = lines_rec ibuf.len ([],None) bols in
   (fl,Option.get ll)
 
 let dotted_location (b,e) =
@@ -149,7 +158,7 @@ let print_highlight_location ib loc =
   highlight_lines
 
 let valid_buffer_loc ib loc =
-  let (b,e) = Loc.unloc loc in b-ib.start >= 0 && e-ib.start < ib.len && b<=e
+  let (b,e) = Loc.unloc loc in b-ib.start >= 0 && e-ib.start <= ib.len && b<=e
 
 (* Toplevel error explanation. *)
 let error_info_for_buffer ?loc buf =
@@ -171,11 +180,11 @@ let error_info_for_buffer ?loc buf =
       | Loc.InFile _ -> Topfmt.pr_phase ~loc ()
 
 (* Actual printing routine *)
-let print_error_for_buffer ?loc lvl msg buf =
+let print_error_for_buffer ?loc ?qf lvl msg buf =
   let pre_hdr = error_info_for_buffer ?loc buf in
   if !print_emacs
   then Topfmt.emacs_logger ?pre_hdr lvl msg
-  else Topfmt.std_logger   ?pre_hdr lvl msg
+  else Topfmt.std_logger   ?pre_hdr ?qf lvl msg
 
 (*
 let print_toplevel_parse_error (e, info) buf =
@@ -186,17 +195,17 @@ let print_toplevel_parse_error (e, info) buf =
 *)
 end
 
-(*s The Coq prompt is the name of the focused proof, if any, and "Coq"
+(*s The Rocq prompt is the name of the focused proof, if any, and "Rocq"
     otherwise. We trap all exceptions to prevent the error message printing
     from cycling. *)
 let make_prompt () =
   try
     (Names.Id.to_string (Vernacstate.Declare.get_current_proof_name ())) ^ " < "
   with Vernacstate.Declare.NoCurrentProof ->
-    "Coq < "
+    "Rocq < "
   [@@ocaml.warning "-3"]
 
-(* the coq prompt added to the default one when in emacs mode
+(* the rocq prompt added to the default one when in emacs mode
    The prompt contains the current state label [n] (for global
    backtracking) and the current proof state [p] (for proof
    backtracking) plus the list of open (nested) proofs (for proof
@@ -226,12 +235,24 @@ let top_buffer =
     ^ make_emacs_prompt doc
     ^ emacs_prompt_endstring()
   in
+  let stream = Gramlib.Stream.empty () in
   { prompt = pr;
     str = Bytes.empty;
     len = 0;
     bols = [];
-    tokens = Pcoq.Parsable.make (Gramlib.Stream.empty ());
+    stream;
+    tokens = Procq.Parsable.make stream;
     start = 0 }
+
+(* Intialize or reinitialize the char stream *)
+let reset_input_buffer ~state =
+  let stream = Gramlib.Stream.from (prompt_char state.Vernac.State.doc stdin top_buffer) in
+  top_buffer.str <- Bytes.empty;
+  top_buffer.len <- 0;
+  top_buffer.bols <- [];
+  top_buffer.stream <- stream;
+  top_buffer.tokens <- Procq.Parsable.make stream;
+  top_buffer.start <- 0
 
 let set_prompt prompt =
   top_buffer.prompt
@@ -247,7 +268,7 @@ let parse_to_dot =
     | Tok.EOI -> ()
     | _ -> dot kwstate st
   in
-  Pcoq.Entry.(of_parser "Coqtoplevel.dot" { parser_fun = dot })
+  Procq.Entry.(of_parser "Coqtoplevel.dot" { parser_fun = dot })
 
 (* If an error occurred while parsing, we try to read the input until a dot
    token is encountered.
@@ -255,7 +276,7 @@ let parse_to_dot =
 
 let rec discard_to_dot () =
   try
-    Pcoq.Entry.parse parse_to_dot top_buffer.tokens
+    Procq.Entry.parse parse_to_dot top_buffer.tokens
   with
     | CLexer.Error.E _ -> (* Lexer failed *) discard_to_dot ()
     | e when CErrors.noncritical e -> ()
@@ -313,16 +334,16 @@ let coqloop_feed (fb : Feedback.feedback) = let open Feedback in
   | FileLoaded (_,_) -> ()
   | Custom (_,_,_) -> ()
   (* Re-enable when we switch back to feedback-based error printing *)
-  | Message (Error,loc,msg) -> ()
+  | Message (Error,loc,_,msg) -> ()
   (* TopErr.print_error_for_buffer ?loc lvl msg top_buffer *)
-  | Message (Warning,loc,msg) ->
+  | Message (Warning,loc,qf,msg) ->
     let loc = extract_default_loc loc fb.doc_id fb.span_id in
-    TopErr.print_error_for_buffer ?loc Warning msg top_buffer
-  | Message (lvl,loc,msg) ->
-    TopErr.print_error_for_buffer ?loc lvl msg top_buffer
+    TopErr.print_error_for_buffer ?loc ~qf Warning msg top_buffer
+  | Message (lvl,loc,qf,msg) ->
+    TopErr.print_error_for_buffer ?loc ~qf lvl msg top_buffer
 
-(** Main coq loop : read vernacular expressions until Drop is entered.
-    Ctrl-C is handled internally as Sys.Break instead of aborting Coq.
+(** Main rocq loop : read vernacular expressions until Drop is entered.
+    Ctrl-C is handled internally as Sys.Break instead of aborting Rocq.
     Normally, the only exceptions that can come out of [do_vernac] and
     exit the loop are Drop and Quit. Any other exception there indicates
     an issue with [print_toplevel_error] above. *)
@@ -345,8 +366,6 @@ let cproof p1 p2 =
   CList.equal (pequal evleq evleq) a2 b2 &&
   CList.equal Evar.equal (Evd.shelf sigma1) (Evd.shelf sigma2) &&
   Evar.Set.equal (Evd.given_up sigma1) (Evd.given_up sigma2)
-
-let drop_last_doc = ref None
 
 (* todo: could add other Set/Unset commands, such as "Printing Universes" *)
 let print_anyway_opts = [
@@ -397,13 +416,12 @@ let top_goal_print ~doc c oldp newp =
     TopErr.print_error_for_buffer ?loc Feedback.Error msg top_buffer
   [@@ocaml.warning "-3"]
 
-let exit_on_error =
+let { Goptions.get = exit_on_error } =
   let open Goptions in
   declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Coqtop";"Exit";"On";"Error"]
     ~value:false
+    ()
 
 let show_proof_diff_cmd ~state diff_opt =
   let open Vernac.State in
@@ -413,22 +431,50 @@ let show_proof_diff_cmd ~state diff_opt =
       let old = Stm.get_prev_proof ~doc:state.doc state.sid in
       Proof_diffs.diff_proofs ~diff_opt ?old proof
 
+let ml_toplevel_state = ref None
+let ml_toplevel_include_ran = ref false
+
+(* Initialises the Ocaml toplevel before launching it, so that it can
+   find the "include" file in the *source* directory *)
+let init_ocaml_path () =
+  let env = Boot.Env.init () in
+  let corelib = Boot.Env.corelib env |> Boot.Path.to_string in
+  let add_subdir dl = Mltop.add_ml_dir (Filename.concat corelib dl) in
+  List.iter add_subdir ("dev" :: Coq_config.all_src_dirs)
+
+let init_and_run_ml_toploop () =
+  init_ocaml_path ();
+  Flags.with_option Flags.in_ml_toplevel (Mltop.ocaml_toploop ~init_file:"ml_toplevel/include") ()
+
+(* We return whether the execution should continue and a new state *)
 let process_toplevel_command ~state stm =
   let open Vernac.State in
   let open G_toplevel in
   match stm with
-  (* Usually handled in the caller *)
   | VernacDrop ->
-    state
+    if Mltop.is_ocaml_top() then begin
+      (* Save the last state for [go ()] *)
+      ml_toplevel_state := Some state;
+      (* Initialise and launch the OCaml toplevel *)
+      init_and_run_ml_toploop ();
+      (* Reinitialize the char stream *)
+      reset_input_buffer ~state;
+      (* [go ()] was potentially executed — get the new state *)
+      let state = Option.get !ml_toplevel_state in
+      true, state
+    end else begin
+      Feedback.msg_warning (str "There is no ML toplevel.");
+      true, state
+    end
 
   | VernacBackTo bid ->
     let bid = Stateid.of_int bid in
     let doc, res = Stm.edit_at ~doc:state.doc bid in
     assert (res = Stm.NewTip);
-    { state with doc; sid = bid }
+    true, { state with doc; sid = bid }
 
   | VernacQuit ->
-    exit 0
+    false, state
 
   | VernacControl { CAst.loc; v=c } ->
     let nstate = Vernac.process_expr ~state (CAst.make ?loc c) in
@@ -436,13 +482,13 @@ let process_toplevel_command ~state stm =
     | None -> ()
     | Some proof -> top_goal_print ~doc:state.doc c state.proof proof
     in
-    nstate
+    true, nstate
 
   | VernacShowGoal { gid; sid } ->
     let proof = Stm.get_proof ~doc:state.doc (Stateid.of_int sid) in
     let goal = Printer.pr_goal_emacs ~proof gid sid in
     let () = Feedback.msg_notice goal in
-    state
+    true, state
 
   | VernacShowProofDiffs diff_opt ->
     (* We print nothing if there are no goals left *)
@@ -451,24 +497,18 @@ let process_toplevel_command ~state stm =
     else
       let out = show_proof_diff_cmd ~state diff_opt in
       Feedback.msg_notice out;
-    state
-
-(* We return a new state and true if we got a `Drop` command  *)
-let read_and_execute_base ~state =
-  let input = top_buffer.tokens in
-  match read_sentence ~state input with
-  | Some G_toplevel.VernacDrop ->
-    if Mltop.is_ocaml_top()
-    then (drop_last_doc := Some state; state, true)
-    else (Feedback.msg_warning (str "There is no ML toplevel."); state, false)
-  | Some stm ->
-    process_toplevel_command ~state stm, false
-  (* End of file *)
-  | None ->
-    top_stderr (fnl ()); exit 0
+    true, state
 
 let read_and_execute ~state =
-  try read_and_execute_base ~state
+  try
+    let input = top_buffer.tokens in
+    match read_sentence ~state input with
+    | Some stm ->
+      process_toplevel_command ~state stm
+    (* End of file *)
+    | None ->
+      top_stderr (fnl ());
+      false, state
   with
   (* Exception printing should be done by the feedback listener,
      however this is not yet ready so we rely on the exception for
@@ -489,44 +529,31 @@ let read_and_execute ~state =
     let msg = CErrors.iprint (e, info) in
     TopErr.print_error_for_buffer ?loc Feedback.Error msg top_buffer;
     if exit_on_error () then exit 1;
-    state, false
+    true, state
 
-(* This function will only return on [Drop], careful to keep it tail-recursive *)
-let rec vernac_loop ~state =
-  let open Vernac.State in
-  loop_flush_all ();
-  top_stderr (fnl());
-  if !print_emacs then top_stderr (str (top_buffer.prompt state.doc));
-  resynch_buffer top_buffer;
-  let state, drop = read_and_execute ~state in
-  if drop then state else (vernac_loop [@ocaml.tailcall]) ~state
+let loop ~state =
+  (* Initialize buffer *)
+  reset_input_buffer ~state;
+  Flags.without_option Flags.in_ml_toplevel (fun () ->
+    (* The main loop, as a tail-recursive function *)
+    let rec aux state =
+      loop_flush_all ();
+      top_stderr (fnl());
+      let open Vernac.State in
+      if !print_emacs then top_stderr (str (top_buffer.prompt state.doc));
+      resynch_buffer top_buffer;
+      let new_running, new_state = read_and_execute ~state:state in
+      if new_running then
+        (aux [@ocaml.tailcall]) new_state
+      else
+        new_state in
+    aux state
+  ) ()
 
-(* Default toplevel loop, machinery for drop is below *)
-
-let drop_args = ref None
-
-(* Initialises the Ocaml toplevel before launching it, so that it can
-   find the "include" file in the *source* directory *)
-let init_ocaml_path () =
-  let env = Boot.Env.init () in
-  let corelib = Boot.Env.corelib env |> Boot.Path.to_string in
-  let add_subdir dl = Mltop.add_ml_dir (Filename.concat corelib dl) in
-  List.iter add_subdir ("dev" :: Coq_config.all_src_dirs)
-
-let loop ~opts ~state =
-  drop_args := Some opts;
+let run ~opts ~state =
   let open Coqargs in
   print_emacs := opts.config.print_emacs;
   (* We initialize the console only if we run the toploop_run *)
   let tl_feed = Feedback.add_feeder coqloop_feed in
-  (* Initialize buffer *)
-  Sys.catch_break true;
-  reset_input_buffer state.Vernac.State.doc stdin top_buffer;
-  (* Call the main loop *)
-  let _ : Vernac.State.t = vernac_loop ~state in
-  (* Initialise and launch the Ocaml toplevel *)
-  init_ocaml_path ();
-  Mltop.ocaml_toploop();
-  (* We delete the feeder after the OCaml toploop has ended so users
-     of Drop can see the feedback. *)
+  let _ : Vernac.State.t = loop ~state in
   Feedback.del_feeder tl_feed

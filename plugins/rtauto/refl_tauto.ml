@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -57,11 +57,11 @@ let step_count = ref 0
 
 let node_count = ref 0
 
-let li_False = lazy (destInd (UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Coqlib.lib_ref "core.False.type"))
-let li_and   = lazy (destInd (UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Coqlib.lib_ref "core.and.type"))
-let li_or    = lazy (destInd (UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Coqlib.lib_ref "core.or.type"))
+let li_False = lazy (destInd (UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Rocqlib.lib_ref "core.False.type"))
+let li_and   = lazy (destInd (UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Rocqlib.lib_ref "core.and.type"))
+let li_or    = lazy (destInd (UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Rocqlib.lib_ref "core.or.type"))
 
-let gen_constant n = lazy (UnivGen.constr_of_monomorphic_global (Global.env ()) (Coqlib.lib_ref n))
+let gen_constant n = lazy (UnivGen.constr_of_monomorphic_global (Global.env ()) (Rocqlib.lib_ref n))
 
 let l_xI = gen_constant "num.pos.xI"
 let l_xO = gen_constant "num.pos.xO"
@@ -92,10 +92,10 @@ let l_E_Or = gen_constant "plugins.rtauto.E_Or"
 let l_D_Or = gen_constant "plugins.rtauto.D_Or"
 
 let special_whd env sigma c =
-  Reductionops.clos_whd_flags CClosure.all env sigma c
+  Reductionops.clos_whd_flags RedFlags.all env sigma c
 
 let special_nf env sigma c =
-  Reductionops.clos_norm_flags CClosure.betaiotazeta env sigma c
+  Reductionops.clos_norm_flags RedFlags.betaiotazeta env sigma c
 
 type atom_env=
     {mutable next:int;
@@ -252,19 +252,17 @@ let build_env gamma=
                      mkApp(force node_count l_push,[|mkProp;p;e|]))
     gamma.env (mkApp (force node_count l_empty,[|mkProp|]))
 
-let verbose =
+let { Goptions.get = verbose } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Rtauto";"Verbose"]
     ~value:false
+    ()
 
-let check =
+let { Goptions.get = check } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Rtauto";"Check"]
     ~value:false
+    ()
 
 open Pp
 
@@ -274,7 +272,7 @@ let rtauto_tac =
     let concl = Proofview.Goal.concl gl in
     let env = Proofview.Goal.env gl in
     let sigma = Proofview.Goal.sigma gl in
-    Coqlib.check_required_library ["Coq";"rtauto";"Rtauto"];
+    Rocqlib.check_required_library ["Stdlib";"rtauto";"Rtauto"];
     let gamma={next=1;env=[]} in
     let () =
       if Retyping.get_sort_family_of env sigma concl != InProp
@@ -325,7 +323,7 @@ let rtauto_tac =
                              str " steps" ++ fnl () ++
                              str "Proof term size : " ++ int (!step_count+ !node_count) ++
                              str " nodes (constants)" ++ fnl () ++
-                             str "Giving proof term to Coq ... ")
+                             str "Giving proof term to Rocq ... ")
         end in
     let tac_start_time = System.get_time () in
     let term = EConstr.of_constr term in

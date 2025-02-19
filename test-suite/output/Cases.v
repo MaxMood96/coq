@@ -15,7 +15,7 @@ Eval lazy in fun d:TT => match d return 0 = 0 with CTT a _ b => b end.
 (* Do not contract nested patterns with dependent return type *)
 (* see bug #1699 *)
 
-Require Import Arith.
+Require Import TestSuite.arith.
 
 Definition proj (x y:nat) (P:nat -> Type) (def:P x) (prf:P y) : P y :=
   match eq_nat_dec x y return P y with
@@ -30,13 +30,13 @@ Print proj.
 
 (* Use notations even below aliases *)
 
-Require Import List.
+Require Import TestSuite.list.
 
 Fixpoint foo (A:Type) (l:list A) : option A :=
   match l with
   | nil => None
-  | x0 :: nil => Some x0
-  | x0 :: (x1 :: xs) as l0 => foo A l0
+  | cons x0 nil => Some x0
+  | cons x0 (cons x1 xs as l0) => foo A l0
   end.
 
 Print foo.
@@ -315,3 +315,14 @@ Definition c :=
  end.
 
 End Bug14207.
+
+Module Bug17071.
+
+Notation "x :||: l" := (true x l) (at level 51).
+
+Fail Check
+  match true with
+  | x :||: l => 0
+  end.
+
+End Bug17071.

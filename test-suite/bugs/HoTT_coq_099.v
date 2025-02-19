@@ -15,8 +15,8 @@ Record Category (obj : Type) :=
     Compose : forall s d d', Morphism d d' -> Morphism s d -> Morphism s d'
   }.
 
-Arguments Identity {obj%type} [!C%category] x%object : rename.
-Arguments Compose {obj%type} [!C%category s%object d%object d'%object] m1%morphism m2%morphism : rename.
+Arguments Identity {obj%_type} [!C%_category] x%_object : rename.
+Arguments Compose {obj%_type} [!C%_category s%_object d%_object d'%_object] m1%_morphism m2%_morphism : rename.
 Bind Scope category_scope with Category.
 
 Record Functor `(C : @Category objC) `(D : @Category objD)
@@ -54,10 +54,10 @@ Section PreMonoidalCategory.
   Variable Associator : NaturalIsomorphism TriMonoidalProductL TriMonoidalProductR.
   (* Toplevel input, characters 15-96:
 Error: Unsatisfied constraints:
-Coq.Init.Datatypes.28 <= Coq.Init.Datatypes.29
-Top.168 <= Coq.Init.Datatypes.29
-Top.168 <= Coq.Init.Datatypes.28
-Top.169 <= Coq.Init.Datatypes.29
-Top.169 <= Coq.Init.Datatypes.28
+Stdlib.Init.Datatypes.28 <= Coq.Init.Datatypes.29
+Top.168 <= Stdlib.Init.Datatypes.29
+Top.168 <= Stdlib.Init.Datatypes.28
+Top.169 <= Stdlib.Init.Datatypes.29
+Top.169 <= Stdlib.Init.Datatypes.28
  (maybe a bugged tactic). *)
 End PreMonoidalCategory.

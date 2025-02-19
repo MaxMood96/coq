@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -32,9 +32,9 @@ type pattern_quote_style = QuotedPattern | NotQuotedPattern
 
 (** Declare and look for the printing rule for symbolic notations *)
 type unparsing =
-  | UnpMetaVar of entry_relative_level * side option
-  | UnpBinderMetaVar of entry_relative_level * pattern_quote_style
-  | UnpListMetaVar of entry_relative_level * unparsing list * side option
+  | UnpMetaVar of notation_entry_relative_level
+  | UnpBinderMetaVar of notation_entry_relative_level * pattern_quote_style
+  | UnpListMetaVar of notation_entry_relative_level * unparsing list
   | UnpBinderListMetaVar of
       bool (* true if open binder *) *
       bool (* true if printed with a quote *) *

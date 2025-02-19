@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -58,4 +58,6 @@ val intern_genarg : glob_sign -> raw_generic_argument -> glob_generic_argument
 
 (** Reduction expressions *)
 
-val intern_red_expr : glob_sign -> raw_red_expr -> glob_red_expr
+val intern_red_expr : glob_sign -> Genredexpr.raw_red_expr -> Genredexpr.glob_red_expr
+
+val intern_strategy : glob_sign -> raw_strategy -> glob_strategy

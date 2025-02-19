@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -48,7 +48,7 @@ struct
       try
         for i = 0 to d-1 do if s.[i] != '0' then raise (Comp 1) done;
         for i = d to l-1 do
-          let c = Util.pervasives_compare s.[i] s'.[i-d] in
+          let c = Stdlib.compare s.[i] s'.[i-d] in
           if c != 0 then raise (Comp c)
         done;
         0

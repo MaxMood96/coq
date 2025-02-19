@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -10,21 +10,14 @@
 
 open NumCompat
 
-module Int : sig
-  type t = int
-
-  val compare : int -> int -> int
-  val equal : int -> int -> bool
-end
-
 module ISet : sig
-  include Set.S with type elt = int
+  include CSet.S with type elt = int
 
   val pp : out_channel -> t -> unit
 end
 
 module IMap : sig
-  include Map.S with type key = int
+  include CMap.ExtS with type key = int and module Set := ISet
 
   (** [from k  m] returns the submap of [m] with keys greater or equal k *)
   val from : key -> 'elt t -> 'elt t
@@ -107,30 +100,15 @@ module Hash : sig
 end
 
 val all_pairs : ('a -> 'a -> 'b) -> 'a list -> 'b list
-val try_any : (('a -> 'b option) * 'c) list -> 'a -> 'b option
 val is_sublist : ('a -> 'b -> bool) -> 'a list -> 'b list -> bool
 val extract : ('a -> 'b option) -> 'a list -> ('b * 'a) option * 'a list
 val extract_all : ('a -> 'b option) -> 'a list -> 'b list * 'a list
 
-val extract_best :
-     ('a -> 'b option)
-  -> ('b -> 'b -> bool)
-  -> 'a list
-  -> ('b * 'a) option * 'a list
-
-val find_some : ('a -> 'b option) -> 'a list -> 'b option
 val iterate_until_stable : ('a -> 'a option) -> 'a -> 'a
 val simplify : ('a -> 'a option) -> 'a list -> 'a list option
 
 val saturate :
   ('a -> 'b option) -> ('b * 'a -> 'a -> 'a option) -> 'a list -> 'a list
 
-val saturate_bin :
-     (module Set.S with type elt = 'a)
-  -> ('a -> 'a -> 'a option)
-  -> 'a list
-  -> 'a list
-
-val generate : ('a -> 'b option) -> 'a list -> 'b list
 val app_funs : ('a -> 'b option) list -> 'a -> 'b option
 val command : string -> string array -> 'a -> 'b

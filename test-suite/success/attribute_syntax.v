@@ -1,4 +1,4 @@
-From Coq Require Program.Wf.
+From Corelib Require Program.Wf.
 
 Section Scope.
 

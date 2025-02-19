@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -17,9 +17,9 @@ module CoqConstr = Constr
 open CoqConstr
 open Constrexpr
 open Constrexpr_ops
-open Pcoq
-open Pcoq.Prim
-open Pcoq.Constr
+open Procq
+open Procq.Prim
+open Procq.Constr
 open Pvernac.Vernac_
 open Ltac_plugin
 open Glob_term
@@ -33,15 +33,15 @@ open Ssrcommon
 
 }
 
-DECLARE PLUGIN "coq-core.plugins.ssreflect"
+DECLARE PLUGIN "rocq-runtime.plugins.ssreflect"
 
 {
 
 (* Defining grammar rules with "xx" in it automatically declares keywords too,
  * we thus save the lexer to restore it at the end of the file *)
-let frozen_lexer = ref (Pcoq.get_keyword_state ()) ;;
-let () = Mltop.add_init_function "coq-core.plugins.ssreflect" (fun () ->
-    frozen_lexer := Pcoq.get_keyword_state ())
+let frozen_lexer = ref (Procq.get_keyword_state ()) ;;
+let () = Mltop.add_init_function "rocq-runtime.plugins.ssreflect" (fun () ->
+    frozen_lexer := Procq.get_keyword_state ())
 
 (* global syntactic changes and vernacular commands *)
 
@@ -62,7 +62,7 @@ let () = Mltop.add_init_function "coq-core.plugins.ssreflect" (fun () ->
 (* in b       (*^--ALTERNATIVE INNER LET--------^ *)              *)
 
 (* Caveat : There is no pretty-printing support, since this would *)
-(* require a modification to the Coq kernel (adding a new match   *)
+(* require a modification to the Rocq kernel (adding a new match  *)
 (* display style -- why aren't these strings?); also, the v8.1    *)
 (* pretty-printer only allows extension hooks for printing        *)
 (* integer or string literals.                                    *)
@@ -121,7 +121,7 @@ GRAMMAR EXTEND Gram
   GLOBAL: closed_binder;
   closed_binder: TOP [
     [ ["of" -> { () } | "&" -> { () } ]; c = term LEVEL "99" ->
-      { [CLocalAssum ([CAst.make ~loc Anonymous], Default Explicit, c)] }
+      { [CLocalAssum ([CAst.make ~loc Anonymous], None, Default Explicit, c)] }
   ] ];
 END
 
@@ -144,7 +144,7 @@ END
 let declare_one_prenex_implicit locality f =
   let fref =
     try Smartlocate.global_with_alias f
-    with _ -> errorstrm (pr_qualid f ++ str " is not declared") in
+    with e when CErrors.noncritical e -> errorstrm (pr_qualid f ++ str " is not declared") in
   let rec loop = function
   | a :: args' when Impargs.is_status_implicit a ->
     MaxImplicit :: loop args'
@@ -325,9 +325,9 @@ END
 (* Coq v8.1 notation uses "by" and "of" quasi-keywords, i.e., reserved *)
 (* identifiers used as keywords. This is incompatible with ssreflect.v *)
 (* which makes "by" and "of" true keywords, because of technicalities  *)
-(* in the internal lexer-parser API of Coq. We patch this here by      *)
+(* in the internal lexer-parser API of Rocq. We patch this here by     *)
 (* adding new parsing rules that recognize the new keywords.           *)
-(*   To make matters worse, the Coq grammar for tactics fails to       *)
+(*   To make matters worse, the Rocq grammar for tactics fails to      *)
 (* export the non-terminals we need to patch. Fortunately, the CamlP5  *)
 (* API provides a backdoor access (with loads of Obj.magic trickery).  *)
 
@@ -361,8 +361,8 @@ END
 (* The user is supposed to Require Import ssreflect or Require ssreflect   *)
 (* and Import ssreflect.SsrSyntax to obtain these keywords and as a         *)
 (* consequence the extended ssreflect grammar.                             *)
-let () = Mltop.add_init_function "coq-core.plugins.ssreflect" (fun () ->
-    Pcoq.set_keyword_state !frozen_lexer) ;;
+let () = Mltop.add_init_function "rocq-runtime.plugins.ssreflect" (fun () ->
+    Procq.set_keyword_state !frozen_lexer) ;;
 
 }
 

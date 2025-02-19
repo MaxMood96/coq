@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -20,17 +20,17 @@ Ltac2 Type match_kind := [
 | MatchContext
 ].
 
-Ltac2 @ external empty_context : unit -> context :=
-  "coq-core.plugins.ltac2" "pattern_empty_context".
+Ltac2 @ external empty_context : context :=
+  "rocq-runtime.plugins.ltac2" "pattern_empty_context".
 (** A trivial context only made of the hole. *)
 
 Ltac2 @ external matches : t -> constr -> (ident * constr) list :=
-  "coq-core.plugins.ltac2" "pattern_matches".
+  "rocq-runtime.plugins.ltac2" "pattern_matches".
 (** If the term matches the pattern, returns the bound variables. If it doesn't,
     fail with [Match_failure]. Panics if not focused. *)
 
 Ltac2 @ external matches_subterm : t -> constr -> context * ((ident * constr) list) :=
-  "coq-core.plugins.ltac2" "pattern_matches_subterm".
+  "rocq-runtime.plugins.ltac2" "pattern_matches_subterm".
 (** Returns a stream of results corresponding to all of the subterms of the term
     that matches the pattern as in [matches]. The stream is encoded as a
     backtracking value whose last exception is [Match_failure]. The additional
@@ -38,11 +38,11 @@ Ltac2 @ external matches_subterm : t -> constr -> context * ((ident * constr) li
     the instantiate function. *)
 
 Ltac2 @ external matches_vect : t -> constr -> constr array :=
-  "coq-core.plugins.ltac2" "pattern_matches_vect".
+  "rocq-runtime.plugins.ltac2" "pattern_matches_vect".
 (** Internal version of [matches] that does not return the identifiers. *)
 
 Ltac2 @ external matches_subterm_vect : t -> constr -> context * constr array :=
-  "coq-core.plugins.ltac2" "pattern_matches_subterm_vect".
+  "rocq-runtime.plugins.ltac2" "pattern_matches_subterm_vect".
 (** Internal version of [matches_subterms] that does not return the identifiers. *)
 
 Ltac2 @ external matches_goal :
@@ -50,7 +50,7 @@ Ltac2 @ external matches_goal :
   ((match_kind * t) option * (match_kind * t)) list ->
   (match_kind * t) ->
   ident array * context array * context array * constr array * context :=
-  "coq-core.plugins.ltac2" "pattern_matches_goal".
+  "rocq-runtime.plugins.ltac2" "pattern_matches_goal".
 (** Given a list of patterns [hpats] for hypotheses and one pattern [cpat] for the
     conclusion, [matches_goal rev hpats cpat] produces (a stream of) tuples of:
     - An array of idents, whose size is the length of [hpats], corresponding to the
@@ -72,12 +72,14 @@ Ltac2 @ external matches_goal :
 *)
 
 Ltac2 @ external instantiate : context -> constr -> constr :=
-  "coq-core.plugins.ltac2" "pattern_instantiate".
+  "rocq-runtime.plugins.ltac2" "pattern_instantiate".
 (** Fill the hole of a context with the given term. *)
 
 (** Implementation of Ltac matching over terms and goals *)
 
-Ltac2 lazy_match0 t pats :=
+Ltac2 Type 'a constr_matching := (match_kind * t * (context -> constr array -> 'a)) list.
+
+Ltac2 lazy_match0 t (pats:'a constr_matching) :=
   let rec interp m := match m with
   | [] => Control.zero Match_failure
   | p :: m =>
@@ -86,7 +88,7 @@ Ltac2 lazy_match0 t pats :=
     let p := match knd with
     | MatchPattern =>
       (fun _ =>
-        let context := empty_context () in
+        let context := empty_context in
         let bind := matches_vect pat t in
         fun _ => f context bind)
     | MatchContext =>
@@ -98,7 +100,7 @@ Ltac2 lazy_match0 t pats :=
   end in
   Control.once (fun () => interp pats) ().
 
-Ltac2 multi_match0 t pats :=
+Ltac2 multi_match0 t (pats:'a constr_matching) :=
   let rec interp e m := match m with
   | [] => Control.zero e
   | p :: m =>
@@ -107,7 +109,7 @@ Ltac2 multi_match0 t pats :=
     let p := match knd with
     | MatchPattern =>
       (fun _ =>
-        let context := empty_context () in
+        let context := empty_context in
         let bind := matches_vect pat t in
         f context bind)
     | MatchContext =>
@@ -121,7 +123,11 @@ Ltac2 multi_match0 t pats :=
 
 Ltac2 one_match0 t m := Control.once (fun _ => multi_match0 t m).
 
-Ltac2 lazy_goal_match0 rev pats :=
+Ltac2 Type 'a goal_matching :=
+  ((((match_kind * t) option * (match_kind * t)) list * (match_kind * t)) *
+     (ident array -> context array -> context array -> constr array -> context -> 'a)) list.
+
+Ltac2 lazy_goal_match0 rev (pats:'a goal_matching) :=
   let rec interp m := match m with
   | [] => Control.zero Match_failure
   | p :: m =>
@@ -136,7 +142,7 @@ Ltac2 lazy_goal_match0 rev pats :=
   end in
   Control.once (fun () => interp pats) ().
 
-Ltac2 multi_goal_match0 rev pats :=
+Ltac2 multi_goal_match0 rev (pats:'a goal_matching) :=
   let rec interp e m := match m with
   | [] => Control.zero e
   | p :: m =>

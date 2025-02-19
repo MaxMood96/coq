@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,25 +8,24 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-val default_toplevel : Names.DirPath.t
-
 type native_compiler = Coq_config.native_compiler =
   NativeOff | NativeOn of { ondemand : bool }
 
-type top = TopLogical of Names.DirPath.t | TopPhysical of string
+type top = TopLogical of string | TopPhysical of string
 
 type option_command =
   | OptionSet of string option
   | OptionUnset
-  | OptionAppend of string
 
-type require_injection = { lib: string; prefix: string option; export: Lib.export_flag option; }
+type export_flag = Export | Import
+
+type require_injection = { lib: string; prefix: string option; export: export_flag option; allow_failure: bool }
 (** Parameters follow [Library], that is to say, [lib,prefix,export]
     means require library [lib] from optional [prefix] and import or
     export if [export] is [Some Lib.Import]/[Some Lib.Export]. *)
 
 type injection_command =
-  | OptionInjection of (Goptions.option_name * option_command)
+  | OptionInjection of (string list * option_command)
   (** Set flags or options before the initial state is ready. *)
   | RequireInjection of require_injection
   (** Require libraries before the initial state is
@@ -44,6 +43,7 @@ type coqargs_logic_config = {
   impredicative_set : bool;
   indices_matter    : bool;
   type_in_type      : bool;
+  rewrite_rules     : bool;
   toplevel_name     : top;
 }
 
@@ -57,8 +57,20 @@ type coqargs_config = {
   native_compiler : native_compiler;
   native_output_dir : CUnix.physical_path;
   native_include_dirs : CUnix.physical_path list;
-  time        : time_config option;
+  output_directory : CUnix.physical_path option;
+  exclude_dirs : CUnix.physical_path list;
+  beautify : bool;
+  quiet : bool;
+  time : time_config option;
+  test_mode : bool;
+  profile : string option;
   print_emacs : bool;
+}
+
+type vo_path = {
+  implicit : bool; (** true if -R, otherwise -Q *)
+  unix_path : string;
+  rocq_path : string;
 }
 
 type coqargs_pre = {
@@ -67,19 +79,14 @@ type coqargs_pre = {
   load_rcfile : bool;
 
   ml_includes : CUnix.physical_path list;
-  vo_includes : Loadpath.vo_path list;
+  vo_includes : vo_path list;
 
   load_vernacular_list : (string * bool) list;
   injections  : injection_command list;
 }
 
-type coqargs_query =
-  | PrintWhere | PrintConfig
-  | PrintVersion | PrintMachineReadableVersion
-  | PrintHelp of Boot.Usage.specific_usage
-
 type coqargs_main =
-  | Queries of coqargs_query list
+  | Queries of Boot.Usage.query list
   | Run
 
 type coqargs_post = {
@@ -96,11 +103,9 @@ type t = {
 (* Default options *)
 val default : t
 
-val parse_args : usage:Boot.Usage.specific_usage -> init:t -> string list -> t * string list
+val parse_args : init:t -> string list -> t * string list
 
 val injection_commands : t -> injection_command list
-
-val dirpath_of_top : top -> Names.DirPath.t
 
 (* Common utilities *)
 
@@ -110,5 +115,3 @@ val get_bool : opt:string -> string -> bool
 val get_float : opt:string -> string -> float
 val error_missing_arg : string -> 'a
 val error_wrong_arg : string -> 'a
-
-val set_option : Goptions.option_name * option_command -> unit

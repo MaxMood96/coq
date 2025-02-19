@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -68,10 +68,11 @@ struct
     | DCoFix  of int
     | DInt    of Uint63.t
     | DFloat  of Float64.t
+    | DString of Pstring.t
     | DArray
 
   let compare_ci ci1 ci2 =
-    let c = Ind.CanOrd.compare ci1.ci_ind ci2.ci_ind in
+    let c = Label.compare (MutInd.label @@ fst ci1.ci_ind) (MutInd.label @@ fst ci2.ci_ind) in
     if c = 0 then
       let c = Int.compare ci1.ci_npar ci2.ci_npar in
       if c = 0 then
@@ -87,7 +88,7 @@ struct
   | DRel, _ -> -1 | _, DRel -> 1
   | DSort, DSort -> 0
   | DSort, _ -> -1 | _, DSort -> 1
-  | DRef gr1, DRef gr2 -> GlobRef.CanOrd.compare gr1 gr2
+  | DRef gr1, DRef gr2 -> GlobRef.UserOrd.compare gr1 gr2
   | DRef _, _ -> -1 | _, DRef _ -> 1
 
   | DProd, DProd -> 0
@@ -124,6 +125,10 @@ struct
 
   | DFloat _, _ -> -1 | _, DFloat _ -> 1
 
+  | DString s1, DString s2 -> Pstring.compare s1 s2
+
+  | DString _, _ -> -1 | _, DString _ -> 1
+
   | DArray, DArray -> 1
 
 end
@@ -143,7 +148,7 @@ sig
 
   (** [add c i dn] adds the binding [(c,i)] to [dn]. [c] can be a
      closed term or a pattern (with untyped Evars). No Metas accepted *)
-  val add : constr -> ident -> t -> t
+  val add : Environ.env -> constr -> ident -> t -> t
 
   (*
    * High-level primitives describing specific search problems
@@ -174,18 +179,18 @@ struct
   open DTerm
   open TDnet
 
-  let pat_of_constr c : (unit DTerm.t * Constr.t list) option =
+  let pat_of_constr env c : (unit DTerm.t * Constr.t list) option =
     let open GlobRef in
     let rec pat_of_constr c = match Constr.kind c with
     | Rel _          -> Some (DRel, [])
     | Sort _         -> Some (DSort, [])
     | Var i          -> Some (DRef (VarRef i), [])
-    | Const (c,u)    -> Some (DRef (ConstRef c), [])
-    | Ind (i,u)      -> Some (DRef (IndRef i), [])
-    | Construct (c,u)-> Some (DRef (ConstructRef c), [])
+    | Const (c,u)    -> Some (DRef (ConstRef (Environ.QConstant.canonize env c)), [])
+    | Ind (i,u)      -> Some (DRef (IndRef (Environ.QInd.canonize env i)), [])
+    | Construct (c,u)-> Some (DRef (ConstructRef (Environ.QConstruct.canonize env c)), [])
     | Meta _         -> assert false
     | Evar (i,_)     -> None
-    | Case (ci,u1,pms1,c1,_iv,c2,ca)     ->
+    | Case (ci,u1,pms1,(c1,_),_iv,c2,ca)     ->
       let f_ctx (_, p) = p in
       Some (DCase(ci), [f_ctx c1; c2] @ Array.map_to_list f_ctx ca)
     | Fix ((ia,i),(_,ta,ca)) ->
@@ -201,12 +206,13 @@ struct
       let a = ca.(len - 1) in
       let ca = Array.sub ca 0 (len - 1) in
       Some (DApp, [mkApp (f, ca); a])
-    | Proj (p,c) ->
+    | Proj (p,_,c) ->
       (* UnsafeMonomorphic is fine because the term will only be used
          by pat_of_constr which ignores universes *)
       pat_of_constr (mkApp (UnsafeMonomorphic.mkConst (Projection.constant p), [|c|]))
     | Int i -> Some (DInt i, [])
     | Float f -> Some (DFloat f, [])
+    | String s -> Some (DString s, [])
     | Array (_u,t,def,ty) ->
       Some (DArray, Array.to_list t @ [def ; ty])
     in
@@ -218,12 +224,12 @@ struct
 
   let empty = TDnet.empty
 
-  let add (c:constr) (id:Ident.t) (dn:t) =
+  let add env (c:constr) (id:Ident.t) (dn:t) =
     (* We used to consider the types of the product as well, but since the dnet
        is only computing an approximation rectified by [filtering] we do not
        anymore. *)
     let (ctx, c) = Term.decompose_prod_decls c in
-    let c = TDnet.pattern pat_of_constr c in
+    let c = TDnet.pattern (fun c -> pat_of_constr env c) c in
     TDnet.add dn c id
 
 (* App(c,[t1,...tn]) -> ([c,t1,...,tn-1],tn)
@@ -283,7 +289,7 @@ let align_prod_letin sigma c a =
   let l1 = CList.firstn lc l in
   n - lc, EConstr.it_mkProd_or_LetIn a l1
 
-  let decomp pat = match pat_of_constr pat with
+  let decomp env pat = match pat_of_constr env pat with
   | None -> Dn.Everything
   | Some (lbl, args) -> Dn.Label (lbl, args)
 
@@ -298,7 +304,7 @@ let align_prod_letin sigma c a =
            with Invalid_argument _ -> 0, c_id in
         if filtering env Evd.empty ctx Conversion.CUMUL whole_c wc then id :: acc
         else acc
-      ) (TDnet.lookup dn decomp dpat) []
+      ) (TDnet.lookup dn (fun c -> decomp env c) dpat) []
 
   let find_all dn = TDnet.lookup dn (fun () -> Everything) ()
 
@@ -367,6 +373,7 @@ let one_base where conds tac_main bas =
   Proofview.Goal.enter begin fun gl ->
     let sigma = Proofview.Goal.sigma gl in
     let subst, ctx' = UnivGen.fresh_universe_context_set_instance h.rew_ctx in
+    let subst = Sorts.QVar.Map.empty, subst in
     let c' = Vars.subst_univs_level_constr subst h.rew_lemma in
     let sigma = Evd.merge_context_set Evd.univ_flexible sigma ctx' in
     Proofview.tclTHEN (Proofview.Unsafe.tclEVARS sigma) (rewrite h.rew_l2r c' tc)
@@ -376,11 +383,11 @@ let one_base where conds tac_main bas =
   let eval h =
     let tac = match h.rew_tac with
     | None -> Proofview.tclUNIT ()
-    | Some (Genarg.GenArg (Genarg.Glbwit wit, tac)) ->
+    | Some tac ->
       let ist = { Geninterp.lfun = Id.Map.empty
                 ; poly
                 ; extra = Geninterp.TacStore.empty } in
-      Ftactic.run (Geninterp.interp wit ist tac) (fun _ -> Proofview.tclUNIT ())
+      Ftactic.run (Geninterp.generic_interp ist tac) (fun _ -> Proofview.tclUNIT ())
     in
     Tacticals.tclREPEAT_MAIN (Tacticals.tclTHENFIRST (try_rewrite h tac) tac_main)
   in
@@ -465,7 +472,7 @@ let auto_multi_rewrite_with ?(conds=Naive) tac_main lbas cl =
 let cache_hintrewrite (rbase,lrl) =
   let base = try raw_find_base rbase with Not_found -> empty_rewrite_db in
   let fold accu r = {
-    rdb_hintdn = HintDN.add r.rew_pat r accu.rdb_hintdn;
+    rdb_hintdn = HintDN.add (Global.env ()) r.rew_pat r accu.rdb_hintdn;
     rdb_order = KNmap.add r.rew_id accu.rdb_maxuid accu.rdb_order;
     rdb_maxuid = accu.rdb_maxuid + 1;
   } in
@@ -478,7 +485,7 @@ let subst_hintrewrite (subst,(rbase,list as node)) =
     let cst' = subst_mps subst hint.rew_lemma in
     let typ' = subst_mps subst hint.rew_type in
     let pat' = subst_mps subst hint.rew_pat in
-    let t' = Option.Smart.map (Genintern.generic_substitute subst) hint.rew_tac in
+    let t' = Option.Smart.map (Gensubst.generic_substitute subst) hint.rew_tac in
       if hint.rew_id == id' && hint.rew_lemma == cst' && hint.rew_type == typ' &&
          hint.rew_tac == t' && hint.rew_pat == pat' then hint else
         { hint with
@@ -490,17 +497,12 @@ let subst_hintrewrite (subst,(rbase,list as node)) =
       (rbase,list')
 
 (* Declaration of the Hint Rewrite library object *)
-let inGlobalHintRewrite : string * rew_rule list -> Libobject.obj =
+let inHintRewrite : Libobject.locality * (string * rew_rule list) -> Libobject.obj =
   let open Libobject in
-  declare_object @@ superglobal_object_nodischarge "HINT_REWRITE_GLOBAL"
+  declare_object @@ object_with_locality "HINT_REWRITE_GLOBAL"
     ~cache:cache_hintrewrite
     ~subst:(Some subst_hintrewrite)
-
-let inExportHintRewrite : string * rew_rule list -> Libobject.obj =
-  let open Libobject in
-  declare_object @@ global_object_nodischarge ~cat:Hints.hint_cat "HINT_REWRITE_EXPORT"
-    ~cache:cache_hintrewrite
-    ~subst:(Some subst_hintrewrite)
+    ~discharge:(fun _ -> assert false)
 
 type hypinfo = {
   hyp_ty : EConstr.types;
@@ -524,7 +526,7 @@ let decompose_applied_relation env sigma c ctype left2right =
     match find_rel ctype with
     | Some c -> Some { hyp_pat = c; hyp_ty = ctype }
     | None ->
-        let ctx,t' = Reductionops.hnf_decompose_prod_decls env sigma ctype in (* Search for underlying eq *)
+        let ctx,t' = Reductionops.whd_decompose_prod_decls env sigma ctype in (* Search for underlying eq *)
         let ctype = EConstr.it_mkProd_or_LetIn t' ctx in
         match find_rel ctype with
         | Some c -> Some { hyp_pat = c; hyp_ty = ctype }
@@ -539,12 +541,9 @@ let find_applied_relation ?loc env sigma c left2right =
                     (str"The type" ++ spc () ++ Printer.pr_econstr_env env sigma ctype ++
                        spc () ++ str"of this term does not end with an applied relation.")
 
-let default_hint_rewrite_locality () =
-  if Lib.sections_are_opened () then Hints.Local
-  else Hints.Export
-
 (* To add rewriting rules to a base *)
 let add_rew_rules ~locality base lrul =
+  let () = Locality.check_locality_nodischarge locality in
   let env = Global.env () in
   let sigma = Evd.from_env env in
   let ist = Genintern.empty_glob_sign ~strict:true (Global.env ()) in
@@ -559,20 +558,4 @@ let add_rew_rules ~locality base lrul =
       rew_tac = Option.map intern t }
   in
   let lrul = List.map map lrul in
-  let open Hints in
-  match locality with
-  | Local -> cache_hintrewrite (base,lrul)
-  | SuperGlobal ->
-    let () =
-      if Lib.sections_are_opened () then
-      CErrors.user_err Pp.(str
-        "This command does not support the global attribute in sections.");
-    in
-    Lib.add_leaf (inGlobalHintRewrite (base,lrul))
-  | Export ->
-    let () =
-      if Lib.sections_are_opened () then
-        CErrors.user_err Pp.(str
-          "This command does not support the export attribute in sections.");
-    in
-    Lib.add_leaf (inExportHintRewrite (base,lrul))
+  Lib.add_leaf (inHintRewrite (locality,(base,lrul)))

@@ -10,7 +10,6 @@ git_download quickchick
 if [ "$DOWNLOAD_ONLY" ]; then exit 0; fi
 
 ( cd "${CI_BUILD_DIR}/quickchick"
-  make
-  make install
-  make tests
+  dune build -p coq-quickchick @install
+  dune install -p coq-quickchick --prefix=$CI_INSTALL_DIR
 )

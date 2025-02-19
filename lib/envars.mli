@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -9,9 +9,14 @@
 (************************************************************************)
 
 (** This file provides a high-level interface to the environment variables
-    needed by Coq to run (such as coqlib). The values of these variables
+    needed by Rocq to run (such as coqlib). The values of these variables
     may come from different sources (shell environment variables,
-    command line options, options set at the time Coq was build). *)
+    command line options, options set at the time Rocq was build). *)
+
+val getenv_rocq : string -> string option
+(** [getenv_rocq name] returns the value of "ROCQ$name" if it exists,
+    otherwise the value of "COQ$name" if it exists and warns that it
+    is deprecated, otherwise [None]. *)
 
 (** [expand_path_macros warn s] substitutes environment variables
     in a string by their values. This function also takes care of
@@ -25,9 +30,6 @@ val expand_path_macros : warn:(string -> unit) -> string -> string
     exists, then other common names are tried (HOMEDRIVE, HOMEPATH,
     USERPROFILE). If all of them fail, [warn] is called. *)
 val home : warn:(string -> unit) -> string
-
-(** [docdir] is the path to the installed documentation. *)
-val docdir : unit -> string
 
 (** [datadir] is the path to the installed data directory. *)
 val datadir : unit -> string
@@ -47,12 +49,9 @@ val coqroot : string
 (** [coqpath] is the standard path to coq.
     Notice that coqpath is stored in reverse order, since that is
     the order it gets added to the search path. *)
-val coqpath : string list
+val coqpath : unit -> string list
 
-(** [camlfind ()] is the path to the ocamlfind binary. *)
-val ocamlfind : unit -> string
-
-(** Coq tries to honor the XDG Base Directory Specification to access
+(** Rocq tries to honor the XDG Base Directory Specification to access
     the user's configuration files.
 
     see [http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html]
@@ -61,6 +60,3 @@ val xdg_config_home : (string -> unit) -> string
 val xdg_data_home   : (string -> unit) -> string
 val xdg_data_dirs   : (string -> unit) -> string list
 val xdg_dirs : warn : (string -> unit) -> string list
-
-(** {6 Prints the configuration information } *)
-val print_config : ?prefix_var_name:string -> out_channel -> unit
