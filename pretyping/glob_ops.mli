@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -13,13 +13,24 @@ open Glob_term
 
 val map_glob_sort_gen : ('a -> 'b) -> 'a glob_sort_gen -> 'b glob_sort_gen
 
+val glob_Type_sort : glob_sort
+val glob_SProp_sort : glob_sort
+val glob_Prop_sort : glob_sort
+val glob_Set_sort : glob_sort
+
 (** Equalities *)
 
 val glob_sort_gen_eq : ('a -> 'a -> bool) -> 'a glob_sort_gen -> 'a glob_sort_gen -> bool
 
 val glob_sort_eq : Glob_term.glob_sort -> Glob_term.glob_sort -> bool
 
+val glob_qvar_eq :  glob_qvar -> glob_qvar -> bool
+
+val glob_quality_eq :  glob_quality -> glob_quality -> bool
+
 val glob_level_eq : Glob_term.glob_level -> Glob_term.glob_level -> bool
+
+val relevance_info_eq : relevance_info -> relevance_info -> bool
 
 val cases_pattern_eq : 'a cases_pattern_g -> 'a cases_pattern_g -> bool
 
@@ -55,9 +66,13 @@ val binding_kind_eq : binding_kind -> binding_kind -> bool
 val map_glob_constr_left_to_right :
   (glob_constr -> glob_constr) -> glob_constr -> glob_constr
 
+val map_glob_constr_left_to_right_with_names :
+  (glob_constr -> glob_constr) -> (Name.t -> Name.t) -> glob_constr -> glob_constr
+
 val warn_variable_collision : ?loc:Loc.t -> Id.t -> unit
 
 val mk_glob_constr_eq : (glob_constr -> glob_constr -> bool) ->
+  (Name.t -> Name.t -> glob_constr option -> glob_constr option -> bool) ->
   glob_constr -> glob_constr -> bool
 
 val fold_glob_constr : ('a -> glob_constr -> 'a) -> 'a -> glob_constr -> 'a
@@ -112,3 +127,7 @@ val add_patterns_for_params_remove_local_defs : Environ.env -> constructor ->
   'a cases_pattern_g list -> 'a cases_pattern_g list
 
 val empty_lvar : Ltac_pretype.ltac_var_map
+
+val kind_of_glob_kind : glob_evar_kind -> Evar_kinds.t
+
+val naming_of_glob_kind : glob_evar_kind -> Namegen.intro_pattern_naming_expr

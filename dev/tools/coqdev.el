@@ -1,13 +1,13 @@
-;;; coqdev.el --- Emacs helpers for Coq development  -*- lexical-binding:t -*-
+;;; coqdev.el --- Emacs helpers for Rocq development  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2018 The Coq Development Team
+;; Copyright (C) 2018 The Rocq Development Team
 
 ;; Maintainer: coqdev@inria.fr
 
 ;;; Commentary:
 
 ;; Helpers to set compilation commands, proof general variables, etc
-;; for Coq development
+;; for Rocq development
 
 ;; You can disable individual features without editing this file by
 ;; using `remove-hook', for instance
@@ -27,7 +27,7 @@
 ;; check out a malicious commit Emacs startup would allow it to run
 ;; arbitrary code, to avoid this you can copy coqdev.el to any
 ;; location and adjust the load path accordingly (of course if you run
-;; ./configure to compile Coq it is already too late).
+;; ./configure to compile Rocq it is already too late).
 
 ;;; Code:
 (require 'ocamldebug nil 'noerror)
@@ -35,24 +35,29 @@
 (require 'seq)
 (require 'subr-x)
 
+;; locate-dominating-file would call tramp handlers which call
+;; hack-local-variables-hook which call this recursively
+;; a proper fix would use some hook other than hack-local-variables
+;; for now just return nil for remote files
 (defun coqdev-default-directory ()
-  "Return the Coq repository containing `default-directory'."
-  (let ((dir (seq-some
-              (lambda (f) (locate-dominating-file default-directory f))
-              '("META.coq" "META.coq.in" "META.coq-core.in" "coqpp"))))
-    (when dir (expand-file-name dir))))
+  "Return the Rocq repository containing `default-directory'."
+  (unless (file-remote-p default-directory)
+    (let ((dir (seq-some
+                (lambda (f) (locate-dominating-file default-directory f))
+                '("META.coq" "META.coq.in" "META.coq-core.in" "coqpp"))))
+      (when dir (expand-file-name dir)))))
 
 (defun coqdev-setup-compile-command ()
-  "Setup `compile-command' for Coq development."
+  "Setup `compile-command' for Rocq development."
   (let ((dir (coqdev-default-directory)))
     (when dir (setq-local compile-command (concat "cd " (shell-quote-argument dir) "
-dune build @check # coq-core.install dev/shim/coqtop")))))
+dune build @check # rocq-runtime.install")))))
 (add-hook 'hack-local-variables-hook #'coqdev-setup-compile-command)
 
 (defvar camldebug-command-name) ; from camldebug.el (caml package)
 (defvar ocamldebug-command-name) ; from ocamldebug.el (tuareg package)
 (defun coqdev-setup-camldebug ()
-  "Setup ocamldebug for Coq development.
+  "Setup ocamldebug for Rocq development.
 
 Specifically `camldebug-command-name' and `ocamldebug-command-name'."
   (let ((dir (coqdev-default-directory)))
@@ -64,7 +69,7 @@ Specifically `camldebug-command-name' and `ocamldebug-command-name'."
 (add-hook 'hack-local-variables-hook #'coqdev-setup-camldebug)
 
 (defun coqdev-setup-tags ()
-  "Setup `tags-file-name' for Coq development."
+  "Setup `tags-file-name' for Rocq development."
   (let ((dir (coqdev-default-directory)))
     (when dir (setq-local tags-file-name (concat dir "TAGS")))))
 (add-hook 'hack-local-variables-hook #'coqdev-setup-tags)
@@ -79,14 +84,12 @@ Specifically `camldebug-command-name' and `ocamldebug-command-name'."
 (setq-default coq-prog-args nil)
 
 (defun coqdev-setup-proofgeneral ()
-  "Setup Proofgeneral variables for Coq development.
+  "Setup Proofgeneral variables for Rocq development.
 
 Note that this function is executed before _Coqproject is read if it exists."
   (let ((dir (coqdev-default-directory)))
     (when dir
-      (if (string-prefix-p (concat dir "_build_ci") default-directory)
-          (setq-local coq-prog-name (concat dir "_build/install/default/bin/coqtop"))
-        (setq-local coq-prog-name (concat dir "_build/default/dev/shim/coqtop"))))))
+      (setq-local coq-prog-name (concat dir "_build/install/default/bin/coqtop")))))
 (add-hook 'hack-local-variables-hook #'coqdev-setup-proofgeneral)
 
 (defvar coqdev-ocamldebug-command "dune exec -- dev/dune-dbg -emacs coqc /tmp/foo.v"
@@ -194,7 +197,7 @@ Otherwise return `nil'."
 (defvar bug-reference-bug-regexp)
 (defvar bug-reference-url-format)
 (defun coqdev-setup-bug-reference-mode ()
-  "Setup `bug-reference-bug-regexp' and `bug-reference-url-format' for Coq.
+  "Setup `bug-reference-bug-regexp' and `bug-reference-url-format' for Rocq.
 
 This does not enable `bug-reference-mode'."
   (let ((dir (coqdev-default-directory)))

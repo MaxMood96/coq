@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,11 +11,13 @@
 module Dep : sig
   type t =
   | Require of string
-  (** module basename, to which we later append .vo or .vio or .vos *)
-  | Ml of string * string
+  (** module basename, to which we later append .vo or .vos *)
+  | Ml of string
   (** plugin basename and byte extension, resolved from Declare Ml Module *)
   | Other of string
   (** load, meta, and external dependencies *)
+
+  module Set : CSet.ExtS with type elt = t
 end
 
 type t =

@@ -13,57 +13,64 @@
   ;   + %{bin:coqdoc} etc...
   ;   + config/coq_config.py
   ;   + tools/coqdoc/coqdoc.css
+  (package rocq-runtime)
   (package coq-core)
-  (package coq-stdlib)
+  (package rocq-core)
   (source_tree sphinx)
   (source_tree tools/coqrst)
   unreleased.rst
-  (env_var SPHINXWARNOPT)))
+  (env_var SPHINXWARNOPT)
+  (env_var COQRST_EXTRA)))
 
 (rule
- (targets refman-html)
+ (targets
+  (dir refman-html))
  (alias refman-html)
  (package coq-doc)
  ; Cannot use this deps alias because of ocaml/dune#3415
  ; (deps (alias refman-deps))
  ; EJGA: note this should've been fixed in dune master as of 05/03/2021
  (deps
+  (package rocq-runtime)
   (package coq-core)
-  (package coq-stdlib)
+  (package rocq-core)
   (source_tree sphinx)
   (source_tree tools/coqrst)
   ../config/coq_config.py
   unreleased.rst
-  (env_var SPHINXWARNOPT))
+  (env_var SPHINXWARNOPT)
+  (env_var COQRST_EXTRA))
  (action
   (run env sphinx-build -q %{env:SPHINXWARNOPT=-W} -b html sphinx %{targets})))
 
 (rule
- (targets refman-pdf)
+ (targets
+  (dir refman-pdf))
  (alias refman-pdf)
  (package coq-doc)
  ; Cannot use this deps alias because of ocaml/dune#3415
  ; (deps (alias refman-deps))
  ; EJGA: note this should've been fixed in dune master as of 05/03/2021
  (deps
+  (package rocq-runtime)
   (package coq-core)
-  (package coq-stdlib)
+  (package rocq-core)
   (source_tree sphinx)
   (source_tree tools/coqrst)
+  ../config/coq_config.py
+  ../ide/rocqide/coq.png
   unreleased.rst
-  (env_var SPHINXWARNOPT))
+  (env_var SPHINXWARNOPT)
+  (env_var COQRST_EXTRA))
  (action
   (progn
    (run env sphinx-build -q %{env:SPHINXWARNOPT=-W} -b latex sphinx %{targets})
    (chdir %{targets} (run make LATEXMKOPTS=-silent)))))
 
-; Installable directories are not yet fully supported by Dune.  See
-; ocaml/dune#1868.  Yet, this makes coq-doc.install a valid target to
-; generate the whole Coq documentation.  And the result under
-; _build/install/default/doc/coq-doc looks just right!
-
 (install
- (files (refman-html as html/refman) (refman-pdf as pdf/refman))
+ (dirs
+  (refman-html as html/refman)
+  (refman-pdf as pdf/refman))
  (section doc)
  (package coq-doc))
 

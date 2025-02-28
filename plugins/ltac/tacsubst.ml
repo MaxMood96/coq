@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -99,14 +99,14 @@ let subst_glob_constr_or_pattern subst (bvars,c,p) =
   let sigma = Evd.from_env env in
   (bvars,subst_glob_constr subst c,subst_pattern env sigma subst p)
 
-let subst_redexp subst =
+let subst_glob_red_expr subst =
   Redops.map_red_expr_gen
     (subst_glob_constr subst)
     (subst_evaluable subst)
-    (subst_glob_constr_or_pattern subst)
+    (subst_glob_constr subst)
 
 let subst_raw_may_eval subst = function
-  | ConstrEval (r,c) -> ConstrEval (subst_redexp subst r,subst_glob_constr subst c)
+  | ConstrEval (r,c) -> ConstrEval (subst_glob_red_expr subst r,subst_glob_constr subst c)
   | ConstrContext (locid,c) -> ConstrContext (locid,subst_glob_constr subst c)
   | ConstrTypeOf c -> ConstrTypeOf (subst_glob_constr subst c)
   | ConstrTerm c -> ConstrTerm (subst_glob_constr subst c)
@@ -154,9 +154,9 @@ let rec subst_atomic subst (t:glob_atomic_tactic_expr) = match t with
       TacInductionDestruct (isrec,ev,(l',el'))
 
   (* Conversion *)
-  | TacReduce (r,cl) -> TacReduce (subst_redexp subst r, cl)
+  | TacReduce (r,cl) -> TacReduce (subst_glob_red_expr subst r, cl)
   | TacChange (check,op,c,cl) ->
-      TacChange (check,Option.map (subst_glob_constr_or_pattern subst) op,
+      TacChange (check,Option.map (subst_glob_constr subst) op,
         subst_glob_constr subst c, cl)
 
   (* Equality and inversion *)
@@ -216,7 +216,6 @@ and subst_tactic subst = CAst.map (function
       TacOrelse (subst_tactic subst tac1,subst_tactic subst tac2)
   | TacFirst l -> TacFirst (List.map (subst_tactic subst) l)
   | TacSolve l -> TacSolve (List.map (subst_tactic subst) l)
-  | TacComplete tac -> TacComplete (subst_tactic subst tac)
   | TacArg a -> TacArg (subst_tacarg subst a)
   | TacSelect (s, tac) -> TacSelect (s, subst_tactic subst tac)
 
@@ -273,29 +272,29 @@ and subst_genarg subst (GenArg (Glbwit wit, x)) =
     let q = out_gen (glbwit wit2) (subst_genarg subst (in_gen (glbwit wit2) q)) in
     in_gen (glbwit (wit_pair wit1 wit2)) (p, q)
   | ExtraArg s ->
-      Genintern.generic_substitute subst (in_gen (glbwit wit) x)
+      Gensubst.generic_substitute subst (in_gen (glbwit wit) x)
 
 (** Registering *)
 
 let () =
-  Genintern.register_subst0 wit_int_or_var (fun _ v -> v);
-  Genintern.register_subst0 wit_nat_or_var (fun _ v -> v);
-  Genintern.register_subst0 wit_ref subst_global_reference;
-  Genintern.register_subst0 wit_smart_global subst_global_reference;
-  Genintern.register_subst0 wit_pre_ident (fun _ v -> v);
-  Genintern.register_subst0 wit_ident (fun _ v -> v);
-  Genintern.register_subst0 wit_hyp (fun _ v -> v);
-  Genintern.register_subst0 wit_intropattern subst_intro_pattern [@warning "-3"];
-  Genintern.register_subst0 wit_simple_intropattern subst_intro_pattern;
-  Genintern.register_subst0 wit_tactic subst_tactic;
-  Genintern.register_subst0 wit_ltac subst_tactic;
-  Genintern.register_subst0 wit_constr subst_glob_constr;
-  Genintern.register_subst0 wit_clause_dft_concl (fun _ v -> v);
-  Genintern.register_subst0 wit_uconstr (fun subst c -> subst_glob_constr subst c);
-  Genintern.register_subst0 wit_open_constr (fun subst c -> subst_glob_constr subst c);
-  Genintern.register_subst0 Redexpr.wit_red_expr subst_redexp;
-  Genintern.register_subst0 wit_quant_hyp subst_declared_or_quantified_hypothesis;
-  Genintern.register_subst0 wit_bindings subst_bindings;
-  Genintern.register_subst0 wit_constr_with_bindings subst_glob_with_bindings;
-  Genintern.register_subst0 wit_destruction_arg subst_destruction_arg;
+  Gensubst.register_subst0 wit_int_or_var (fun _ v -> v);
+  Gensubst.register_subst0 wit_nat_or_var (fun _ v -> v);
+  Gensubst.register_subst0 wit_ref subst_global_reference;
+  Gensubst.register_subst0 wit_smart_global subst_global_reference;
+  Gensubst.register_subst0 wit_pre_ident (fun _ v -> v);
+  Gensubst.register_subst0 wit_ident (fun _ v -> v);
+  Gensubst.register_subst0 wit_hyp (fun _ v -> v);
+  Gensubst.register_subst0 wit_intropattern subst_intro_pattern [@warning "-3"];
+  Gensubst.register_subst0 wit_simple_intropattern subst_intro_pattern;
+  Gensubst.register_subst0 wit_tactic subst_tactic;
+  Gensubst.register_subst0 wit_ltac subst_tactic;
+  Gensubst.register_subst0 wit_constr subst_glob_constr;
+  Gensubst.register_subst0 wit_clause_dft_concl (fun _ v -> v);
+  Gensubst.register_subst0 wit_uconstr (fun subst c -> subst_glob_constr subst c);
+  Gensubst.register_subst0 wit_open_constr (fun subst c -> subst_glob_constr subst c);
+  Gensubst.register_subst0 Redexpr.wit_red_expr subst_glob_red_expr;
+  Gensubst.register_subst0 wit_quant_hyp subst_declared_or_quantified_hypothesis;
+  Gensubst.register_subst0 wit_bindings subst_bindings;
+  Gensubst.register_subst0 wit_constr_with_bindings subst_glob_with_bindings;
+  Gensubst.register_subst0 wit_destruction_arg subst_destruction_arg;
   ()

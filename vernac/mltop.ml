@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -18,28 +18,18 @@ open Pp
    dependencies, and manage path for us.
 
    A bit of infrastructure is still in place to support a "legacy"
-   mode where Coq used to manage the OCaml include paths and directly
+   mode where Rocq used to manage the OCaml include paths and directly
    load .cmxs/.cma files itself.
 
    We also place here the required code for interacting with the
    Summary and Libobject, and provide an API so plugins can interact
-   with this loading/unloading for Coq-specific purposes adding their
+   with this loading/unloading for Rocq-specific purposes adding their
    own init functions, given that OCaml cannot unlink a dynamic module.
 
 *)
 
 
-(* This path is where we look for .cmo/.cmxs using the legacy method *)
-let coq_mlpath_copy = ref [Sys.getcwd ()]
-let keep_copy_mlpath path =
-  let cpath = CUnix.canonical_path_name path in
-  let filter path' = not (String.equal cpath path') in
-  coq_mlpath_copy := cpath :: List.filter filter !coq_mlpath_copy
-
 module Fl_internals = struct
-
-  (* Check that [m] is a findlib library name *)
-  let validate_lib_name m = String.index_opt m '.' <> None
 
   (* Fl_split.in_words is not exported *)
   let fl_split_in_words s =
@@ -85,109 +75,40 @@ module Fl_internals = struct
 
 end
 
+let dbg_dynlink = CDebug.create ~name:"dynlink" ()
+
 module PluginSpec : sig
 
   type t
 
-  (* Main constructor, takes the format used in Declare ML Module *)
-  val of_declare_ml_format : string -> t
+  (* Main constructor, takes the format used in Declare ML Module.
+     With [usercode:true], warn instead of error on legacy syntax. *)
+  val of_package : ?usercode:bool -> string -> t
 
-  (* repr/unrepr are internal and only needed for the summary and other low-level stuff *)
-  val repr : t -> string option * string
-  val unrepr : string option * string -> t
+  val to_package : t -> string
 
   (* Load a plugin, low-level, that is to say, will directly call the
      loading mechanism in OCaml/findlib *)
   val load : t -> unit
 
   (* Compute a digest, a findlib library name have more than one
-     plugin .cmxs, however this is not the case in Coq. Maybe we
+     plugin .cmxs, however this is not the case in Rocq. Maybe we
      should strengthen this invariant. *)
   val digest : t -> Digest.t list
 
+  (** bool = true for implicit dependencies *)
+  val add_deps : t list -> (bool * t) list
+
   val pp : t -> string
 
-  module Set : CSet.S with type elt = t
+  module Set : CSet.ExtS with type elt = t
   module Map : CMap.ExtS with type key = t and module Set := Set
 
 end = struct
 
-  type t = { file : string option; lib : string }
+  type t = { lib : string }
 
-  module Errors = struct
-
-    let plugin_name_should_contain_dot m =
-      CErrors.user_err
-        Pp.(str Format.(asprintf "%s is not a valid plugin name anymore." m) ++ spc() ++
-            str "Plugins should be loaded using their public name" ++ spc () ++
-            str "according to findlib, for example package-name.foo and not " ++
-            str "foo_plugin.")
-
-    let plugin_name_invalid_format m =
-      CErrors.user_err
-        Pp.(str Format.(asprintf "%s is not a valid plugin name." m) ++ spc () ++
-            str "It should be a public findlib name, e.g. package-name.foo," ++ spc () ++
-            str "or a legacy name followed by a findlib public name, e.g. "++ spc () ++
-            str "legacy_plugin:package-name.plugin.")
-
-  end
-
-  let legacy_mapping = Core_plugins_findlib_compat.legacy_to_findlib
-
-  let of_declare_ml_format m =
-    match String.split_on_char ':' m with
-    | [file] when List.mem_assoc file legacy_mapping ->
-      { file = Some file; lib = String.concat "." ("coq-core" :: List.assoc file legacy_mapping) }
-    | [x] when not (Fl_internals.validate_lib_name x) ->
-      Errors.plugin_name_should_contain_dot m
-    | [ file; lib ] ->
-      { file = Some file; lib }
-    | [ lib ] ->
-      { file = None; lib }
-    | [] -> assert false
-    | _ :: _ :: _ ->
-      Errors.plugin_name_invalid_format m
-
-  (* Adds the corresponding extension .cmo/.cma or .cmxs. Dune and
-     coq_makefile byte plugins do differ in the choice of extension,
-     hence the probing. *)
-  let select_plugin_version base =
-    if Sys.(backend_type = Native)
-    then base ^ ".cmxs"
-    else
-      let name = base ^ ".cmo" in
-      if System.is_in_path !coq_mlpath_copy name
-      then name else base ^ ".cma"
-
-  let load = function
-    | { file = None; lib } ->
-      Fl_dynload.load_packages [lib]
-    | { file = Some file; lib } ->
-      let file = select_plugin_version file in
-      let _, gname = System.find_file_in_path ~warn:false !coq_mlpath_copy file in
-      Dynlink.loadfile gname;
-      Findlib.(record_package Record_load) lib
-
-  let digest s =
-    match s with
-    | { file = Some file; _ } ->
-      let file = select_plugin_version file in
-      let _, gname = System.find_file_in_path ~warn:false !coq_mlpath_copy file in
-      [Digest.file gname]
-    | { file = None; lib } ->
-      let plugins = Fl_internals.fl_find_plugins lib in
-      List.map Digest.file plugins
-
-  let repr { file; lib } = ( file, lib )
-  let unrepr ( file, lib ) = { file; lib }
-
-  let compare { lib = l1; _ } { lib = l2; _ } = String.compare l1 l2
-
-  let pp = function
-    | { file = None; lib } -> lib
-    | { file = Some file; lib } ->
-      let file = select_plugin_version file in
-      Filename.basename file ^ " (using legacy method)"
+  let compare { lib = l1 } { lib = l2 } = String.compare l1 l2
 
   module Self = struct
       type nonrec t = t
@@ -197,9 +118,103 @@ end = struct
   module Set = CSet.Make(Self)
   module Map = CMap.Make(Self)
 
+  module Errors = struct
+
+    let warn_legacy_loading =
+      CWarnings.create ~name:"legacy-loading-removed" ~category:Deprecation.Version.v9_0
+        Pp.(fun name ->
+            str "Legacy loading plugin method has been removed from Rocq, \
+                 and the `:` syntax is deprecated, and its first \
+                 argument ignored; please remove \"" ++
+            str name ++ str ":\" from your Declare ML")
+
+    let plugin_name_invalid_format m =
+      CErrors.user_err
+        Pp.(str Format.(asprintf "%s is not a valid plugin name." m) ++ spc () ++
+            str "It should be a public findlib name, e.g. package-name.foo." ++ spc () ++
+            str "Legacy names followed by a findlib public name, e.g. "++ spc () ++
+            str "legacy_plugin:package-name.plugin," ++ spc() ++
+            str "are not supported anymore.")
+
+    let warn_coq_core =
+      CWarnings.create ~name:"coq-core-plugin" ~category:Deprecation.Version.v9_0
+        Pp.(fun () -> str "\"coq-core\" has been renamed to \"rocq-runtime\".")
+
+  end
+
+  (* We would properly load the rocq-runtime cmxs because of the
+     virtual coq-core findlib package, but we would not initialize the plugin.
+     eg [Declare ML Module "coq-core.plugins.ltac". Ltac foo := idtac.] would fail
+     as the grammar for Ltac is not activated. *)
+  let compat_coq_core lib =
+    let old_prefix = "coq-core.plugins." in
+    if CString.is_prefix old_prefix lib
+    then begin
+      Errors.warn_coq_core ();
+      let old_len = String.length old_prefix in
+      "rocq-runtime.plugins." ^ (CString.sub lib old_len (String.length lib - old_len))
+    end
+    else lib
+
+  let of_package ?(usercode=false) m =
+    let lib = match String.split_on_char ':' m with
+      | [ lib ] -> lib
+      | [cmxs; lib] when usercode ->
+        Errors.warn_legacy_loading cmxs;
+        lib
+      | _ -> Errors.plugin_name_invalid_format m
+    in
+    let lib = if usercode then compat_coq_core lib else lib in
+    { lib }
+
+  let to_package { lib } = lib
+
+  let load = function
+    | { lib } ->
+      if Findlib.is_recorded_package lib then
+        dbg_dynlink Pp.(fun () -> str lib ++ str " already loaded")
+      else begin
+        (* no point in using Fl_dynload since we [add_deps] to get digests *)
+        let plugins = Fl_internals.fl_find_plugins lib in
+        dbg_dynlink Pp.(fun () ->
+            str lib ++ str ": linking" ++ spc() ++
+            prlist_with_sep spc str plugins);
+        List.iter Dynlink.loadfile plugins;
+        Findlib.record_package Record_load lib
+      end
+
+  let add_deps plugins =
+    let explicit = Set.of_list plugins in
+    let preds = Findlib.recorded_predicates() in
+    let allplugins = Findlib.package_deep_ancestors preds (List.map to_package plugins) in
+    let deps = List.filter_map (fun lib ->
+        (* comes from findlib so guaranteed valid *)
+        let plugin = { lib } in
+        let explicit = Set.mem plugin explicit in
+        (* only add not-yet-loaded implicit deps *)
+        if not explicit && Findlib.is_recorded_package lib then None
+        else Some (not explicit, plugin))
+      allplugins
+    in
+    dbg_dynlink Pp.(fun () ->
+        str "for " ++ prlist_with_sep spc (fun {lib} -> str lib) plugins ++
+        str ":" ++ fnl() ++
+        str "all deps " ++ prlist_with_sep spc str allplugins ++ fnl() ++
+        str "filtered " ++ prlist_with_sep spc (fun (_,{lib}) -> str lib) deps);
+    deps
+
+  let digest s =
+    match s with
+    | { lib } ->
+      let plugins = Fl_internals.fl_find_plugins lib in
+      List.map Digest.file plugins
+
+  let pp = function
+    | { lib } -> lib
+
 end
 
-(* If there is a toplevel under Coq *)
+(* If there is a toplevel under Rocq *)
 type toplevel =
   { load_plugin : PluginSpec.t -> unit
   (** Load a findlib library, given by public name *)
@@ -207,11 +222,11 @@ type toplevel =
   (** Load a cmxs / cmo module, used by the native compiler to load objects *)
   ; add_dir  : string -> unit
   (** Adds a dir to the module search path *)
-  ; ml_loop  : unit -> unit
-  (** Implementation of Drop *)
+  ; ml_loop  : ?init_file:string -> unit -> unit
+  (** Run the OCaml toplevel with given initialisation file *)
   }
 
-(* Determines the behaviour of Coq with respect to ML files (compiled
+(* Determines the behaviour of Rocq with respect to ML files (compiled
    or not) *)
 type kind_load =
   | WithTop of toplevel
@@ -230,7 +245,7 @@ let remove () =
   load := WithoutTop;
   Nativelib.load_obj := (fun x -> () : string -> unit)
 
-(* Tests if an Ocaml toplevel runs under Coq *)
+(* Tests if an Ocaml toplevel runs under Rocq *)
 let is_ocaml_top () =
   match !load with
     | WithTop _ -> true
@@ -240,9 +255,9 @@ let is_ocaml_top () =
 let has_dynlink = Coq_config.has_natdynlink || not Sys.(backend_type = Native)
 
 (* Runs the toplevel loop of Ocaml *)
-let ocaml_toploop () =
+let ocaml_toploop ?init_file () =
   match !load with
-    | WithTop t -> t.ml_loop ()
+    | WithTop t -> t.ml_loop ?init_file ()
     | _ -> ()
 
 let ml_load p =
@@ -251,22 +266,26 @@ let ml_load p =
   | WithoutTop ->
     PluginSpec.load p
 
+let load_module x = match !load with
+  | WithTop t -> t.load_module x
+  | WithoutTop -> ()
+
 (* Adds a path to the ML paths *)
 let add_ml_dir s =
   match !load with
-    | WithTop t -> t.add_dir s; keep_copy_mlpath s
-    | WithoutTop when has_dynlink -> keep_copy_mlpath s
+    | WithTop t -> t.add_dir s
+    | WithoutTop when has_dynlink -> ()
     | _ -> ()
 
 (** Is the ML code of the standard library placed into loadable plugins
-    or statically compiled into coqtop ? For the moment this choice is
+    or statically compiled into rocq repl ? For the moment this choice is
     made according to the presence of native dynlink : even if bytecode
-    coqtop could always load plugins, we prefer to have uniformity between
+    rocq repl could always load plugins, we prefer to have uniformity between
     bytecode and native versions. *)
 
 (* [known_loaded_module] contains the names of the loaded ML modules
  * (linked or loaded with load_object). It is used not to load a
- * module twice. It is NOT the list of ML modules Coq knows. *)
+ * module twice. It is NOT the list of ML modules Rocq knows. *)
 
 (* TODO: Merge known_loaded_module and known_loaded_plugins *)
 let known_loaded_modules : PluginSpec.Set.t ref = ref PluginSpec.Set.empty
@@ -285,8 +304,9 @@ let initialized_plugins = Summary.ref ~stage:Synterp ~name:"inited-plugins" Plug
 let plugin_init_functions : (unit -> unit) list PluginSpec.Map.t ref = ref PluginSpec.Map.empty
 
 let add_init_function name f =
-  let name = PluginSpec.of_declare_ml_format name in
-  if PluginSpec.Set.mem name !initialized_plugins then CErrors.anomaly Pp.(str "Not allowed to add init function for already initialized plugin " ++ str (PluginSpec.pp name));
+  let name = PluginSpec.of_package name in
+  if PluginSpec.Set.mem name !initialized_plugins
+  then CErrors.anomaly Pp.(str "Not allowed to add init function for already initialized plugin " ++ str (PluginSpec.pp name));
   plugin_init_functions := PluginSpec.Map.update name (function
       | None -> Some [f]
       | Some g -> Some (f::g))
@@ -298,7 +318,7 @@ let add_init_function name f =
 let cache_objs = ref PluginSpec.Map.empty
 
 let declare_cache_obj f name =
-  let name = PluginSpec.of_declare_ml_format name in
+  let name = PluginSpec.of_package name in
   let objs = try PluginSpec.Map.find name !cache_objs with Not_found -> [] in
   let objs = f :: objs in
   cache_objs := PluginSpec.Map.add name objs !cache_objs
@@ -326,15 +346,14 @@ let init_ml_object mname =
 
 let load_ml_object mname =
   ml_load mname;
-  add_known_module mname;
-  init_ml_object mname
+  add_known_module mname
 
 let add_known_module name =
-  let name = PluginSpec.of_declare_ml_format name in
+  let name = PluginSpec.of_package name in
   add_known_module name
 
 let module_is_known mname =
-  let mname = PluginSpec.of_declare_ml_format mname in
+  let mname = PluginSpec.of_package mname in
   module_is_known mname
 
 (* Summary of declared ML Modules *)
@@ -353,66 +372,79 @@ let add_loaded_module md =
 
 let reset_loaded_modules () = loaded_modules := []
 
-let if_verbose_load verb f name =
-  if not verb then f name
-  else
-    let info = str "[Loading ML file " ++ str (PluginSpec.pp name) ++ str " ..." in
-    try
-      let path = f name in
-      Feedback.msg_info (info ++ str " done]");
-      path
-    with reraise ->
-      Feedback.msg_info (info ++ str " failed]");
-      raise reraise
+type load_request =
+  | Summary
+  | Regular of { implicit : bool }
 
-(** Load a module for the first time (i.e. dynlink it)
-    or simulate its reload (i.e. doing nothing except maybe
-    an initialization function). *)
+let if_verbose_load req f name =
+  match req with
+  | Regular {implicit} when not !Flags.quiet -> begin
+      let info =
+        str "[Loading ML file " ++ str (PluginSpec.pp name) ++
+        (if implicit then str " (implicit dependency)" else mt()) ++ str " ..." in
+      try
+        let path = f name in
+        Feedback.msg_info (info ++ str " done]");
+        path
+      with reraise ->
+        Feedback.msg_info (info ++ str " failed]");
+        raise reraise
+    end
+  | Summary | Regular _ -> f name
 
-let trigger_ml_object ~verbose ~cache ~reinit plugin =
+(** Load a module for the first time (i.e. dynlink it) *)
+
+let trigger_ml_object req plugin =
   let () =
-    if plugin_is_known plugin then
-      (if reinit then init_ml_object plugin)
-    else
-      begin
-        if not has_dynlink then
-          CErrors.user_err
-            (str "Dynamic link not supported (module " ++ str (PluginSpec.pp plugin) ++ str ").")
-        else
-          if_verbose_load (verbose && not !Flags.quiet) load_ml_object plugin
-      end
+    if not @@ plugin_is_known plugin then begin
+      if not has_dynlink then
+        CErrors.user_err
+          (str "Dynamic link not supported (module " ++ str (PluginSpec.pp plugin) ++ str ").")
+      else
+        if_verbose_load req load_ml_object plugin
+    end
   in
-  add_loaded_module plugin;
-  if cache then perform_cache_obj plugin
+  add_loaded_module plugin
 
 let unfreeze_ml_modules x =
   reset_loaded_modules ();
   List.iter
     (fun name ->
-       let name = PluginSpec.unrepr name in
-       trigger_ml_object ~verbose:false ~cache:false ~reinit:false name) x
+       let name = PluginSpec.of_package name in
+       trigger_ml_object Summary name) x
 
 let () =
   Summary.declare_ml_modules_summary
     { stage = Summary.Stage.Synterp
-    ; Summary.freeze_function = (fun ~marshallable ->
-          get_loaded_modules () |> List.map PluginSpec.repr)
+    ; Summary.freeze_function = (fun () ->
+          get_loaded_modules () |> List.map PluginSpec.to_package)
     ; Summary.unfreeze_function = unfreeze_ml_modules
     ; Summary.init_function = reset_loaded_modules }
 
 (* Liboject entries of declared ML Modules *)
 type ml_module_object =
   { mlocal : Vernacexpr.locality_flag
-  ; mnames : PluginSpec.t list
+  ; mnames : (bool * PluginSpec.t) list
+  (* bool: if true then implicit dep
+     XXX should we init_ml_object even for implicit deps? *)
   ; mdigests : Digest.t list
   }
 
 let cache_ml_objects mnames =
-  let iter obj = trigger_ml_object ~verbose:true ~cache:true ~reinit:true obj in
+  let iter (implicit,obj) =
+    trigger_ml_object (Regular {implicit}) obj;
+    if not implicit then begin
+      init_ml_object obj;
+      perform_cache_obj obj
+    end
+  in
   List.iter iter mnames
 
 let load_ml_objects _ {mnames; _} =
-  let iter obj = trigger_ml_object ~verbose:true ~cache:false ~reinit:true obj in
+  let iter (implicit,obj) =
+    trigger_ml_object (Regular {implicit}) obj;
+    if not implicit then init_ml_object obj
+  in
   List.iter iter mnames
 
 let classify_ml_objects {mlocal=mlocal} =
@@ -428,23 +460,17 @@ let inMLModule : ml_module_object -> Libobject.obj =
       subst_function = (fun (_,o) -> o);
       classify_function = classify_ml_objects }
 
-
-let declare_ml_modules local l =
-  let mnames = List.map PluginSpec.of_declare_ml_format l in
+let declare_ml_modules local mnames =
+  let mnames = List.map (PluginSpec.of_package ~usercode:true) mnames in
   if Lib.sections_are_opened()
   then CErrors.user_err Pp.(str "Cannot Declare ML Module while sections are opened.");
-  (* List.concat_map only available in 4.10 *)
-  let mdigests = List.map PluginSpec.digest mnames |> List.concat in
+  let mnames = PluginSpec.add_deps mnames in
+  let mdigests = CList.concat_map (fun (_,plugin) -> PluginSpec.digest plugin) mnames in
   Lib.add_leaf (inMLModule {mlocal=local; mnames; mdigests});
   (* We can't put this in cache_function: it may declare other
      objects, and when the current module is required we want to run
      the ML-MODULE object before them. *)
   cache_ml_objects mnames
-
-let print_ml_path () =
-  let l = !coq_mlpath_copy in
-  str"ML Load Path:" ++ fnl () ++ str"  " ++
-          hv 0 (prlist_with_sep fnl str l)
 
 (* Printing of loaded ML modules *)
 

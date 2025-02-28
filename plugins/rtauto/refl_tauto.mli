@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -23,6 +23,6 @@ val make_hyps
   -> atom_env
   -> EConstr.types list
   -> EConstr.named_context
-  -> (Names.Id.t Context.binder_annot * Proof_search.form) list
+  -> (Names.Id.t EConstr.binder_annot * Proof_search.form) list
 
 val rtauto_tac : unit Proofview.tactic

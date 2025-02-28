@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -9,90 +9,31 @@
 (************************************************************************)
 
 open Util
-open Names
 open Tac2dyn
-open Proofview.Notations
-
-type ('a, _) arity0 =
-| OneAty : ('a, 'a -> 'a Proofview.tactic) arity0
-| AddAty : ('a, 'b) arity0 -> ('a, 'a -> 'b) arity0
-
-type tag = int
-
-type valexpr =
-| ValInt of int
-  (** Immediate integers *)
-| ValBlk of tag * valexpr array
-  (** Structured blocks *)
-| ValStr of Bytes.t
-  (** Strings *)
-| ValCls of closure
-  (** Closures *)
-| ValOpn of KerName.t * valexpr array
-  (** Open constructors *)
-| ValExt : 'a Tac2dyn.Val.tag * 'a -> valexpr
-  (** Arbitrary data *)
-
-and closure = MLTactic : (valexpr, 'v) arity0 * Tac2expr.frame option * 'v -> closure
-
-let arity_one = OneAty
-let arity_suc a = AddAty a
-
-type 'a arity = (valexpr, 'a) arity0
-
-let mk_closure arity f = MLTactic (arity, None, f)
-
-let mk_closure_val arity f = ValCls (mk_closure arity f)
-
-module Valexpr =
-struct
-
-type t = valexpr
-
-let is_int = function
-| ValInt _ -> true
-| ValBlk _ | ValStr _ | ValCls _ | ValOpn _ | ValExt _ -> false
-
-let tag v = match v with
-| ValBlk (n, _) -> n
-| ValInt _ | ValStr _ | ValCls _ | ValOpn _ | ValExt _ ->
-  CErrors.anomaly (Pp.str "Unexpected value shape")
-
-let field v n = match v with
-| ValBlk (_, v) -> v.(n)
-| ValInt _ | ValStr _ | ValCls _ | ValOpn _ | ValExt _ ->
-  CErrors.anomaly (Pp.str "Unexpected value shape")
-
-let set_field v n w = match v with
-| ValBlk (_, v) -> v.(n) <- w
-| ValInt _ | ValStr _ | ValCls _ | ValOpn _ | ValExt _ ->
-  CErrors.anomaly (Pp.str "Unexpected value shape")
-
-let make_block tag v = ValBlk (tag, v)
-let make_int n = ValInt n
-
-end
+open Tac2val
 
 type 'a repr = {
   r_of : 'a -> valexpr;
   r_to : valexpr -> 'a;
-  r_id : bool;
 }
 
 let repr_of r x = r.r_of x
 let repr_to r x = r.r_to x
 
-let make_repr r_of r_to = { r_of; r_to; r_id = false; }
+let make_repr r_of r_to = { r_of; r_to; }
 
 let map_repr f g r = {
   r_of = (fun x -> r.r_of (g x));
   r_to = (fun x -> f (r.r_to x));
-  r_id = false;
 }
+
+type ind_data = (Names.Ind.t * Declarations.mutual_inductive_body)
+type binder = (Names.Name.t EConstr.binder_annot * EConstr.types)
 
 (** Dynamic tags *)
 
 let val_exn = Val.create "exn"
+let val_exninfo = Val.create "exninfo"
 let val_constr = Val.create "constr"
 let val_ident = Val.create "ident"
 let val_pattern = Val.create "pattern"
@@ -106,14 +47,18 @@ let val_inductive = Val.create "inductive"
 let val_constant = Val.create "constant"
 let val_constructor = Val.create "constructor"
 let val_projection = Val.create "projection"
+let val_qvar = Val.create "qvar"
 let val_case = Val.create "case"
 let val_binder = Val.create "binder"
-let val_univ = Val.create "universe"
-let val_free : Names.Id.Set.t Val.tag = Val.create "free"
-let val_ltac1 : Geninterp.Val.t Val.tag = Val.create "ltac1"
+let val_instance = Val.create "instance"
+let val_free = Val.create "free"
 let val_uint63 = Val.create "uint63"
 let val_float = Val.create "float"
+let val_pstring = Val.create "pstring"
 let val_ind_data : (Names.Ind.t * Declarations.mutual_inductive_body) Val.tag = Val.create "ind_data"
+let val_transparent_state : TransparentState.t Val.tag = Val.create "transparent_state"
+let val_pretype_flags = Val.create "pretype_flags"
+let val_expected_type = Val.create "expected_type"
 
 let extract_val (type a) (type b) (tag : a Val.tag) (tag' : b Val.tag) (v : b) : a =
 match Val.eq tag tag' with
@@ -122,14 +67,13 @@ match Val.eq tag tag' with
 
 (** Exception *)
 
-exception LtacError of KerName.t * valexpr array
+exception LtacError of Names.KerName.t * valexpr array
 
 (** Conversion functions *)
 
 let valexpr = {
   r_of = (fun obj -> obj);
   r_to = (fun obj -> obj);
-  r_id = true;
 }
 
 let of_unit () = ValInt 0
@@ -141,7 +85,6 @@ let to_unit = function
 let unit = {
   r_of = of_unit;
   r_to = to_unit;
-  r_id = false;
 }
 
 let of_int n = ValInt n
@@ -152,7 +95,6 @@ let to_int = function
 let int = {
   r_of = of_int;
   r_to = to_int;
-  r_id = false;
 }
 
 let of_bool b = if b then ValInt 0 else ValInt 1
@@ -165,7 +107,6 @@ let to_bool = function
 let bool = {
   r_of = of_bool;
   r_to = to_bool;
-  r_id = false;
 }
 
 let of_char n = ValInt (Char.code n)
@@ -176,7 +117,6 @@ let to_char = function
 let char = {
   r_of = of_char;
   r_to = to_char;
-  r_id = false;
 }
 
 let of_bytes s = ValStr s
@@ -187,7 +127,6 @@ let to_bytes = function
 let bytes = {
   r_of = of_bytes;
   r_to = to_bytes;
-  r_id = false;
 }
 
 let of_string s = of_bytes (Bytes.of_string s)
@@ -195,7 +134,6 @@ let to_string s = Bytes.to_string (to_bytes s)
 let string = {
   r_of = of_string;
   r_to = to_string;
-  r_id = false;
 }
 
 let rec of_list f = function
@@ -210,19 +148,15 @@ let rec to_list f = function
 let list r = {
   r_of = (fun l -> of_list r.r_of l);
   r_to = (fun l -> to_list r.r_to l);
-  r_id = false;
 }
 
 let of_closure cls = ValCls cls
 
-let to_closure = function
-| ValCls cls -> cls
-| ValExt _ | ValInt _ | ValBlk _ | ValStr _ | ValOpn _ -> assert false
+let to_closure = Tac2val.to_closure
 
 let closure = {
   r_of = of_closure;
   r_to = to_closure;
-  r_id = false;
 }
 
 let of_ext tag c =
@@ -235,12 +169,19 @@ let to_ext tag = function
 let repr_ext tag = {
   r_of = (fun e -> of_ext tag e);
   r_to = (fun e -> to_ext tag e);
-  r_id = false;
 }
 
 let of_constr c = of_ext val_constr c
 let to_constr c = to_ext val_constr c
 let constr = repr_ext val_constr
+
+let of_matching_context c = of_ext val_matching_context c
+let to_matching_context c = to_ext val_matching_context c
+let matching_context = repr_ext val_matching_context
+
+let of_preterm c = of_ext val_preterm c
+let to_preterm c = to_ext val_preterm c
+let preterm = repr_ext val_preterm
 
 let of_cast c = of_ext val_cast c
 let to_cast c = to_ext val_cast c
@@ -258,22 +199,39 @@ let of_evar ev = of_ext val_evar ev
 let to_evar ev = to_ext val_evar ev
 let evar = repr_ext val_evar
 
+let of_sort ev = of_ext val_sort ev
+let to_sort ev = to_ext val_sort ev
+let sort = repr_ext val_sort
+
 let internal_err =
   let open Names in
-  let coq_prefix =
+  let rocq_prefix =
     MPfile (DirPath.make (List.map Id.of_string ["Init"; "Ltac2"]))
   in
-  KerName.make coq_prefix (Label.of_id (Id.of_string "Internal"))
+  KerName.make rocq_prefix (Label.of_id (Id.of_string "Internal"))
+
+let of_exninfo = of_ext val_exninfo
+let to_exninfo = to_ext val_exninfo
+
+let exninfo = {
+  r_of = of_exninfo;
+  r_to = to_exninfo;
+}
+
+(* Invariant: no [LtacError] should be put into a value with tag [val_exn]. *)
+let of_err e = of_ext val_exn e
+let to_err e = to_ext val_exn e
+let err = repr_ext val_exn
 
 (** FIXME: handle backtrace in Ltac2 exceptions *)
 let of_exn c = match fst c with
 | LtacError (kn, c) -> ValOpn (kn, c)
-| _ -> ValOpn (internal_err, [|of_ext val_exn c|])
+| _ -> ValOpn (internal_err, [|of_err c|])
 
 let to_exn c = match c with
 | ValOpn (kn, c) ->
   if Names.KerName.equal kn internal_err then
-    to_ext val_exn c.(0)
+    to_err c.(0)
   else
     (LtacError (kn, c), Exninfo.null)
 | _ -> assert false
@@ -281,7 +239,6 @@ let to_exn c = match c with
 let exn = {
   r_of = of_exn;
   r_to = to_exn;
-  r_id = false;
 }
 
 let of_option f = function
@@ -296,7 +253,6 @@ let to_option f = function
 let option r = {
   r_of = (fun l -> of_option r.r_of l);
   r_to = (fun l -> to_option r.r_to l);
-  r_id = false;
 }
 
 let of_pp c = of_ext val_pp c
@@ -315,7 +271,6 @@ let to_pair f g = function
 let pair r0 r1 = {
   r_of = (fun p -> of_pair r0.r_of r1.r_of p);
   r_to = (fun p -> to_pair r0.r_to r1.r_to p);
-  r_id = false;
 }
 
 let of_triple f g h (x, y, z) = ValBlk (0, [|f x; g y; h z|])
@@ -325,7 +280,6 @@ let to_triple f g h = function
 let triple r0 r1 r2 = {
   r_of = (fun p -> of_triple r0.r_of r1.r_of r2.r_of p);
   r_to = (fun p -> to_triple r0.r_to r1.r_to r2.r_to p);
-  r_id = false;
 }
 
 let of_array f vl = ValBlk (0, Array.map f vl)
@@ -335,7 +289,6 @@ let to_array f = function
 let array r = {
   r_of = (fun l -> of_array r.r_of l);
   r_to = (fun l -> to_array r.r_to l);
-  r_id = false;
 }
 
 let of_block (n, args) = ValBlk (n, args)
@@ -346,7 +299,6 @@ let to_block = function
 let block = {
   r_of = of_block;
   r_to = to_block;
-  r_id = false;
 }
 
 let of_open (kn, args) = ValOpn (kn, args)
@@ -358,7 +310,14 @@ let to_open = function
 let open_ = {
   r_of = of_open;
   r_to = to_open;
-  r_id = false;
+}
+
+let of_free n = of_ext val_free n
+let to_free x = to_ext val_free x
+
+let free = {
+  r_of = of_free;
+  r_to = to_free;
 }
 
 let of_uint63 n = of_ext val_uint63 n
@@ -367,7 +326,6 @@ let to_uint63 x = to_ext val_uint63 x
 let uint63 = {
   r_of = of_uint63;
   r_to = to_uint63;
-  r_id = false;
 }
 
 let of_float f = of_ext val_float f
@@ -376,30 +334,80 @@ let to_float x = to_ext val_float x
 let float = {
   r_of = of_float;
   r_to = to_float;
-  r_id = false;
 }
+
+let of_pstring s = of_ext val_pstring s
+let to_pstring x = to_ext val_pstring x
+
+let pstring = {
+  r_of = of_pstring;
+  r_to = to_pstring;
+}
+
+let of_transparent_state c = of_ext val_transparent_state c
+let to_transparent_state c = to_ext val_transparent_state c
+let transparent_state = repr_ext val_transparent_state
+
+let of_pretype_flags c = of_ext val_pretype_flags c
+let to_pretype_flags c = to_ext val_pretype_flags c
+let pretype_flags = repr_ext val_pretype_flags
+
+let of_expected_type c = of_ext val_expected_type c
+let to_expected_type c = to_ext val_expected_type c
+let expected_type = repr_ext val_expected_type
+
+let of_ind_data c = of_ext val_ind_data c
+let to_ind_data c = to_ext val_ind_data c
+let ind_data = repr_ext val_ind_data
+
+let of_inductive c = of_ext val_inductive c
+let to_inductive c = to_ext val_inductive c
+let inductive = repr_ext val_inductive
 
 let of_constant c = of_ext val_constant c
 let to_constant c = to_ext val_constant c
 let constant = repr_ext val_constant
 
-let of_reference = let open GlobRef in function
+let of_constructor c = of_ext val_constructor c
+let to_constructor c = to_ext val_constructor c
+let constructor = repr_ext val_constructor
+
+let of_projection c = of_ext val_projection c
+let to_projection c = to_ext val_projection c
+let projection = repr_ext val_projection
+
+let of_qvar c = of_ext val_qvar c
+let to_qvar c = to_ext val_qvar c
+let qvar = repr_ext val_qvar
+
+let of_case c = of_ext val_case c
+let to_case c = to_ext val_case c
+let case = repr_ext val_case
+
+let of_binder c = of_ext val_binder c
+let to_binder c = to_ext val_binder c
+let binder = repr_ext val_binder
+
+let of_instance c = of_ext val_instance c
+let to_instance c = to_ext val_instance c
+let instance = repr_ext val_instance
+
+let of_reference = let open Names.GlobRef in function
 | VarRef id -> ValBlk (0, [| of_ident id |])
 | ConstRef cst -> ValBlk (1, [| of_constant cst |])
-| IndRef ind -> ValBlk (2, [| of_ext val_inductive ind |])
-| ConstructRef cstr -> ValBlk (3, [| of_ext val_constructor cstr |])
+| IndRef ind -> ValBlk (2, [| of_inductive ind |])
+| ConstructRef cstr -> ValBlk (3, [| of_constructor cstr |])
 
-let to_reference = let open GlobRef in function
+let to_reference = let open Names.GlobRef in function
 | ValBlk (0, [| id |]) -> VarRef (to_ident id)
 | ValBlk (1, [| cst |]) -> ConstRef (to_constant cst)
-| ValBlk (2, [| ind |]) -> IndRef (to_ext val_inductive ind)
-| ValBlk (3, [| cstr |]) -> ConstructRef (to_ext val_constructor cstr)
+| ValBlk (2, [| ind |]) -> IndRef (to_inductive ind)
+| ValBlk (3, [| cstr |]) -> ConstructRef (to_constructor cstr)
 | _ -> assert false
 
 let reference = {
   r_of = of_reference;
   r_to = to_reference;
-  r_id = false;
 }
 
 type ('a, 'b) fun1 = closure
@@ -407,51 +415,6 @@ type ('a, 'b) fun1 = closure
 let fun1 (r0 : 'a repr) (r1 : 'b repr) : ('a, 'b) fun1 repr = closure
 let to_fun1 r0 r1 f = to_closure f
 
-let wrap fr tac = match fr with
-  | None -> tac
-  | Some fr -> Tac2bt.with_frame fr tac
-
-let rec apply : type a. a arity -> _ -> a -> valexpr list -> valexpr Proofview.tactic =
-  fun arity fr f args -> match args, arity with
-  | [], arity -> Proofview.tclUNIT (ValCls (MLTactic (arity, fr, f)))
-  (* A few hardcoded cases for efficiency *)
-  | [a0], OneAty -> wrap fr (f a0)
-  | [a0; a1], AddAty OneAty -> wrap fr (f a0 a1)
-  | [a0; a1; a2], AddAty (AddAty OneAty) -> wrap fr (f a0 a1 a2)
-  | [a0; a1; a2; a3], AddAty (AddAty (AddAty OneAty)) -> wrap fr (f a0 a1 a2 a3)
-  (* Generic cases *)
-  | a :: args, OneAty ->
-    wrap fr (f a) >>= fun f ->
-    let MLTactic (arity, fr, f) = to_closure f in
-    apply arity fr f args
-  | a :: args, AddAty arity ->
-    apply arity fr (f a) args
-
-let apply (MLTactic (arity, wrap, f)) args = apply arity wrap f args
-
-type n_closure =
-| NClosure : 'a arity * (valexpr list -> 'a) -> n_closure
-
-let rec abstract n f =
-  if Int.equal n 1 then NClosure (OneAty, fun accu v -> f (List.rev (v :: accu)))
-  else
-    let NClosure (arity, fe) = abstract (n - 1) f in
-    NClosure (AddAty arity, fun accu v -> fe (v :: accu))
-
-let abstract n f =
-  match n with
-  | 1 -> MLTactic (OneAty, None, fun a -> f [a])
-  | 2 -> MLTactic (AddAty OneAty, None, fun a b -> f [a;b])
-  | 3 -> MLTactic (AddAty (AddAty OneAty), None, fun a b c -> f [a;b;c])
-  | 4 -> MLTactic (AddAty (AddAty (AddAty OneAty)), None, fun a b c d -> f [a;b;c;d])
-  | _ ->
-    let () = assert (n > 0) in
-    let NClosure (arity, f) = abstract n f in
-    MLTactic (arity, None, f [])
-
 let app_fun1 cls r0 r1 x =
+  let open Proofview.Notations in
   apply cls [r0.r_of x] >>= fun v -> Proofview.tclUNIT (r1.r_to v)
-
-let annotate_closure fr (MLTactic (arity, fr0, f)) =
-  assert (Option.is_empty fr0);
-  MLTactic (arity, Some fr, f)

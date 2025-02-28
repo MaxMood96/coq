@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,6 +11,7 @@
 open Util
 open Names
 open Univ
+open UVars
 open Cooking
 
 module NamedDecl = Context.Named.Declaration
@@ -31,7 +32,7 @@ type 'a t = {
   (** Global universes introduced in the section *)
   poly_universes : UContext.t;
   (** Universes local to the section *)
-  all_poly_univs : Univ.Level.t array;
+  all_poly_univs : Instance.t;
   (** All polymorphic universes, including from previous sections. *)
   has_poly_univs : bool;
   (** Are there polymorphic universes or constraints, including in previous sections. *)
@@ -51,23 +52,20 @@ let all_poly_univs sec = sec.all_poly_univs
 let map_custom f sec = {sec with custom = f sec.custom}
 
 let add_emap e v (cmap, imap) = match e with
-| SecDefinition con -> (Cmap.add con v cmap, imap)
-| SecInductive ind -> (cmap, Mindmap.add ind v imap)
+| SecDefinition con -> (Cmap_env.add con v cmap, imap)
+| SecInductive ind -> (cmap, Mindmap_env.add ind v imap)
 
 let push_local_universe_context ctx sec =
   if UContext.is_empty ctx then sec
   else
     let sctx = sec.poly_universes in
     let poly_universes = UContext.union sctx ctx in
-    let all_poly_univs =
-      Array.append sec.all_poly_univs (Instance.to_array @@ UContext.instance ctx)
-    in
+    let all_poly_univs = Instance.append sec.all_poly_univs (UContext.instance ctx) in
     { sec with poly_universes; all_poly_univs; has_poly_univs = true }
 
-let rec is_polymorphic_univ u sec =
-  let uctx = sec.poly_universes in
-  let here = Array.exists (fun u' -> Level.equal u u') (Instance.to_array (UContext.instance uctx)) in
-  here || Option.cata (is_polymorphic_univ u) false sec.prev
+let is_polymorphic_univ u sec =
+  let _, us = Instance.to_array sec.all_poly_univs in
+  Array.exists (fun u' -> Level.equal u u') us
 
 let push_constraints uctx sec =
   if sec.has_poly_univs &&
@@ -86,11 +84,11 @@ let open_section ~custom prev =
     context = [];
     mono_universes = ContextSet.empty;
     poly_universes = UContext.empty;
-    all_poly_univs = Option.cata (fun sec -> sec.all_poly_univs) [| |] prev;
+    all_poly_univs = Option.cata (fun sec -> sec.all_poly_univs) Instance.empty prev;
     has_poly_univs = Option.cata has_poly_univs false prev;
     entries = [];
-    expand_info_map = (Cmap.empty, Mindmap.empty);
-    cooking_info_map = (Cmap.empty, Mindmap.empty);
+    expand_info_map = (Cmap_env.empty, Mindmap_env.empty);
+    cooking_info_map = (Cmap_env.empty, Mindmap_env.empty);
     custom = custom;
   }
 
@@ -132,8 +130,8 @@ let push_global env ~poly e sec =
     let expand_info_map = add_emap e abstr_inst_info sec.expand_info_map in
     { sec with entries = e :: sec.entries; expand_info_map; cooking_info_map }
 
-let segment_of_constant con sec = Cmap.find con (fst sec.cooking_info_map)
-let segment_of_inductive con sec = Mindmap.find con (snd sec.cooking_info_map)
+let segment_of_constant con sec = Cmap_env.find con (fst sec.cooking_info_map)
+let segment_of_inductive con sec = Mindmap_env.find con (snd sec.cooking_info_map)
 
 let is_in_section _env gr sec =
   let open GlobRef in
@@ -142,6 +140,6 @@ let is_in_section _env gr sec =
     let vars = sec.context in
     List.exists (fun decl -> Id.equal id (NamedDecl.get_id decl)) vars
   | ConstRef con ->
-    Cmap.mem con (fst sec.expand_info_map)
+    Cmap_env.mem con (fst sec.expand_info_map)
   | IndRef (ind, _) | ConstructRef ((ind, _), _) ->
-    Mindmap.mem ind (snd sec.expand_info_map)
+    Mindmap_env.mem ind (snd sec.expand_info_map)

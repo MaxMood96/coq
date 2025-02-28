@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -67,77 +67,7 @@ and anon_abstracting_tac = bool (** abstracting anonymously its result *)
 
 and proof_block_name = string (** open type of delimiters *)
 
-(** Interpretation of extended vernac phrases. *)
-
-module InProg : sig
-  type _ t =
-    | Ignore : unit t
-    | Use : Declare.OblState.t t
-
-  val cast : Declare.OblState.t -> 'a t -> 'a
-end
-
-module OutProg : sig
-  type _ t =
-    | No : unit t
-    | Yes : Declare.OblState.t t
-    | Push
-    | Pop
-
-  val cast : 'a -> 'a t -> Declare.OblState.t NeList.t -> Declare.OblState.t NeList.t
-end
-
-module InProof : sig
-  type _ t =
-    | Ignore : unit t
-    | Reject : unit t
-    | Use : Declare.Proof.t t
-    | UseOpt : Declare.Proof.t option t
-
-  val cast : Declare.Proof.t option -> 'a t -> 'a
-end
-
-module OutProof : sig
-
-  type _ t =
-    | No : unit t
-    | Close : unit t
-    | Update : Declare.Proof.t t
-    | New : Declare.Proof.t t
-
-end
-
-type ('inprog,'outprog,'inproof,'outproof) vernac_type = {
-  inprog : 'inprog InProg.t;
-  outprog : 'outprog InProg.t;
-  inproof : 'inproof InProof.t;
-  outproof : 'outproof OutProof.t;
-}
-
-type typed_vernac =
-    TypedVernac : {
-      inprog : 'inprog InProg.t;
-      outprog : 'outprog OutProg.t;
-      inproof : 'inproof InProof.t;
-      outproof : 'outproof OutProof.t;
-      run : pm:'inprog -> proof:'inproof -> 'outprog * 'outproof;
-    } -> typed_vernac
-
-(** Some convenient typed_vernac constructors *)
-
-val vtdefault : (unit -> unit) -> typed_vernac
-val vtnoproof : (unit -> unit) -> typed_vernac
-val vtcloseproof : (lemma:Declare.Proof.t -> pm:Declare.OblState.t -> Declare.OblState.t) -> typed_vernac
-val vtopenproof : (unit -> Declare.Proof.t) -> typed_vernac
-val vtmodifyproof : (pstate:Declare.Proof.t -> Declare.Proof.t) -> typed_vernac
-val vtreadproofopt : (pstate:Declare.Proof.t option -> unit) -> typed_vernac
-val vtreadproof : (pstate:Declare.Proof.t -> unit) -> typed_vernac
-val vtreadprogram : (pm:Declare.OblState.t -> unit) -> typed_vernac
-val vtmodifyprogram : (pm:Declare.OblState.t -> Declare.OblState.t) -> typed_vernac
-val vtdeclareprogram : (pm:Declare.OblState.t -> Declare.Proof.t) -> typed_vernac
-val vtopenproofprogram : (pm:Declare.OblState.t -> Declare.OblState.t * Declare.Proof.t) -> typed_vernac
-
-type vernac_command = ?loc:Loc.t -> atts:Attributes.vernac_flags -> unit -> typed_vernac
+type vernac_command = ?loc:Loc.t -> atts:Attributes.vernac_flags -> unit -> Vernactypes.typed_vernac
 
 type plugin_args = Genarg.raw_generic_argument list
 
@@ -156,21 +86,57 @@ type (_, _) ty_sig =
 
 type ty_ml = TyML : bool (* deprecated *) * ('r, 's) ty_sig * 'r * 's option -> ty_ml
 
-(** Wrapper to dynamically extend vernacular commands. *)
-val vernac_extend :
-  ?plugin:string ->
+(** Statically extend vernacular commands.
+
+    This is used by coqpp VERNAC EXTEND.
+    It should not be used directly, use [declare_dynamic_vernac_extend] instead.
+
+    Commands added by plugins at Declare ML Module / Require time should provide [plugin].
+
+    Commands added without providing [plugin] cannot be removed from
+    the grammar or modified. Not passing [plugin] is possible for
+    non-plugin rocq-runtime commands and deprecated for all other callers.
+*)
+val static_vernac_extend :
+  plugin:string option ->
   command:string ->
   ?classifier:(string -> vernac_classification) ->
-  ?entry:Vernacexpr.vernac_expr Pcoq.Entry.t ->
+  ?entry:Vernacexpr.vernac_expr Procq.Entry.t ->
   ty_ml list -> unit
+
+(** Used to tell the system that all future vernac extends are from plugins. *)
+val static_linking_done : unit -> unit
+
+(** Dynamically extend vernacular commands (for instance when importing some module).
+
+    Reusing a [command] string will replace previous uses. The result
+    is undefined and probably produces anomalies if the previous
+    grammar rule is still active and was different from the new one.
+
+    The polymorphic arguments are as in [TyML].
+
+    The declared grammar extension is disabled, one needs to call
+    [Egramml.extend_vernac_command_grammar] in order to enable it.
+    That call should use [undoable:true] to make it possible to
+    disable the extension, e.g. by backtracking over the command which
+    enabled it.
+*)
+val declare_dynamic_vernac_extend
+  : command:Vernacexpr.extend_name
+  -> ?entry:Vernacexpr.vernac_expr Procq.Entry.t
+  -> depr:bool
+  -> 's (* classifier *)
+  -> ('r, 's) ty_sig (* grammar *)
+  -> 'r (* command interpretation *)
+  -> Vernacexpr.extend_name
 
 (** {5 VERNAC ARGUMENT EXTEND} *)
 
 type 'a argument_rule =
-| Arg_alias of 'a Pcoq.Entry.t
+| Arg_alias of 'a Procq.Entry.t
   (** This is used because CAMLP5 parser can be dumb about rule factorization,
       which sometimes requires two entries to be the same. *)
-| Arg_rules of 'a Pcoq.Production.t list
+| Arg_rules of 'a Procq.Production.t list
   (** There is a discrepancy here as we use directly extension rules and thus
     entries instead of ty_user_symbol and thus arguments as roots. *)
 
@@ -180,7 +146,7 @@ type 'a vernac_argument = {
 }
 
 val vernac_argument_extend : plugin:string -> name:string -> 'a vernac_argument ->
-  ('a, unit, unit) Genarg.genarg_type * 'a Pcoq.Entry.t
+  'a Genarg.vernac_genarg_type * 'a Procq.Entry.t
 
 (** {5 STM classifiers} *)
 val get_vernac_classifier : Vernacexpr.extend_name -> classifier

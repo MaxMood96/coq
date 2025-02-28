@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -107,7 +107,8 @@ let ast_iter_references do_term do_cons do_type a =
         Array.iter (fun (_,p,_) -> patt_iter_references do_cons p) v
 
       | MLrel _ | MLlam _ | MLapp _ | MLletin _ | MLtuple _ | MLfix _ | MLexn _
-      | MLdummy _ | MLaxiom | MLmagic _ | MLuint _ | MLfloat _ | MLparray _ -> ()
+      | MLdummy _ | MLaxiom _ | MLmagic _ | MLuint _ | MLfloat _
+      | MLstring _ | MLparray _ -> ()
   in iter a
 
 let ind_iter_references do_term do_cons do_type kn ind =
@@ -233,9 +234,12 @@ let get_decl_in_structure r struc =
             | SEdecl d -> d
             | SEmodtype m -> assert false
             | SEmodule m ->
-                match m.ml_mod_expr with
+                let rec aux = function
                   | MEstruct (_,sel) -> go ll sel
-                  | _ -> error_not_visible r
+                  | MEfunctor (_,_,sel) -> aux sel
+                  | MEident _ | MEapply _ -> error_not_visible r
+                in aux m.ml_mod_expr
+
     in go ll sel
   with Not_found ->
     anomaly (Pp.str "reference not found in extracted structure.")

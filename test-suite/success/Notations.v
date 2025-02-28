@@ -112,8 +112,7 @@ Goal True -> True. intros H. exact H. Qed.
 Notation "[ a , .. , b ]" := (a, (.. (b,tt) ..)).
 
 (* Check that vector notations do not break Ltac [] (bugs #4785, #4733) *)
-Require Import Coq.Vectors.VectorDef.
-Import VectorNotations.
+Notation "[ ]" := (nil _) (format "[ ]") : vector_scope.
 Goal True. idtac; []. (* important for test: no space here *) constructor. Qed.
 
 (* Check parsing of { and } is not affected by notations #3479 *)
@@ -153,3 +152,22 @@ Fail Check {?[n],y|0=0}.
 Section C.
 Notation "f $$$ x" := (id f x) (at level 10, left associativity).
 End C.
+
+(* Scope names should not start with an underscore *)
+Fail Declare Scope _scope_start_underscore.
+
+(* Scope delimiters should not start with an underscore *)
+Fail Delimit Scope type_scope with _type.
+
+Module ImplicitArgumentsPrimToken.
+
+(* Check that implicit arguments of number notations are taken into account *)
+
+Class T (A:Type).
+Parameter (a:T nat).
+Axiom f : forall A, T A -> A.
+Arguments f {A} {_}.
+Notation "0" := f.
+Check 0 = 1.
+
+End ImplicitArgumentsPrimToken.

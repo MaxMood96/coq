@@ -1,15 +1,15 @@
 .. index:: coqdoc
 
-.. _coqdoc:
+.. _rocqdoc:
 
-Documenting Coq files with coqdoc
------------------------------------
+Documenting Rocq files with rocq doc
+------------------------------------
 
-coqdoc is a documentation tool for the proof assistant Coq, similar to
-``javadoc`` or ``ocamldoc``. The task of coqdoc is
+`rocq doc` is a documentation tool for the Rocq Prover, similar to
+``javadoc`` or ``ocamldoc``. The task of `rocq doc` is
 
 
-#. to produce a nice |Latex| and/or HTML document from Coq source files,
+#. to produce a nice |Latex| and/or HTML document from Rocq source files,
    readable for a human and not only for the proof assistant;
 #. to help users navigate their own (or third-party) sources.
 
@@ -18,21 +18,21 @@ coqdoc is a documentation tool for the proof assistant Coq, similar to
 Principles
 ~~~~~~~~~~
 
-Documentation is inserted into Coq files as *special comments*. Thus
-your files will compile as usual, whether you use coqdoc or not. coqdoc
-presupposes that the given Coq files are well-formed (at least
+Documentation is inserted into Rocq files as *special comments*. Thus
+your files will compile as usual, whether you use `rocq doc` or not. `rocq doc`
+presupposes that the given Rocq files are well-formed (at least
 lexically). Documentation starts with ``(**``, followed by a space, and
 ends with ``*)``. The documentation format is inspired by Todd
 A. Coram’s *Almost Free Text (AFT)* tool: it is mainly ``ASCII`` text with
-some syntax-light controls, described below. coqdoc is robust: it
+some syntax-light controls, described below. `rocq doc` is robust: it
 shouldn’t fail, whatever the input is. But remember: “garbage in,
 garbage out”.
 
 
-Coq material inside documentation.
+Rocq material inside documentation.
 ++++++++++++++++++++++++++++++++++++
 
-Coq material is quoted between the delimiters ``[`` and ``]``. Square brackets
+Rocq material is quoted between the delimiters ``[`` and ``]``. Square brackets
 may be nested, the inner ones being understood as being part of the
 quoted code (thus you can quote a term like ``let id := fun [T : Type] (x : t) => x in id 0``
 by writing  ``[let id := fun [T : Type] (x : t) => x in id 0]``).
@@ -45,8 +45,8 @@ followed by a newline and the latter must follow a newline.
 Pretty-printing.
 ++++++++++++++++
 
-coqdoc uses different faces for identifiers and keywords. The pretty-
-printing of Coq tokens (identifiers or symbols) can be controlled
+`rocq doc` uses different faces for identifiers and keywords. The pretty-
+printing of Rocq tokens (identifiers or symbols) can be controlled
 using one of the following commands:
 
 ::
@@ -63,7 +63,7 @@ or
     (** printing  *token* $...LATEX math...$ #...html...# *)
 
 
-It gives the |Latex| and HTML texts to be produced for the given Coq
+It gives the |Latex| and HTML texts to be produced for the given Rocq
 token. Either the |Latex| or the HTML rule may be omitted, causing the
 default pretty-printing to be used for this token.
 
@@ -91,7 +91,7 @@ commands.
 
    The recognition of tokens is done by a (``ocaml``) lex
    automaton and thus applies the longest-match rule. For instance, `->~`
-   is recognized as a single token, where Coq sees two tokens. It is the
+   is recognized as a single token, where Rocq sees two tokens. It is the
    responsibility of the user to insert space between tokens *or* to give
    pretty-printing rules for the possible combinations, e.g.
 
@@ -120,7 +120,7 @@ two a subsection, etc.
 Lists.
 ++++++
 
-List items are introduced by a leading dash. coqdoc uses whitespace to
+List items are introduced by a leading dash. `rocq doc` uses whitespace to
 determine the depth of a new list item and which text belongs in which
 list items. A list ends when a line of text starts at or before the
 level of indenting of the list’s dash. A list item’s dash must always
@@ -216,21 +216,21 @@ Hyperlinks
 Hyperlinks can be inserted into the HTML output, so that any
 identifier is linked to the place of its definition.
 
-``coqc file.v`` automatically dumps localization information in
+``rocq c file.v`` automatically dumps localization information in
 ``file.glob`` or appends it to a file specified using the option ``--dump-glob
 file``. Take care of erasing this global file, if any, when starting
 the whole compilation process.
 
-Then invoke coqdoc or ``coqdoc --glob-from file`` to tell coqdoc to look
+Then invoke `rocq doc` or ``rocq doc --glob-from file`` to tell `rocq doc` to look
 for name resolutions in the file ``file`` (it will look in ``file.glob``
 by default).
 
-Identifiers from the Coq standard library are linked to the Coq website
+Identifiers from the Rocq standard library are linked to the Coq website
 `<http://coq.inria.fr/library/>`_. This behavior can be changed
 using command line options ``--no-externals`` and ``--coqlib_url``; see below.
 
 
-.. _coqdoc-hide-show:
+.. _rocqdoc-hide-show:
 
 Hiding / Showing parts of the source
 ++++++++++++++++++++++++++++++++++++
@@ -242,7 +242,7 @@ and ``-l`` (see below), or using such comments:
 
 
     (* begin hide *)
-     *some Coq material*
+     *some Rocq material*
     (* end hide *)
 
 
@@ -253,7 +253,7 @@ shown using such comments:
 
 
     (* begin show *)
-     *some Coq material*
+     *some Rocq material*
     (* end show *)
 
 
@@ -261,14 +261,14 @@ The latter cannot be used around some inner parts of a proof, but can
 be used around a whole proof.
 
 Lastly, it is possible to adopt a middle-ground approach when the
-desired output is HTML, where a given snippet of Coq material is
+desired output is HTML, where a given snippet of Rocq material is
 hidden by default, but can be made visible with user interaction.
 
 ::
 
 
     (* begin details *)
-     *some Coq material*
+     *some Rocq material*
     (* end details *)
 
 
@@ -278,24 +278,24 @@ There is also an alternative syntax available.
 
 
     (* begin details : Some summary describing the snippet *)
-     *some Coq material*
+     *some Rocq material*
     (* end details *)
 
 
 Usage
 ~~~~~
 
-coqdoc is invoked on a shell command line as follows:
-``coqdoc <options and files>``.
+`rocq doc` is invoked on a shell command line as follows:
+``rocq doc <options and files>``.
 Any command line argument which is not an option is considered to be a
-file (even if it starts with a ``-``). Coq files are identified by the
+file (even if it starts with a ``-``). Rocq files are identified by the
 suffixes ``.v`` and ``.g`` and |Latex| files by the suffix ``.tex``.
 
 
 :HTML output: This is the default output format. One HTML file is created for
-  each Coq file given on the command line, together with a file
+  each Rocq file given on the command line, together with a file
   ``index.html`` (unless ``option-no-index is passed``). The HTML pages use a
-  style sheet named ``style.css``. Such a file is distributed with coqdoc.
+  style sheet named ``style.css``. Such a file is distributed with `rocq doc`.
 :|Latex| output: A single |Latex| file is created, on standard
   output. It can be redirected to a file using the option ``-o``. The order of
   files on the command line is kept in the final document. |Latex|
@@ -303,7 +303,7 @@ suffixes ``.v`` and ``.g`` and |Latex| files by the suffix ``.tex``.
   document . DVI and PostScript can be produced directly with the
   options ``-dvi`` and ``-ps`` respectively.
 :TEXmacs output: To translate the input files to TEXmacs format,
-  to be used by the TEXmacs Coq interface.
+  to be used by the TEXmacs Rocq interface.
 
 
 
@@ -350,8 +350,8 @@ Command line options
     with large source files, where binder information may dominate the index.
   :--multi-index: Generate one page for each category and each letter in
     the index, together with a top page ``index.html``.
-  :--index string: Make the filename of the index string instead of
-    “index”. Useful since “index.html” is special.
+  :--index string: Make the filename of the index "``string``.html" instead of
+    “index.html”. Useful since “index.html” is special.
 
 
 
@@ -367,18 +367,18 @@ Command line options
 
 **Hyperlink options**
 
-  :--glob-from file: Make references using Coq globalizations from file
-    file. (Such globalizations are obtained with Coq option ``-dump-glob``).
-  :--no-externals: Do not insert links to the Coq standard library.
+  :--glob-from file: Make references using Rocq globalizations from file
+    file. (Such globalizations are obtained with Rocq option ``-dump-glob``).
+  :--no-externals: Do not insert links to the Rocq standard library.
   :--external url coqdir: Use given URL for linking references whose
     name starts with prefix ``coqdir``.
-  :--coqlib_url url: Set base URL for the Coq standard library (default is
+  :--coqlib_url url: Set base URL for the Rocq standard library (default is
     `<http://coq.inria.fr/library/>`_). This is equivalent to ``--external url
-    Coq``.
-  :-R dir coqdir: Recursively map physical directory dir to Coq logical
-    directory  ``coqdir`` (similarly to Coq option ``-R``).
-  :-Q dir coqdir: Map physical directory dir to Coq logical
-    directory  ``coqdir`` (similarly to Coq option ``-Q``).
+    Stdlib``.
+  :-R dir coqdir: Recursively map physical directory dir to Rocq logical
+    directory  ``coqdir`` (similarly to Rocq option ``-R``).
+  :-Q dir coqdir: Map physical directory dir to Rocq logical
+    directory  ``coqdir`` (similarly to Rocq option ``-Q``).
 
     .. note::
 
@@ -430,7 +430,7 @@ Command line options
   :--plain-comments: Do not interpret comments, simply copy them as
     plain-text.
   :--interpolate: Use the globalization information to typeset
-    identifiers appearing in Coq escapings inside comments.
+    identifiers appearing in Rocq escapings inside comments.
 
 **Language options**
 
@@ -444,7 +444,7 @@ Command line options
     standard plain ASCII notations such as → for ``->`` and ∀ for ``forall``. |Latex|
     UTF-8 support can be found
     at `<http://www.ctan.org/pkg/unicode>`_. For the interpretation of Unicode
-    characters by |Latex|, extra packages which coqdoc does not provide
+    characters by |Latex|, extra packages which `rocq doc` does not provide
     by default might be required, such as textgreek for some Greek letters
     or ``stmaryrd`` for some mathematical symbols. If a Unicode character is
     missing an interpretation in the utf8x input encoding, add
@@ -457,8 +457,8 @@ Command line options
 
 
 
-The coqdoc |Latex| style file
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The rocq doc |Latex| style file
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 In case you choose to produce a document without the default |Latex|
 preamble (by using option ``--no-preamble``), then you must insert into

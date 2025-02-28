@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,279 +8,93 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-let die fmt = Printf.kfprintf (fun _ -> exit 1) stderr fmt
+let die fmt = Printf.kfprintf (fun _ -> exit 1) stderr (fmt^^"\n%!")
 
-let colors = [|"#F08080"; "#EEE8AA"; "#98FB98"|]
+let usage () = die "Usage: rocq timelog2html [options] VFILE DATAFILES\n\n%a\n%s"
+    (fun fmt len -> Printf.fprintf fmt "1 to %d data files are supported." len)
+    Htmloutput.max_data_count
+    "Data files may be .json or .json.gz profile files (as produced by rocq c -profile),\
+     \nor timing files (as produced by rocq c -time-file).\
+     \n\
+     \nOptions:\
+     \n  -o FILE: output to FILE (default is - meaning stdout)\
+     \n  -raw-o FILE: output machine readable data to FILE (default off, - means stdout)\
+     \n               (only supported with 2 data files)\
+     \n  -min-diff DIFF: in -raw-o, only output lines with time diff greater than DIFF\
+     \n                  (DIFF in OCaml float format, default 1e-4)"
 
-let usage () = die "Usage: %s VFILE TIMEFILES\n\n%a\n" Sys.argv.(0)
-    (fun fmt len -> Printf.fprintf fmt "(Only up to %d time files are supported.)" len)
-    (Array.length colors)
+let parse_files = function
+  | [] | [_] -> usage ()
+  | vfile :: data_files ->
+    let data_files = Array.of_list data_files in
+    let () = if Array.length data_files > Htmloutput.max_data_count
+      then usage ()
+    in
+    vfile, data_files
 
-let () = if Array.length Sys.argv < 3 ||
-            Array.length Sys.argv > 2 + Array.length colors
-  then  usage ()
+type output = Stdout | File of string
 
-module Compat = struct
-
-  (* stdlib version needs ocaml >= 4.13 *)
-  let str_fold_left f x a =
-    let open String in
-    let r = ref x in
-    for i = 0 to length a - 1 do
-      r := f !r (unsafe_get a i)
-    done;
-    !r
-
-  (* stdlib version needs ocaml >= 4.13 *)
-  let str_for_all p s =
-    let open String in
-    let n = length s in
-    let rec loop i =
-      if i = n then true
-      else if p (unsafe_get s i) then loop (succ i)
-      else false in
-    loop 0
-
-end
-open Compat
-
-let vfile = Sys.argv.(1)
-let data_files = Array.sub Sys.argv 2 (Array.length Sys.argv - 2)
-let ndata = Array.length data_files
-
-let htmlescape =
-  let r = Str.regexp "[&<>\"]" in
-  let subst s = match Str.matched_string s with
-    | "&" -> "&amp;"
-    | "<" -> "&lt;"
-    | ">" -> "&gt;"
-    | "\"" -> "&quot;"
-    | _ -> assert false
-  in
-  fun s -> Str.global_substitute r subst s
-
-let sourcelen = (Unix.stat vfile).st_size
-let source =
-  let ch = try open_in vfile with Sys_error e -> die "Could not open %s: %s" vfile e in
-  let s = really_input_string ch sourcelen in
-  close_in ch;
-  s
-
-let source_substring start stop =
-  (* substring from start to stop inclusive, both 1-based *)
-  (* start=0 is the same as start=1 *)
-  let start = if start = 0 then 1 else start in
-  let len = stop - start + 1 (* +1 for inclusive *) in
-  String.sub source (start-1) len
-
-type loc = { start: int; stop: int; line: int; text: string; }
-
-(* [line] and [text] are derived data using the same [source] so no need to check them *)
-let same_loc a b = a.start = b.start && a.stop = b.stop
-
-(* A measurement, with the original printed string and an exact rational representation *)
-type measure = { str: string; q: Q.t; }
-
-let dummy = { str="0"; q=Q.zero; }
-
-type 'a one_command = {
-  loc: loc;
-  time: 'a;
+type opts = {
+  output : output;
+  raw_output : output option;
+  min_diff : Q.t;
 }
 
-let time_regex = Str.regexp {|^Chars \([0-9]+\) - \([0-9]+\) [^ ]+ \([0-9.]+\) secs|}
+let defaults = {
+  output = Stdout;
+  raw_output = None;
+  min_diff = Q.(one / of_int 10_000);
+}
 
-let count_newlines s = str_fold_left (fun n c -> if c = '\n' then n+1 else n) 0 s
+let with_output f out =
+  match out with
+  | Stdout -> f stdout
+  | File fname ->
+    let ch = open_out fname in
+    Fun.protect ~finally:(fun () -> close_out ch) (fun () -> f ch)
 
-let is_white_char = function ' '|'\n'|'\t' -> true | _ -> false
+let parse_output = function
+  | "-" -> Stdout
+  | f -> File f
 
-let rec file_loop filech ~last_end ~lines acc : measure one_command array =
-  match input_line filech with
-  | exception End_of_file ->
-    let acc = if last_end + 1 <= sourcelen then
-        let text = source_substring (last_end+1) sourcelen in
-        if str_for_all is_white_char text then acc
-        else
-          { loc = { start = last_end+1; stop = sourcelen; line = lines+1; text; };
-            time = dummy;
-          } :: acc
-      else acc
-    in
-    CArray.rev_of_list acc
-  | l ->
-    if not (Str.string_match time_regex l 0) then
-      file_loop filech ~last_end ~lines acc
-    else
-      let b = int_of_string @@ Str.matched_group 1 l
-      and e = int_of_string @@ Str.matched_group 2 l
-      and t = Str.matched_group 3 l in
-      let acc, lines, last_end = if b > last_end + 1 then
-          let text = source_substring (last_end + 1) (b - 1) in
-          (* if only spaces since last command, include them in the next command
-             typically "Module Foo.\n  Cmd." *)
-          if not (str_for_all is_white_char text) then
-            let n = count_newlines text in
-            let acc =
-              { loc = { start = last_end + 1; stop = b-1; line = lines; text };
-                time = dummy;
-              } :: acc
-            in
-            acc, (lines+n), b-1
-          else acc, lines, last_end
-        else acc, lines, last_end
-      in
-      let text = source_substring (last_end+1) e in
-      let lines, n = if text <> "" && text.[0] = '\n' then lines+1, 1 else lines, 0 in
-      let n = count_newlines text - n in
-      (* lua script has "eoln" but unused *)
-      let acc =
-        { loc = { start = last_end+1; stop = e; line = lines; text; };
-          time = { str=t; q = Q.of_string t; };
-        } :: acc
-      in
-      let lines = lines + n in
-      let last_end = e in
-      file_loop filech ~last_end ~lines acc
+let parse_min_diff d =
+  try Q.of_float @@ float_of_string d
+  with Failure _ -> usage ()
+
+let rec parse_args opts = function
+  | "-o" :: f :: args -> parse_args { opts with output = parse_output f } args
+  | "-raw-o" :: f :: args -> parse_args { opts with raw_output = Some (parse_output f) } args
+  | "-min-diff" :: d :: args -> parse_args { opts with min_diff = parse_min_diff d } args
+  | ["-o"|"-raw-o"|"-min-diff"] -> usage()
+  | args -> opts, parse_files args
 
 let file_data data_file =
-  file_loop (open_in data_file) ~last_end:(-1) ~lines:1 []
+  if List.exists (fun suf -> CString.is_suffix suf data_file) [".json"; ".json.gz"] then
+    let data = Profparser.parse ~file:data_file in
+    data_file, CArray.of_list data
+  else
+    let data = Timelogparser.parse ~file:data_file in
+    data_file, data |> CArray.map_of_list (fun (loc, time) -> loc, { BenchUtil.time; memory = None })
 
-let all_data = Array.map file_data data_files
+let main args =
+  let opts, (vfile, data_files) = parse_args defaults args in
 
-let () =
-  data_files |> Array.iteri (fun fidx fname ->
-      if Array.length all_data.(0) <> Array.length all_data.(fidx)
-      then die "Mismatch between %s and %s: different measurement counts\n" data_files.(0) fname)
+  let source = BenchUtil.read_whole_file vfile in
 
-let all_data : measure array one_command array =
-  all_data.(0) |> Array.mapi (fun i d ->
-      let times = data_files |> Array.mapi (fun fidx fname ->
-          let fdata = all_data.(fidx).(i) in
-          if same_loc d.loc fdata.loc
-          then fdata.time
-          else die "Mismatch between %s and %s at line %d\n" data_files.(0) fname (i+1))
-      in
-      { loc = d.loc;
-        time = times; })
+  let all_data = Array.map file_data data_files in
 
-let percentage ~max:m v =
-  Q.to_float Q.(v * of_int 100 / m)
+  let all_data = BenchUtil.combine_related_data all_data in
 
-let maxq =
-  Array.fold_left (fun max data ->
-      Array.fold_left (fun max d ->
-          let dq = d.q in
-          if Q.lt max dq then dq
-          else max)
-        max
-        data.time)
-    Q.zero all_data
+  let dummy = Array.make (Array.length data_files) BenchUtil.dummy_data in
 
-let vname = Filename.basename vfile
+  let all_data = Array.of_list (Sourcehandler.join_to_source ~dummy ~source (Array.to_list all_data)) in
 
-let out fmt = Printf.kfprintf (fun _ -> ()) stdout fmt
+  let vname = Filename.basename vfile in
 
-let () =
-  out
-{|<html>
-<head>
-<title>%s</title>
-<style>
-|} vname
-
-(* NB: lua "ipairs" is 1-based, ocaml "iteri" is 0-based *)
-let () = data_files |> Array.iteri (fun i _ ->
-    let color = colors.(i) in
-    out
-{|.time%d {
-  background-color: %s;
-  height: %d%%;
-  top: %d%%;
-  z-index: -1;
-  position: absolute;
-  opacity: 50%%;
-}
-|} (i+1) color (100 / ndata) (100 / ndata * i))
-
-let () =
-  out
-{|.code {
-  z-index: 0;
-  position: relative;
-  border-style: solid;
-  border-color: transparent;
-  border-width: 1px;
-}
-.code:hover {
-  border-color: black;
-}
-code::before {
-    content:  attr(data-line);
-    right: 0.5em;
-    position: absolute;
-    text-align: right;
-}
-</style>
-</head>
-<body>
-|}
-
-let () = out "<h1>Timings for %s</h1>\n" vname
-
-let () = out "<ol>\n"
-
-let () = data_files |> Array.iteri (fun i data_file ->
-    out "<li style=\"background-color: %s\">%s</li>\n" colors.(i) data_file)
-
-let () = out "</ol>\n"
-
-let () = out "<pre>"
-
-let last_seen_line = ref 0
-
-let line_id fmt l =
-  if l > !last_seen_line then begin
-    last_seen_line := l;
-    Printf.fprintf fmt "id=\"L%d\" " l
-  end
-
-
-let () = all_data |> Array.iteri (fun j d ->
-    let () = out {|<div class="code" title="File: %s
-Line: %d
-
-|} vname d.loc.line
-    in
-    let () = d.time |> Array.iteri (fun k d ->
-        out "Time%d: %ss\n" (k+1) d.str)
-    in
-    let () = out {|">|} in
-
-    let () = d.time |> Array.iteri (fun k d ->
-        out {|<div class="time%d" style="width: %f%%"></div>|}
-          (k+1)
-          (percentage d.q ~max:maxq))
-    in
-
-    let text = d.loc.text in
-    let text = if text <> "" && text.[0] = '\n'
-      then String.sub text 1 (String.length text  - 1)
-      else text
-    in
-    let sublines = String.split_on_char '\n' text in
-    let () = sublines |> List.iteri (fun i line ->
-        let lnum = d.loc.line + i in
-        out "<code %adata-line=\"%d\">%s</code>\n" line_id lnum lnum (htmlescape line))
-    in
-
-    let () = out "</div>" in
-    ())
-
-let () =
-  out
-{|
-</pre>
-
-</body>
-</html>
-|}
+  let () = opts.raw_output |> Option.iter @@ with_output @@ fun ch ->
+    Htmloutput.raw_output ch ~min_diff:opts.min_diff all_data
+  in
+  let () =  opts.output |> with_output @@ fun ch ->
+    Htmloutput.output ch ~vname ~data_files all_data
+  in
+  ()

@@ -1,3 +1,6 @@
+(* *** DO NOT EDIT *** *)
+(* This file is extracted from test-suite/output/MExtraction.v in the stdlib *)
+(* *** DO NOT EDIT *** *)
 
 type __ = Obj.t
 
@@ -66,7 +69,7 @@ let rec nth n0 l default =
           | x::_ -> x)
   | S m -> (match l with
             | [] -> default
-            | _::t0 -> nth m t0 default)
+            | _::l' -> nth m l' default)
 
 (** val rev_append : 'a1 list -> 'a1 list -> 'a1 list **)
 
@@ -79,20 +82,20 @@ let rec rev_append l l' =
 
 let rec map f = function
 | [] -> []
-| a::t0 -> (f a)::(map f t0)
+| a::l0 -> (f a)::(map f l0)
 
 (** val fold_left : ('a1 -> 'a2 -> 'a1) -> 'a2 list -> 'a1 -> 'a1 **)
 
 let rec fold_left f l a0 =
   match l with
   | [] -> a0
-  | b::t0 -> fold_left f t0 (f a0 b)
+  | b::l0 -> fold_left f l0 (f a0 b)
 
 (** val fold_right : ('a2 -> 'a1 -> 'a1) -> 'a1 -> 'a2 list -> 'a1 **)
 
 let rec fold_right f a0 = function
 | [] -> a0
-| b::t0 -> f b (fold_right f a0 t0)
+| b::l0 -> f b (fold_right f a0 l0)
 
 type positive =
 | XI of positive
@@ -289,6 +292,20 @@ module Coq_Pos =
     | Gt -> p
     | _ -> p'
 
+  (** val eqb : positive -> positive -> bool **)
+
+  let rec eqb p q0 =
+    match p with
+    | XI p2 -> (match q0 with
+                | XI q1 -> eqb p2 q1
+                | _ -> false)
+    | XO p2 -> (match q0 with
+                | XO q1 -> eqb p2 q1
+                | _ -> false)
+    | XH -> (match q0 with
+             | XH -> true
+             | _ -> false)
+
   (** val leb : positive -> positive -> bool **)
 
   let leb x y =
@@ -483,6 +500,20 @@ module Z =
     | Gt -> true
     | _ -> false
 
+  (** val eqb : z -> z -> bool **)
+
+  let eqb x y =
+    match x with
+    | Z0 -> (match y with
+             | Z0 -> true
+             | _ -> false)
+    | Zpos p -> (match y with
+                 | Zpos q0 -> Coq_Pos.eqb p q0
+                 | _ -> false)
+    | Zneg p -> (match y with
+                 | Zneg q0 -> Coq_Pos.eqb p q0
+                 | _ -> false)
+
   (** val max : z -> z -> z **)
 
   let max n0 m =
@@ -577,13 +608,6 @@ module Z =
        | Zpos b0 -> Zpos (Coq_Pos.gcd a0 b0)
        | Zneg b0 -> Zpos (Coq_Pos.gcd a0 b0))
  end
-
-(** val zeq_bool : z -> z -> bool **)
-
-let zeq_bool x y =
-  match Z.compare x y with
-  | Eq -> true
-  | _ -> false
 
 type 'c pExpr =
 | PEc of 'c
@@ -888,7 +912,8 @@ let rec pmul cO cI cadd cmul ceqb p p'' = match p'' with
      let pP' = pmul cO cI cadd cmul ceqb p2 p' in
      padd cO cadd ceqb
        (mkPX cO ceqb (padd cO cadd ceqb (mkPX cO ceqb pP' i (p0 cO)) qP') i'
-         (p0 cO)) (mkPX cO ceqb pQ' i qQ'))
+         (p0 cO))
+       (mkPX cO ceqb pQ' i qQ'))
 
 (** val psquare :
     'a1 -> 'a1 -> ('a1 -> 'a1 -> 'a1) -> ('a1 -> 'a1 -> 'a1) -> ('a1 -> 'a1
@@ -921,7 +946,8 @@ let rec ppow_pos cO cI cadd cmul ceqb subst_l res p = function
   subst_l
     (pmul cO cI cadd cmul ceqb
       (ppow_pos cO cI cadd cmul ceqb subst_l
-        (ppow_pos cO cI cadd cmul ceqb subst_l res p p3) p p3) p)
+        (ppow_pos cO cI cadd cmul ceqb subst_l res p p3) p p3)
+      p)
 | XO p3 ->
   ppow_pos cO cI cadd cmul ceqb subst_l
     (ppow_pos cO cI cadd cmul ceqb subst_l res p p3) p p3
@@ -1314,7 +1340,8 @@ let xror_clause_cnf unsat deduce t0 f =
     let acc,tg = pat in
     (match ror_clause unsat deduce t0 e with
      | Inl cl -> (cl::acc),tg
-     | Inr l -> acc,(Merge (tg, l)))) f ([],Null)
+     | Inr l -> acc,(Merge (tg, l))))
+    f ([],Null)
 
 (** val ror_clause_cnf :
     ('a1 -> bool) -> ('a1 -> 'a1 -> 'a1 option) -> ('a1 * 'a2) list -> ('a1,
@@ -2039,7 +2066,7 @@ type q = { qnum : z; qden : positive }
 (** val qeq_bool : q -> q -> bool **)
 
 let qeq_bool x y =
-  zeq_bool (Z.mul x.qnum (Zpos y.qden)) (Z.mul y.qnum (Zpos x.qden))
+  Z.eqb (Z.mul x.qnum (Zpos y.qden)) (Z.mul y.qnum (Zpos x.qden))
 
 (** val qle_bool : q -> q -> bool **)
 
@@ -2147,12 +2174,12 @@ type zWitness = z psatz
 (** val zWeakChecker : z nFormula list -> z psatz -> bool **)
 
 let zWeakChecker =
-  check_normalised_formulas Z0 (Zpos XH) Z.add Z.mul zeq_bool Z.leb
+  check_normalised_formulas Z0 (Zpos XH) Z.add Z.mul Z.eqb Z.leb
 
 (** val psub1 : z pol -> z pol -> z pol **)
 
 let psub1 =
-  psub0 Z0 Z.add Z.sub Z.opp zeq_bool
+  psub0 Z0 Z.add Z.sub Z.opp Z.eqb
 
 (** val popp1 : z pol -> z pol **)
 
@@ -2162,22 +2189,22 @@ let popp1 =
 (** val padd1 : z pol -> z pol -> z pol **)
 
 let padd1 =
-  padd0 Z0 Z.add zeq_bool
+  padd0 Z0 Z.add Z.eqb
 
 (** val normZ : z pExpr -> z pol **)
 
 let normZ =
-  norm Z0 (Zpos XH) Z.add Z.mul Z.sub Z.opp zeq_bool
+  norm Z0 (Zpos XH) Z.add Z.mul Z.sub Z.opp Z.eqb
 
 (** val zunsat : z nFormula -> bool **)
 
 let zunsat =
-  check_inconsistent Z0 zeq_bool Z.leb
+  check_inconsistent Z0 Z.eqb Z.leb
 
 (** val zdeduce : z nFormula -> z nFormula -> z nFormula option **)
 
 let zdeduce =
-  nformula_plus_nformula Z0 Z.add zeq_bool
+  nformula_plus_nformula Z0 Z.add Z.eqb
 
 (** val xnnormalise : z formula -> z nFormula **)
 
@@ -2294,7 +2321,7 @@ let genCuttingPlane = function
    | Equal ->
      let g,c = zgcd_pol e in
      if (&&) (Z.gtb g Z0)
-          ((&&) (negb (zeq_bool c Z0)) (negb (zeq_bool (Z.gcd g c) g)))
+          ((&&) (negb (Z.eqb c Z0)) (negb (Z.eqb (Z.gcd g c) g)))
      then None
      else Some ((makeCuttingPlane e),Equal)
    | NonEqual -> Some ((e,Z0),op)
@@ -2317,7 +2344,7 @@ let is_pol_Z0 = function
 (** val eval_Psatz0 : z nFormula list -> zWitness -> z nFormula option **)
 
 let eval_Psatz0 =
-  eval_Psatz Z0 (Zpos XH) Z.add Z.mul zeq_bool Z.leb
+  eval_Psatz Z0 (Zpos XH) Z.add Z.mul Z.eqb Z.leb
 
 (** val valid_cut_sign : op1 -> bool **)
 

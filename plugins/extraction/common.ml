@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -128,7 +128,7 @@ module KOrd =
 struct
   type t = kind * string
   let compare (k1, s1) (k2, s2) =
-    let c = pervasives_compare k1 k2 (* OK *) in
+    let c = Stdlib.compare k1 k2 (* OK *) in
     if c = 0 then String.compare s1 s2
     else c
 end
@@ -502,7 +502,7 @@ let opened_libraries () =
    otherwise it contains the label of the reference to print.
    [rls] is the string list giving the qualified name, short name at the end. *)
 
-(* In Coq, we can qualify [M.t] even if we are inside [M], but in Ocaml we
+(* In Rocq, we can qualify [M.t] even if we are inside [M], but in Ocaml we
    cannot do that. So, if [t] gets hidden and we need a long name for it,
    we duplicate the _definition_ of t in a Coq__XXX module, and similarly
    for a sub-module [M.N] *)
@@ -634,11 +634,10 @@ let ascii_type_name = "core.ascii.type"
 let ascii_constructor_name = "core.ascii.ascii"
 
 let is_ascii_registered () =
-  Coqlib.has_ref ascii_type_name
-  && Coqlib.has_ref ascii_constructor_name
+  Rocqlib.has_ref ascii_type_name
+  && Rocqlib.has_ref ascii_constructor_name
 
-let ascii_type_ref () = Coqlib.lib_ref ascii_type_name
-let ascii_constructor_ref () = Coqlib.lib_ref ascii_constructor_name
+let ascii_type_ref () = Rocqlib.lib_ref ascii_type_name
 
 let check_extract_ascii () =
   try
@@ -656,7 +655,7 @@ let is_list_cons l =
 let is_native_char = function
   | MLcons(_,gr,l) ->
     is_ascii_registered ()
-    && GlobRef.CanOrd.equal gr (ascii_constructor_ref ())
+    && Rocqlib.check_ref ascii_constructor_name gr
     && check_extract_ascii ()
     && is_list_cons l
   | _ -> false
@@ -681,13 +680,11 @@ let empty_string_name = "core.string.empty"
 let string_constructor_name = "core.string.string"
 
 let is_string_registered () =
-  Coqlib.has_ref string_type_name
-  && Coqlib.has_ref empty_string_name
-  && Coqlib.has_ref string_constructor_name
+  Rocqlib.has_ref string_type_name
+  && Rocqlib.has_ref empty_string_name
+  && Rocqlib.has_ref string_constructor_name
 
-let string_type_ref () = Coqlib.lib_ref string_type_name
-let empty_string_ref () = Coqlib.lib_ref empty_string_name
-let string_constructor_ref () = Coqlib.lib_ref string_constructor_name
+let string_type_ref () = Rocqlib.lib_ref string_type_name
 
 let check_extract_string () =
   try
@@ -699,16 +696,16 @@ let check_extract_string () =
     String.equal (find_custom @@ string_type_ref ()) string_type
   with Not_found -> false
 
-(* The argument is known to be of type Coq.Strings.String.string.
+(* The argument is known to be of type Strings.String.string.
    Check that it is built from constructors EmptyString and String
    with constant ascii arguments. *)
 
 let rec is_native_string_rec empty_string_ref string_constructor_ref = function
   (* "EmptyString" constructor *)
-  | MLcons(_, gr, []) -> GlobRef.CanOrd.equal gr empty_string_ref
+  | MLcons(_, gr, []) -> Rocqlib.check_ref empty_string_ref gr
   (* "String" constructor *)
   | MLcons(_, gr, [hd; tl]) ->
-      GlobRef.CanOrd.equal gr string_constructor_ref
+      Rocqlib.check_ref string_constructor_ref gr
       && is_native_char hd
       && is_native_string_rec empty_string_ref string_constructor_ref tl
   (* others *)
@@ -723,9 +720,9 @@ let is_native_string c =
   match c with
   | MLcons(_, GlobRef.ConstructRef(ind, j), l) ->
       is_string_registered ()
-      && GlobRef.CanOrd.equal (GlobRef.IndRef ind) (string_type_ref ())
+      && Rocqlib.check_ref string_type_name (GlobRef.IndRef ind)
       && check_extract_string ()
-      && is_native_string_rec (empty_string_ref ()) (string_constructor_ref ()) c
+      && is_native_string_rec empty_string_name string_constructor_name c
   | _ -> false
 
 (* Extract the underlying string. *)
@@ -734,10 +731,10 @@ let get_native_string c =
   let buf = Buffer.create 64 in
   let rec get = function
     (* "EmptyString" constructor *)
-    | MLcons(_, gr, []) when GlobRef.CanOrd.equal gr (empty_string_ref ()) ->
+    | MLcons(_, gr, []) when Rocqlib.check_ref empty_string_name gr ->
         Buffer.contents buf
     (* "String" constructor *)
-    | MLcons(_, gr, [hd; tl]) when GlobRef.CanOrd.equal gr (string_constructor_ref ()) ->
+    | MLcons(_, gr, [hd; tl]) when Rocqlib.check_ref string_constructor_name gr ->
         Buffer.add_char buf (get_native_char hd);
         get tl
     (* others *)
@@ -751,4 +748,4 @@ let pp_native_string c =
 
 (* Registered sig type *)
 
-let sig_type_ref () = Coqlib.lib_ref "core.sig.type"
+let sig_type_name = "core.sig.type"

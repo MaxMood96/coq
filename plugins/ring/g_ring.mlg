@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -17,12 +17,12 @@ open Ring_ast
 open Ring
 open Stdarg
 open Tacarg
-open Pcoq.Constr
+open Procq.Constr
 open Pltac
 
 }
 
-DECLARE PLUGIN "coq-core.plugins.ring"
+DECLARE PLUGIN "rocq-runtime.plugins.ring"
 
 TACTIC EXTEND protect_fv
 | [ "protect_fv" string(map) "in" ident(id) ] ->

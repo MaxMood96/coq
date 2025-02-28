@@ -17,7 +17,7 @@ Solvers for logic and equality
       The following goal can be proved by :tacn:`tauto` whereas :tacn:`auto` would
       fail:
 
-      .. coqtop:: reset all
+      .. rocqtop:: reset all
 
          Goal forall (x:nat) (P:nat -> Prop), x = 0 \/ P x -> x <> 0 -> P x.
          intros.
@@ -29,7 +29,7 @@ Solvers for logic and equality
 
    .. example::
 
-      .. coqtop:: reset all
+      .. rocqtop:: reset all
 
          Goal forall (A:Prop) (P:nat -> Prop), A \/ (forall x:nat, ~ A -> P x) -> forall x:nat, ~ A -> P x.
          tauto.
@@ -146,11 +146,6 @@ Solvers for logic and equality
 
       This :term:`option` controls the proof search depth bound.
 
-   .. tacn:: gintuition {? @ltac_expr }
-
-      An extension of :tacn:`intuition` to first-order reasoning
-      (similar to how :tacn:`firstorder` extends :tacn:`tauto`).
-
 .. tacn:: congruence {? @natural } {? with {+ @one_term } }
 
    :token:`natural`
@@ -188,7 +183,7 @@ Solvers for logic and equality
 
    .. example::
 
-      .. coqtop:: reset all
+      .. rocqtop:: reset all
 
          Theorem T (A:Type) (f:A -> A) (g: A -> A -> A) a b: a=(f a) -> (g b (f a))=(f (f a)) -> (g a b)=(f (g b a)) -> (g a b)=a.
          intros.
@@ -203,7 +198,7 @@ Solvers for logic and equality
    .. exn:: I don’t know how to handle dependent equality.
 
       The decision procedure managed to find a proof of the goal or of a
-      discriminable equality but this proof could not be built in Coq because of
+      discriminable equality but this proof could not be built in Rocq because of
       dependently-typed functions.
 
    .. exn:: Goal is solvable by congruence but some arguments are missing. Try congruence with {+ @term}, replacing metavariables by arbitrary terms.

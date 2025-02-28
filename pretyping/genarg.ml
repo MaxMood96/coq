@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -79,6 +79,8 @@ let pr_argument_type (ArgumentType t) = pr_genarg_type t
 
 type 'a uniform_genarg_type = ('a, 'a, 'a) genarg_type
 (** Alias for concision *)
+
+type 'a vernac_genarg_type = ('a, Util.Empty.t, Util.Empty.t) genarg_type
 
 (* Dynamics but tagged by a type expression *)
 
@@ -172,7 +174,7 @@ module type GenObj =
 sig
   type ('raw, 'glb, 'top) obj
   val name : string
-  val default : ('raw, 'glb, 'top) genarg_type -> ('raw, 'glb, 'top) obj option
+  val default : ('raw, 'glb, 'top) ArgT.tag -> ('raw, 'glb, 'top) obj option
 end
 
 let get_arg_tag = function
@@ -197,7 +199,7 @@ struct
     try
       let GenMap.Pack obj = GenMap.find name !arg0_map in obj
     with Not_found ->
-      match M.default (ExtraArg name) with
+      match M.default name with
       | None ->
         CErrors.anomaly (str M.name ++ str " function not found: " ++ str (ArgT.repr name) ++ str ".")
       | Some obj -> obj
@@ -205,6 +207,10 @@ struct
   (** For now, the following function is quite dummy and should only be applied
       to an extra argument type, otherwise, it will badly fail. *)
   let obj t = get_obj0 @@ get_arg_tag t
+
+  let mem t =
+    let t = get_arg_tag t in
+    GenMap.mem t !arg0_map
 
   (** NB: we need the [Pack] pattern to get [tag]
       from [_ ArgT.DYN.tag] to [(_ * _ * _) ArgT.DYN.tag] *)

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,9 +8,13 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
+(** Regular intern using the filesystem  *)
+val fs_intern : Library.Intern.t
+
 (** The main interpretation function of vernacular expressions *)
 val interp
-  : ?verbosely:bool
+  : intern:Library.Intern.t
+  -> ?verbosely:bool
   -> st:Vernacstate.t
   -> Vernacexpr.vernac_control
   -> Vernacstate.t
@@ -26,6 +30,6 @@ val interp_entry
 val interp_qed_delayed_proof
   :  proof:Declare.Proof.proof_object
   -> st:Vernacstate.t
-  -> control:Vernacexpr.control_flag list
+  -> control:unit VernacControl.control_entries
   -> Vernacexpr.proof_end CAst.t
   -> Vernacstate.Interp.t

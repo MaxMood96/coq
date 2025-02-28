@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -26,7 +26,7 @@ val clear_global: GlobRef.t -> tactic
 
 val axiom_tac : Sequent.t -> tactic
 
-val ll_atom_tac : flags:Formula.flags -> constr -> lseqtac with_backtracking
+val ll_atom_tac : flags:Formula.flags -> Formula.atom -> lseqtac with_backtracking
 
 val and_tac : flags:Formula.flags -> seqtac with_backtracking
 

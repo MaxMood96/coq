@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -15,7 +15,7 @@ open Constr
 open Environ
 
 (** This file defines the pervasive unification state used everywhere
-    in Coq tactic engine. It is very low-level and most of the
+    in Rocq tactic engine. It is very low-level and most of the
     functions exported here are irrelevant to the standard API user.
     Consider using {!Evarutil} or {!Proofview} instead.
 
@@ -31,6 +31,7 @@ open Environ
 type econstr
 type etypes = econstr
 type esorts
+type erelevance
 
 (** {5 Existential variables and unification states} *)
 
@@ -111,7 +112,7 @@ type any_evar_info = EvarInfo : 'a evar_info -> any_evar_info
 val evar_concl : undefined evar_info -> econstr
 (** Type of the evar. *)
 
-val evar_context : 'a evar_info -> (econstr, etypes) Context.Named.pt
+val evar_context : 'a evar_info -> (econstr, etypes, erelevance) Context.Named.pt
 (** Context of the evar. *)
 
 val evar_hyps : 'a evar_info -> named_context_val
@@ -135,12 +136,12 @@ val evar_abstract_arguments : undefined evar_info -> Abstraction.t
     can be imitated or should stay abstract in HO unification problems
     and inversion (see [second_order_matching_with_args] for its use). *)
 
-val evar_relevance : 'a evar_info -> Sorts.relevance
+val evar_relevance : 'a evar_info -> erelevance
 (** Relevance of the conclusion of the evar. *)
 
 (** {6 Derived projections} *)
 
-val evar_filtered_context : 'a evar_info -> (econstr, etypes) Context.Named.pt
+val evar_filtered_context : 'a evar_info -> (econstr, etypes, erelevance) Context.Named.pt
 val evar_filtered_hyps : 'a evar_info -> named_context_val
 val evar_env : env -> 'a evar_info -> env
 val evar_filtered_env : env -> 'a evar_info -> env
@@ -188,17 +189,15 @@ val has_shelved : evar_map -> bool
 
 val new_pure_evar :
   ?src:Evar_kinds.t Loc.located -> ?filter:Filter.t ->
-  ?relevance:Sorts.relevance ->
+  relevance:erelevance ->
   ?abstract_arguments:Abstraction.t -> ?candidates:econstr list ->
   ?name:Id.t ->
   ?typeclass_candidate:bool ->
-  ?principal:bool ->
   named_context_val -> evar_map -> etypes -> evar_map * Evar.t
 (** Low-level interface to create an evar.
   @param src User-facing source for the evar
   @param filter See {!Evd.Filter}, must be the same length as [named_context_val]
   @param name A name for the evar
-  @param principal Whether the evar is the principal goal
   @param named_context_val The context of the evar
   @param types The type of conclusion of the evar
 *)
@@ -206,6 +205,8 @@ val new_pure_evar :
 val add : evar_map -> Evar.t -> 'a evar_info -> evar_map
 (** [add sigma ev info] adds [ev] with evar info [info] in sigma.
     Precondition: ev must not preexist in [sigma]. *)
+
+val find_defined : evar_map -> Evar.t -> defined evar_info option
 
 val find : evar_map -> Evar.t -> any_evar_info
 (** Recover the data associated to an evar. *)
@@ -269,12 +270,20 @@ val is_undefined : evar_map -> Evar.t-> bool
 val add_constraints : evar_map -> Univ.Constraints.t -> evar_map
 (** Add universe constraints in an evar map. *)
 
+val add_quconstraints : evar_map -> Sorts.QUConstraints.t -> evar_map
+
 val undefined_map : evar_map -> undefined evar_info Evar.Map.t
 (** Access the undefined evar mapping directly. *)
 
+val defined_map : evar_map -> defined evar_info Evar.Map.t
+(** Access the defined evar mapping directly. *)
+
 val drop_all_defined : evar_map -> evar_map
 
-val is_maybe_typeclass_hook : (evar_map -> constr -> bool) Hook.t
+val drop_new_defined : original:evar_map -> evar_map -> evar_map
+(** Drop the defined evars in the second evar map which did not exist in the first. *)
+
+val is_maybe_typeclass_hook : (evar_map -> econstr -> bool) Hook.t
 
 (** {6 Instantiating partial terms} *)
 
@@ -284,13 +293,9 @@ val existential_value : evar_map -> econstr pexistential -> econstr
 (** [existential_value sigma ev] raises [NotInstantiatedEvar] if [ev] has
     no body and [Not_found] if it does not exist in [sigma] *)
 
-val existential_value0 : evar_map -> existential -> constr
-
 val existential_type_opt : evar_map -> econstr pexistential -> etypes option
 
 val existential_type : evar_map -> econstr pexistential -> etypes
-
-val existential_type0 : evar_map -> existential -> types
 
 val existential_opt_value : evar_map -> econstr pexistential -> econstr option
 (** Same as {!existential_value} but returns an option instead of raising an
@@ -298,9 +303,9 @@ val existential_opt_value : evar_map -> econstr pexistential -> econstr option
 
 val existential_opt_value0 : evar_map -> existential -> constr option
 
-val evar_handler : evar_map -> constr evar_handler
+val evar_handler : evar_map -> CClosure.evar_handler
 
-val existential_expand_value0 : evar_map -> existential -> constr Constr.evar_expansion
+val existential_expand_value0 : evar_map -> existential -> constr CClosure.evar_expansion
 
 val expand_existential : evar_map -> econstr pexistential -> econstr list
 (** Returns the full evar instance with implicit default variables turned into
@@ -328,8 +333,12 @@ val get_aliased_evars : evar_map -> Evar.t Evar.Map.t
 val is_aliased_evar : evar_map -> Evar.t -> Evar.t option
 (** Tell if an evar has been aliased to another evar, and if yes, which *)
 
+val max_undefined_with_candidates : evar_map -> Evar.t option
+(** If any, the evar with highest id with a non-empty list of candidates. *)
+
 val set_typeclass_evars : evar_map -> Evar.Set.t -> evar_map
 (** Mark the given set of evars as available for resolution.
+    (The previous marked set is replaced, not added to.)
 
     Precondition: they should indeed refer to undefined typeclass evars.
  *)
@@ -349,6 +358,9 @@ val set_obligation_evar : evar_map -> Evar.t -> evar_map
 val is_obligation_evar : evar_map -> Evar.t -> bool
 (** Is the evar declared as an obligation *)
 
+val get_impossible_case_evars : evar_map -> Evar.Set.t
+(** Set of undefined evars with ImpossibleCase evar source. *)
+
 val downcast : Evar.t-> etypes -> evar_map -> evar_map
 (** Change the type of an undefined evar to a new type assumed to be a
     subtype of its current type; subtyping must be ensured by caller *)
@@ -359,7 +371,7 @@ val rename : Evar.t -> Id.t -> evar_map -> evar_map
 
 val evar_key : Id.t -> evar_map -> Evar.t
 
-val evar_source_of_meta : metavariable -> evar_map -> Evar_kinds.t located
+val evar_names : evar_map -> Nameops.Fresh.t
 
 val dependent_evar_ident : Evar.t -> evar_map -> Id.t
 
@@ -392,21 +404,11 @@ val declare_future_goal : Evar.t -> evar_map -> evar_map
 (** Adds an existential variable to the list of future goals. For
     internal uses only. *)
 
-val declare_principal_goal : Evar.t -> evar_map -> evar_map
-(** Adds an existential variable to the list of future goals and make
-    it principal. Only one existential variable can be made principal, an
-    error is raised otherwise. For internal uses only. *)
-
 module FutureGoals : sig
 
   type t
 
   val comb : t -> Evar.t list
-
-  val principal : t -> Evar.t option
-  (** if [Some e], [e] must be contained in [future_comb]. The evar [e] will
-      inherit properties (now: the name) of the evar which will be instantiated
-      with a term containing [e]. *)
 
   val map_filter : (Evar.t -> Evar.t option) -> t -> t
   (** Applies a function on the future goals *)
@@ -472,81 +474,10 @@ module Store : Store.S
 val get_extra_data : evar_map -> Store.t
 val set_extra_data : Store.t -> evar_map -> evar_map
 
-(** {5 Enriching with evar maps} *)
-
-type 'a sigma = {
-  it : 'a ;
-  (** The base object. *)
-  sigma : evar_map
-  (** The added unification state. *)
-} [@@ocaml.deprecated]
-(** The type constructor ['a sigma] adds an evar map to an object of type
-    ['a]. *)
-
-val sig_it  : 'a sigma -> 'a  [@@ocaml.warning "-3"] [@@ocaml.deprecated]
-val sig_sig : 'a sigma -> evar_map [@@ocaml.warning "-3"] [@@ocaml.deprecated]
-val on_sig : 'a sigma -> (evar_map -> evar_map * 'b) -> 'a sigma * 'b [@@ocaml.warning "-3"] [@@ocaml.deprecated]
-
 (** {5 The state monad with state an evar map} *)
 
 module MonadR : Monad.S with type +'a t = evar_map -> evar_map * 'a
 module Monad  : Monad.S with type +'a t = evar_map -> 'a * evar_map
-
-(** {5 Meta machinery}
-
-    These functions are almost deprecated. They were used before the
-    introduction of the full-fledged evar calculus. In an ideal world, they
-    should be removed. Alas, some parts of the code still use them. Do not use
-    in newly-written code. *)
-
-module Metaset : Set.S with type elt = metavariable
-module Metamap : Map.ExtS with type key = metavariable and module Set := Metaset
-
-type 'a freelisted = {
-  rebus : 'a;
-  freemetas : Metaset.t }
-
-val metavars_of : econstr -> Metaset.t
-val mk_freelisted : econstr -> econstr freelisted
-val map_fl : ('a -> 'b) -> 'a freelisted -> 'b freelisted
-
-(** Status of an instance found by unification wrt to the meta it solves:
-  - a supertype of the meta (e.g. the solution to ?X <= T is a supertype of ?X)
-  - a subtype of the meta (e.g. the solution to T <= ?X is a supertype of ?X)
-  - a term that can be eta-expanded n times while still being a solution
-    (e.g. the solution [P] to [?X u v = P u v] can be eta-expanded twice)
-*)
-
-type instance_constraint = IsSuperType | IsSubType | Conv
-
-val eq_instance_constraint :
-  instance_constraint -> instance_constraint -> bool
-
-(** Status of the unification of the type of an instance against the type of
-     the meta it instantiates:
-   - CoerceToType means that the unification of types has not been done
-     and that a coercion can still be inserted: the meta should not be
-     substituted freely (this happens for instance given via the
-     "with" binding clause).
-   - TypeProcessed means that the information obtainable from the
-     unification of types has been extracted.
-   - TypeNotProcessed means that the unification of types has not been
-     done but it is known that no coercion may be inserted: the meta
-     can be substituted freely.
-*)
-
-type instance_typing_status =
-    CoerceToType | TypeNotProcessed | TypeProcessed
-
-(** Status of an instance together with the status of its type unification *)
-
-type instance_status = instance_constraint * instance_typing_status
-
-(** Clausal environments *)
-
-type clbinding =
-  | Cltyp of Name.t * econstr freelisted
-  | Clval of Name.t * (econstr freelisted * instance_status) * econstr freelisted
 
 (** Unification constraints *)
 type conv_pb = Conversion.conv_pb
@@ -557,8 +488,12 @@ type evar_constraint = conv_pb * env * econstr * econstr
 val add_conv_pb : ?tail:bool -> evar_constraint -> evar_map -> evar_map
 val conv_pbs : evar_map -> evar_constraint list
 
+val extract_conv_pbs : evar_map ->
+      (evar_constraint -> bool) ->
+      evar_map * evar_constraint list
 val extract_changed_conv_pbs : evar_map ->
-      (Evar.Set.t -> evar_constraint -> bool) ->
+      evar_map * evar_constraint list
+val extract_changed_conv_pbs_from : evar_map -> Evar.Set.t option ->
       evar_map * evar_constraint list
 val extract_all_conv_pbs : evar_map -> evar_map * evar_constraint list
 val loc_of_conv_pb : evar_map -> evar_constraint -> Loc.t option
@@ -569,36 +504,9 @@ val loc_of_conv_pb : evar_map -> evar_constraint -> Loc.t option
 val evars_of_term : evar_map -> econstr -> Evar.Set.t
   (** including evars in instances of evars *)
 
-val evars_of_named_context : evar_map -> (econstr, etypes) Context.Named.pt -> Evar.Set.t
+val evars_of_named_context : evar_map -> (econstr, etypes, erelevance) Context.Named.pt -> Evar.Set.t
 
 val evars_of_filtered_evar_info : evar_map -> 'a evar_info -> Evar.Set.t
-
-(** Metas *)
-val meta_list : evar_map -> clbinding Metamap.t
-
-val meta_value     : evar_map -> metavariable -> econstr
-(** [meta_fvalue] raises [Not_found] if meta not in map or [Anomaly] if
-   meta has no value *)
-
-val meta_opt_fvalue : evar_map -> metavariable -> (econstr freelisted * instance_status) option
-val meta_ftype     : evar_map -> metavariable -> etypes freelisted
-val meta_name      : evar_map -> metavariable -> Name.t
-val meta_declare   :
-  metavariable -> etypes -> ?name:Name.t -> evar_map -> evar_map
-val meta_assign    : metavariable -> econstr * instance_status -> evar_map -> evar_map
-val meta_reassign  : metavariable -> econstr * instance_status -> evar_map -> evar_map
-
-val clear_metas : evar_map -> evar_map
-
-(** [meta_merge evd1 evd2] returns [evd2] extended with the metas of [evd1] *)
-val meta_merge : clbinding Metamap.t -> evar_map -> evar_map
-
-val map_metas_fvalue : (econstr -> econstr) -> evar_map -> evar_map
-val map_metas : (econstr -> econstr) -> evar_map -> evar_map
-
-type metabinding = metavariable * econstr * instance_status
-
-val retract_coercible_metas : evar_map -> metabinding list * evar_map
 
 (** {5 FIXME: Nothing to do here} *)
 
@@ -625,76 +533,96 @@ val univ_rigid : rigid
 val univ_flexible : rigid
 val univ_flexible_alg : rigid
 
-type 'a in_evar_universe_context = 'a * UState.t
+type 'a in_ustate = 'a * UState.t
 
 val restrict_universe_context : evar_map -> Univ.Level.Set.t -> evar_map
 
 (** Raises Not_found if not a name for a universe in this map. *)
 val universe_of_name : evar_map -> Id.t -> Univ.Level.t
+val quality_of_name : evar_map -> Id.t -> Sorts.QVar.t
+
+val is_rigid_qvar : evar_map -> Sorts.QVar.t -> bool
+
+val is_relevance_irrelevant : evar_map -> erelevance -> bool
+(** Whether the relevance is irrelevant modulo qstate *)
+(* XXX move to ERelevance *)
 
 val universe_binders : evar_map -> UnivNames.universe_binders
 
 val new_univ_level_variable : ?loc:Loc.t -> ?name:Id.t -> rigid -> evar_map -> evar_map * Univ.Level.t
-val new_sort_variable : ?loc:Loc.t -> ?name:Id.t -> rigid -> evar_map -> evar_map * esorts
+val new_quality_variable : ?loc:Loc.t -> ?name:Id.t -> evar_map -> evar_map * Sorts.QVar.t
+val new_sort_variable : ?loc:Loc.t -> rigid -> evar_map -> evar_map * esorts
 
-val add_global_univ : evar_map -> Univ.Level.t -> evar_map
+val add_forgotten_univ : evar_map -> Univ.Level.t -> evar_map
 
 val universe_rigidity : evar_map -> Univ.Level.t -> rigid
-val make_flexible_variable : evar_map -> algebraic:bool -> Univ.Level.t -> evar_map
-(** See [UState.make_flexible_variable] *)
 
 val make_nonalgebraic_variable : evar_map -> Univ.Level.t -> evar_map
 (** See [UState.make_nonalgebraic_variable]. *)
 
-val is_sort_variable : evar_map -> esorts -> Univ.Level.t option
-(** [is_sort_variable evm s] returns [Some u] or [None] if [s] is
-    not a local sort variable declared in [evm] *)
-
 val is_flexible_level : evar_map -> Univ.Level.t -> bool
 
-val normalize_universe_instance : evar_map -> Univ.Instance.t -> Univ.Instance.t
+val normalize_universe_instance : evar_map -> UVars.Instance.t -> UVars.Instance.t
 
-val set_leq_sort : env -> evar_map -> esorts -> esorts -> evar_map
-val set_eq_sort : env -> evar_map -> esorts -> esorts -> evar_map
+val set_leq_sort : evar_map -> esorts -> esorts -> evar_map
+val set_eq_sort : evar_map -> esorts -> esorts -> evar_map
 val set_eq_level : evar_map -> Univ.Level.t -> Univ.Level.t -> evar_map
 val set_leq_level : evar_map -> Univ.Level.t -> Univ.Level.t -> evar_map
 val set_eq_instances : ?flex:bool ->
-  evar_map -> Univ.Instance.t -> Univ.Instance.t -> evar_map
+  evar_map -> UVars.Instance.t -> UVars.Instance.t -> evar_map
+
+val set_eq_qualities : evar_map -> Sorts.Quality.t -> Sorts.Quality.t -> evar_map
+val set_above_prop : evar_map -> Sorts.Quality.t -> evar_map
 
 val check_eq : evar_map -> esorts -> esorts -> bool
 val check_leq : evar_map -> esorts -> esorts -> bool
 
 val check_constraints : evar_map -> Univ.Constraints.t -> bool
+val check_qconstraints : evar_map -> Sorts.QConstraints.t -> bool
+val check_quconstraints : evar_map -> Sorts.QUConstraints.t -> bool
 
-val evar_universe_context : evar_map -> UState.t
+val ustate : evar_map -> UState.t
+val evar_universe_context : evar_map -> UState.t [@@deprecated "(9.0) Use [Evd.ustate]"]
+
 val universe_context_set : evar_map -> Univ.ContextSet.t
-val universe_subst : evar_map -> UnivSubst.universe_opt_subst
+val sort_context_set : evar_map -> UnivGen.sort_context_set
+val universe_subst : evar_map -> UnivFlex.t
 val universes : evar_map -> UGraph.t
 
 (** [to_universe_context evm] extracts the local universes and
     constraints of [evm] and orders the universes the same as
     [Univ.ContextSet.to_context]. *)
-val to_universe_context : evar_map -> Univ.UContext.t
+val to_universe_context : evar_map -> UVars.UContext.t
 
 val univ_entry : poly:bool -> evar_map -> UState.named_universes_entry
 
 val check_univ_decl : poly:bool -> evar_map -> UState.universe_decl -> UState.named_universes_entry
+
+(** An early check of compatibility of the universe declaration before
+    starting to build a declaration interactively *)
+val check_univ_decl_early : poly:bool -> with_obls:bool -> evar_map -> UState.universe_decl -> Constr.t list -> unit
 
 val merge_universe_context : evar_map -> UState.t -> evar_map
 val set_universe_context : evar_map -> UState.t -> evar_map
 
 val merge_context_set : ?loc:Loc.t -> ?sideff:bool -> rigid -> evar_map -> Univ.ContextSet.t -> evar_map
 
+val merge_sort_context_set : ?loc:Loc.t -> ?sideff:bool -> rigid -> evar_map -> UnivGen.sort_context_set -> evar_map
+
+val merge_sort_variables : ?loc:Loc.t -> ?sideff:bool -> evar_map -> Sorts.QVar.Set.t -> evar_map
+
 val with_context_set : ?loc:Loc.t -> rigid -> evar_map -> 'a Univ.in_universe_context_set -> evar_map * 'a
+
+val with_sort_context_set : ?loc:Loc.t -> rigid -> evar_map -> 'a UnivGen.in_sort_context_set -> evar_map * 'a
 
 val nf_univ_variables : evar_map -> evar_map
 
-val collapse_sort_variables : evar_map -> evar_map
+val collapse_sort_variables : ?except:Sorts.QVar.Set.t -> evar_map -> evar_map
 
 val fix_undefined_variables : evar_map -> evar_map
 
-(** Universe minimization *)
-val minimize_universes : evar_map -> evar_map
+(** Universe minimization (collapse_sort_variables is true by default) *)
+val minimize_universes : ?collapse_sort_variables:bool -> evar_map -> evar_map
 
 (** Lift [UState.update_sigma_univs] *)
 val update_sigma_univs : UGraph.t -> evar_map -> evar_map
@@ -710,9 +638,9 @@ val fresh_inductive_instance : ?loc:Loc.t -> ?rigid:rigid
 val fresh_constructor_instance : ?loc:Loc.t -> ?rigid:rigid
   -> env -> evar_map -> constructor -> evar_map * pconstructor
 val fresh_array_instance : ?loc:Loc.t -> ?rigid:rigid
-  -> env -> evar_map  -> evar_map * Univ.Instance.t
+  -> env -> evar_map  -> evar_map * UVars.Instance.t
 
-val fresh_global : ?loc:Loc.t -> ?rigid:rigid -> ?names:Univ.Instance.t -> env ->
+val fresh_global : ?loc:Loc.t -> ?rigid:rigid -> ?names:UVars.Instance.t -> env ->
   evar_map -> GlobRef.t -> evar_map * econstr
 
 (********************************************************************)
@@ -741,6 +669,13 @@ val create_evar_defs : evar_map -> evar_map
 
 (** Use this module only to bootstrap EConstr *)
 module MiniEConstr : sig
+  module ERelevance : sig
+    type t = erelevance
+    val make : Sorts.relevance -> t
+    val kind : evar_map -> t -> Sorts.relevance
+    val unsafe_to_relevance : t -> Sorts.relevance
+  end
+
   module ESorts : sig
     type t = esorts
     val make : Sorts.t -> t
@@ -750,17 +685,17 @@ module MiniEConstr : sig
 
   module EInstance : sig
     type t
-    val make : Univ.Instance.t -> t
-    val kind : evar_map -> t -> Univ.Instance.t
+    val make : UVars.Instance.t -> t
+    val kind : evar_map -> t -> UVars.Instance.t
     val empty : t
     val is_empty : t -> bool
-    val unsafe_to_instance : t -> Univ.Instance.t
+    val unsafe_to_instance : t -> UVars.Instance.t
   end
 
   type t = econstr
 
-  val kind : evar_map -> t -> (t, t, ESorts.t, EInstance.t) Constr.kind_of_term
-  val kind_upto : evar_map -> constr -> (constr, types, Sorts.t, Univ.Instance.t) Constr.kind_of_term
+  val kind : evar_map -> t -> (t, t, ESorts.t, EInstance.t, ERelevance.t) Constr.kind_of_term
+  val kind_upto : evar_map -> constr -> (constr, types, Sorts.t, UVars.Instance.t, Sorts.relevance) Constr.kind_of_term
 
   val whd_evar : evar_map -> t -> t
 
@@ -768,32 +703,45 @@ module MiniEConstr : sig
 
   val replace_vars : evar_map -> (Id.t * t) list -> t -> t
 
-  val of_kind : (t, t, ESorts.t, EInstance.t) Constr.kind_of_term -> t
+  val of_kind : (t, t, ESorts.t, EInstance.t, ERelevance.t) Constr.kind_of_term -> t
 
   val of_constr : Constr.t -> t
   val of_constr_array : Constr.t array -> t array
 
   val to_constr : ?abort_on_undefined_evars:bool -> evar_map -> t -> Constr.t
   val to_constr_opt : evar_map -> t -> Constr.t option
+  val nf_evar : evar_map -> t -> t
 
   val unsafe_to_constr : t -> Constr.t
   val unsafe_to_constr_array : t array -> Constr.t array
 
   val unsafe_eq : (t, Constr.t) eq
+  val unsafe_relevance_eq : (ERelevance.t, Sorts.relevance) eq
 
-  val of_named_decl : (Constr.t, Constr.types) Context.Named.Declaration.pt ->
-    (t, t) Context.Named.Declaration.pt
-  val unsafe_to_named_decl : (t, t) Context.Named.Declaration.pt ->
-    (Constr.t, Constr.types) Context.Named.Declaration.pt
-  val unsafe_to_rel_decl : (t, t) Context.Rel.Declaration.pt ->
-    (Constr.t, Constr.types) Context.Rel.Declaration.pt
+  val of_named_decl : (Constr.t, Constr.types, Sorts.relevance) Context.Named.Declaration.pt ->
+    (t, t, ERelevance.t) Context.Named.Declaration.pt
+  val unsafe_to_named_decl : (t, t, ERelevance.t) Context.Named.Declaration.pt ->
+    (Constr.t, Constr.types, Sorts.relevance) Context.Named.Declaration.pt
+  val unsafe_to_rel_decl : (t, t, ERelevance.t) Context.Rel.Declaration.pt ->
+    (Constr.t, Constr.types, Sorts.relevance) Context.Rel.Declaration.pt
   val of_case_invert : constr pcase_invert -> econstr pcase_invert
   val unsafe_to_case_invert : econstr pcase_invert -> constr pcase_invert
-  val of_rel_decl : (Constr.t, Constr.types) Context.Rel.Declaration.pt ->
-    (t, t) Context.Rel.Declaration.pt
-  val to_rel_decl : evar_map -> (t, t) Context.Rel.Declaration.pt ->
-    (Constr.t, Constr.types) Context.Rel.Declaration.pt
+  val of_rel_decl : (Constr.t, Constr.types, Sorts.relevance) Context.Rel.Declaration.pt ->
+    (t, t, ERelevance.t) Context.Rel.Declaration.pt
 
-  val of_named_context : (Constr.t, Constr.types) Context.Named.pt -> (t, t) Context.Named.pt
-  val of_rel_context : (Constr.t, Constr.types) Context.Rel.pt -> (t, t) Context.Rel.pt
+  val of_named_context : (Constr.t, Constr.types, Sorts.relevance) Context.Named.pt ->
+    (t, t, ERelevance.t) Context.Named.pt
+  val of_rel_context : (Constr.t, Constr.types, Sorts.relevance) Context.Rel.pt ->
+    (t, t, ERelevance.t) Context.Rel.pt
+end
+
+(** Only used as EConstr internals *)
+module Expand : sig
+  open MiniEConstr
+  type handle
+  val empty_handle : handle
+  val liftn_handle : int -> handle -> handle
+  val kind : evar_map -> handle -> econstr -> handle * (econstr, econstr, ESorts.t, EInstance.t, ERelevance.t) Constr.kind_of_term
+  val expand : evar_map -> handle -> econstr -> econstr
+  val expand_instance : skip:bool -> undefined evar_info -> handle -> econstr SList.t -> econstr SList.t
 end

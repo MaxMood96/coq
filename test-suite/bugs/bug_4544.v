@@ -2,13 +2,13 @@
 (* File reduced by coq-bug-finder from original input, then from 2553 lines to 1932 lines, then from 1946 lines to 1932 lines, then from 2467 lines to 1002 lines, then from 1016 lines to 1002 lines *)
 (* coqc version 8.5 (January 2016) compiled on Jan 23 2016 16:15:22 with OCaml 4.01.0
    coqtop version 8.5 (January 2016) *)
-Require Import Coq.Init.Ltac.
+Require Import Corelib.Init.Ltac.
 Inductive False := .
 Axiom proof_admitted : False.
 Tactic Notation "admit" := case proof_admitted.
-Require Coq.Init.Datatypes.
+Require Corelib.Init.Datatypes.
 
-Import Coq.Init.Notations.
+Import Corelib.Init.Notations.
 
 Global Set Universe Polymorphism.
 
@@ -18,9 +18,9 @@ Global Set Primitive Projections.
 Inductive sum (A B : Type) : Type :=
   | inl : A -> sum A B
   | inr : B -> sum A B.
-Notation nat := Coq.Init.Datatypes.nat.
-Notation O := Coq.Init.Datatypes.O.
-Notation S := Coq.Init.Datatypes.S.
+Notation nat := Corelib.Init.Datatypes.nat.
+Notation O := Corelib.Init.Datatypes.O.
+Notation S := Corelib.Init.Datatypes.S.
 Notation "x + y" := (sum x y) : type_scope.
 
 Record prod (A B : Type) := pair { fst : A ; snd : B }.
@@ -77,8 +77,8 @@ Notation "( x ; y )" := (existT _ x y) : fibration_scope.
 Notation pr1 := projT1.
 Notation pr2 := projT2.
 
-Notation "x .1" := (pr1 x) (at level 3, format "x '.1'") : fibration_scope.
-Notation "x .2" := (pr2 x) (at level 3, format "x '.2'") : fibration_scope.
+Notation "x .1" := (pr1 x) : fibration_scope.
+Notation "x .2" := (pr2 x) : fibration_scope.
 
 Notation compose := (fun g f x => g (f x)).
 
@@ -127,7 +127,7 @@ Class IsEquiv {A B : Type} (f : A -> B) := BuildIsEquiv {
   eisadj : forall x : A, eisretr (f x) = ap f (eissect x)
 }.
 
-Arguments eisretr {A B}%type_scope f%function_scope {_} _.
+Arguments eisretr {A B}%_type_scope f%_function_scope {_} _.
 
 Record Equiv A B := BuildEquiv {
   equiv_fun : A -> B ;

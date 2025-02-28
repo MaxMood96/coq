@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -22,7 +22,7 @@ open Logic
 
 }
 
-DECLARE PLUGIN "coq-core.plugins.ltac"
+DECLARE PLUGIN "rocq-runtime.plugins.ltac"
 
 (** Basic tactics *)
 
@@ -56,14 +56,6 @@ END
 
 TACTIC EXTEND native_cast_no_check
 | [ "native_cast_no_check" constr(c) ] -> { Tactics.native_cast_no_check c }
-END
-
-TACTIC EXTEND casetype DEPRECATED { Deprecation.make ~since:"8.18" ~note:"Use [case] instead." () }
-| [ "casetype" constr(c) ] -> { Tactics.case_type c }
-END
-
-TACTIC EXTEND elimtype DEPRECATED { Deprecation.make ~since:"8.18" ~note:"Use [elim] instead." () }
-| [ "elimtype" constr(c) ] -> { Tactics.elim_type c }
 END
 
 TACTIC EXTEND exfalso
@@ -234,7 +226,7 @@ END
 (** Revert *)
 
 TACTIC EXTEND revert
-| [ "revert" ne_hyp_list(hl) ] -> { Tactics.revert hl }
+| [ "revert" ne_hyp_list(hl) ] -> { Generalize.revert hl }
 END
 
 (** Simple induction / destruct *)
@@ -300,7 +292,7 @@ END
 (* Generalize dependent *)
 
 TACTIC EXTEND generalize_dependent
-| [ "generalize" "dependent" constr(c) ] -> { Tactics.generalize_dep c }
+| [ "generalize" "dependent" constr(c) ] -> { Generalize.generalize_dep c }
 END
 
 (* Table of "pervasives" macros tactics (e.g. auto, simpl, etc.) *)
@@ -316,7 +308,7 @@ let initial_atomic () =
     Tacenv.register_ltac false false (Names.Id.of_string s) body
   in
   let () = List.iter iter
-      [ "red", TacReduce(Red false,nocl);
+      [ "red", TacReduce (Red, nocl);
         "hnf", TacReduce(Hnf,nocl);
         "simpl", TacReduce(Simpl (Redops.all_flags,None),nocl);
         "compute", TacReduce(Cbv Redops.all_flags,nocl);
@@ -330,11 +322,11 @@ let initial_atomic () =
         "fresh", CAst.make @@ TacArg(TacFreshId [])
       ]
 
-let () = Mltop.declare_cache_obj initial_atomic "coq-core.plugins.ltac"
+let () = Mltop.declare_cache_obj initial_atomic "rocq-runtime.plugins.ltac"
 
 (* First-class Ltac access to primitive blocks *)
 
-let initial_name s = { mltac_plugin = "coq-core.plugins.ltac"; mltac_tactic = s; }
+let initial_name s = { mltac_plugin = "rocq-runtime.plugins.ltac"; mltac_tactic = s; }
 let initial_entry s = { mltac_name = initial_name s; mltac_index = 0; }
 
 let register_list_tactical name f =
@@ -364,6 +356,6 @@ let initial_tacticals () =
         ([Name (idn 0)], CAst.make (TacML (initial_entry "solve", [varn 0]))));
   ]
 
-let () = Mltop.declare_cache_obj initial_tacticals "coq-core.plugins.ltac"
+let () = Mltop.declare_cache_obj initial_tacticals "rocq-runtime.plugins.ltac"
 
 }

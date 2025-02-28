@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -45,21 +45,19 @@ val interp_alias : alias -> alias_tactic
 val check_alias : alias -> bool
 (** Returns [true] if an alias is defined, false otherwise. *)
 
-(** {5 Coq tactic definitions} *)
+(** {5 Rocq tactic definitions} *)
 
 val register_ltac : bool -> bool -> ?deprecation:Deprecation.t -> Id.t ->
   glob_tactic_expr -> unit
 (** Register a new Ltac with the given name and body.
 
     The first boolean indicates whether this is done from ML side, rather than
-    Coq side. If the second boolean flag is set to true, then this is a local
+    Rocq side. If the second boolean flag is set to true, then this is a local
     definition. It also puts the Ltac name in the nametab, so that it can be
     used unqualified. *)
 
-val redefine_ltac : bool -> ?deprecation:Deprecation.t -> KerName.t ->
-  glob_tactic_expr -> unit
-(** Replace a Ltac with the given name and body. If the boolean flag is set
-    to true, then this is a local redefinition. *)
+val redefine_ltac : Libobject.locality -> KerName.t -> glob_tactic_expr -> unit
+(** Replace a Ltac with the given name and body. *)
 
 val interp_ltac : KerName.t -> glob_tactic_expr
 (** Find a user-defined tactic by name. Raise [Not_found] if it is absent. *)

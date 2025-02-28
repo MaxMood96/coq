@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -19,8 +19,7 @@ open Declarations
 module RelDecl = Context.Rel.Declaration
 
 type flags = {
-  qflag : bool;
-  reds : CClosure.RedFlags.reds;
+  reds : RedFlags.reds;
 }
 
 let (=?) f g i1 i2 j1 j2=
@@ -35,11 +34,67 @@ type ('a,'b) sum = Left of 'a | Right of 'b
 
 type counter = bool -> metavariable
 
-type atom = { atom : constr }
+module Env :
+sig
+type t
+type uid
+val empty : t
+val add : flags -> Environ.env -> Evd.evar_map -> EConstr.t -> t -> t * uid
+val find : uid -> t -> EConstr.t
+val repr : uid -> int
+val hole : uid
+end =
+struct
 
-let repr_atom a = a.atom
+module CM = Map.Make(Constr)
 
-exception Is_atom of atom
+type t = {
+  max_uid : int;
+  repr : int CM.t;
+  data : Constr.t Int.Map.t;
+}
+
+type uid = int
+
+let empty = {
+  max_uid = 1; (* uid 0 is reserved for Meta 1 *)
+  repr = CM.singleton (Constr.mkMeta 1) 0;
+  data = Int.Map.singleton 0 (Constr.mkMeta 1);
+}
+
+let hole = 0
+
+(* This is nonsense, but backwards compatibility mandates it *)
+let add flags env sigma c e =
+  let c = Reductionops.clos_norm_flags flags.reds env sigma c in
+  let c = EConstr.to_constr ~abort_on_undefined_evars:false sigma c in
+  match CM.find_opt c e.repr with
+  | Some i -> e, i
+  | None ->
+    let i = e.max_uid in
+    let e = {
+      max_uid = i + 1;
+      repr = CM.add c i e.repr;
+      data = Int.Map.add i c e.data;
+    } in
+    e, i
+
+let find id e = EConstr.of_constr (Int.Map.find id e.data)
+
+let repr id = id
+
+end
+
+type atom = {
+  atom : Env.uid;
+  vars : Int.Set.t; (** set of metas appearing in the associated term *)
+}
+
+let repr_atom state a = Env.find a.atom state
+let compare_atom a1 a2 =
+  Int.compare (Env.repr a1.atom) (Env.repr a2.atom)
+
+let meta_in_atom mv a = Int.Set.mem mv a.vars
 
 let meta_succ m = m+1
 
@@ -50,24 +105,22 @@ let rec nb_prod_after n c=
     | _ -> 0
 
 let construct_nhyps env ind =
+  let ind = on_snd EInstance.make ind in
   let nparams = (fst (Global.lookup_inductive (fst ind))).mind_nparams in
   let constr_types = Inductiveops.arities_of_constructors env ind in
-  let hyp = nb_prod_after nparams in
-    Array.map hyp constr_types
+  let hyp c = nb_prod_after nparams (EConstr.Unsafe.to_constr c) in
+  Array.map hyp constr_types
 
 (* indhyps builds the array of arrays of constructor hyps for (ind largs)*)
 let ind_hyps env sigma nevar ind largs =
+  let ind = on_snd EInstance.make ind in
   let types= Inductiveops.arities_of_constructors env ind in
   let myhyps t =
-    let t = EConstr.of_constr t in
     let nparam_decls = Context.Rel.length (fst (Global.lookup_inductive (fst ind))).mind_params_ctxt in
     let t1=Termops.prod_applist_decls sigma nparam_decls t largs in
     let t2=snd (decompose_prod_n_decls sigma nevar t1) in
       fst (decompose_prod_decls sigma t2) in
     Array.map myhyps types
-
-let special_nf ~flags env sigma t =
-  Reductionops.clos_norm_flags flags.reds env sigma t
 
 let special_whd ~flags env sigma t =
   Reductionops.clos_whd_flags flags.reds env sigma t
@@ -79,12 +132,37 @@ type kind_of_formula=
   | Or of pinductive*constr list*bool
   | Exists of pinductive*constr list
   | Forall of constr*constr
-  | Atom of atom
+  | Atom of EConstr.t
 
 let pop t = Vars.lift (-1) t
 
+let fresh_atom ~flags state env sigma metas atm =
+  let vars, atm =
+    if List.is_empty metas then Int.Set.empty, atm
+    else
+      let metas = Array.of_list metas in
+      let nmetas = Array.length metas in
+      let seen = ref Int.Set.empty in
+      let rec substrec depth c = match Constr.kind c with
+      | Constr.Rel k ->
+        if k <= depth then c
+        else if k - depth <= nmetas then
+          let mv = metas.(k - depth - 1) in
+          let () = seen := Int.Set.add mv !seen in
+          Constr.mkMeta mv
+        else Constr.mkRel (k - nmetas)
+      | _ -> Constr.map_with_binders succ substrec depth c
+      in
+      let ans = EConstr.of_constr @@ substrec 0 (EConstr.Unsafe.to_constr atm) in
+      !seen, ans
+  in
+  let st, uid = Env.add flags env sigma atm !state in
+  let () = state := st in
+  { atom = uid; vars }
+
+let hole_atom = { atom = Env.hole; vars = Int.Set.singleton 1 }
+
 let kind_of_formula ~flags env sigma term =
-  let normalize = special_nf ~flags env sigma in
   let cciterm = special_whd ~flags env sigma term in
     match match_with_imp_term env sigma cciterm with
         Some (a,b)-> Arrow (a, pop b)
@@ -105,10 +183,10 @@ let kind_of_formula ~flags env sigma term =
                         let is_trivial=
                           let is_constant n = Int.equal n 0 in
                             Array.exists is_constant mip.mind_consnrealargs in
-                          if Inductiveops.mis_is_recursive (ind,mib,mip) ||
+                          if Inductiveops.mis_is_recursive env (ind, mib, mip) ||
                             (has_realargs && not is_trivial)
                           then
-                            Atom { atom = cciterm }
+                            Atom cciterm
                           else
                             if Int.equal nconstr 1 then
                               And((ind,u),l,is_trivial)
@@ -120,7 +198,8 @@ let kind_of_formula ~flags env sigma term =
                           let (ind, u) = EConstr.destInd sigma i in
                           let u = EConstr.EInstance.kind sigma u in
                           Exists((ind, u), l)
-                      |_-> Atom { atom = normalize cciterm }
+                      |_->
+                        Atom cciterm
 
 type atoms = {positive:atom list;negative:atom list}
 
@@ -128,13 +207,10 @@ type _ side =
 | Hyp : bool -> [ `Hyp ] side (* true if treated as hint *)
 | Concl : [ `Goal ] side
 
-let no_atoms = (false,{positive=[];negative=[]})
-
-let build_atoms (type a) ~flags env sigma metagen (side : a side) cciterm =
+let build_atoms (type a) ~flags state env sigma metagen (side : a side) cciterm =
   let trivial =ref false
   and positive=ref []
   and negative=ref [] in
-  let normalize=special_nf ~flags env sigma in
   let rec build_rec subst polarity cciterm=
     match kind_of_formula ~flags env sigma cciterm with
         False(_,_)->if not polarity then trivial:=true
@@ -144,7 +220,7 @@ let build_atoms (type a) ~flags env sigma metagen (side : a side) cciterm =
       | And(i,l,b) | Or(i,l,b)->
           if b then
             begin
-              let unsigned= { atom = normalize (substnl subst 0 cciterm) } in
+              let unsigned= fresh_atom ~flags state env sigma subst cciterm in
                 if polarity then
                   positive:= unsigned :: !positive
                 else
@@ -160,17 +236,17 @@ let build_atoms (type a) ~flags env sigma metagen (side : a side) cciterm =
             then trivial:=true;
             Array.iter f v
       | Exists(i,l)->
-          let var=mkMeta (metagen true) in
+          let var = metagen true in
           let v =(ind_hyps env sigma 1 i l).(0) in
           let g i _ decl =
             build_rec (var::subst) polarity (lift i (RelDecl.get_type decl)) in
             List.fold_left_i g (2-(List.length l)) () v
       | Forall(_,b)->
-          let var=mkMeta (metagen true) in
+          let var = metagen true in
             build_rec (var::subst) polarity b
       | Atom t->
-          let unsigned= { atom = substnl subst 0 t.atom } in
-            if not (isMeta sigma unsigned.atom) then (* discarding wildcard atoms *)
+          let unsigned = fresh_atom ~flags state env sigma subst t in
+            if not (isMeta sigma (repr_atom !state unsigned)) then (* discarding wildcard atoms *)
               if polarity then
                 positive:= unsigned :: !positive
               else
@@ -181,7 +257,7 @@ let build_atoms (type a) ~flags env sigma metagen (side : a side) cciterm =
         | Hyp false -> build_rec [] false cciterm
         | Hyp true  ->
             let rels,head=decompose_prod sigma cciterm in
-            let subst=List.rev_map (fun _->mkMeta (metagen true)) rels in
+            let subst=List.rev_map (fun _ -> metagen true) rels in
               build_rec subst false head;trivial:=false (* special for hints *)
     end;
     (!trivial,
@@ -211,11 +287,14 @@ type left_pattern=
   | Lor of pinductive
   | Lforall of metavariable*constr*bool
   | Lexists of pinductive
-  | LA of constr*left_arrow_pattern
+  | LA of atom*left_arrow_pattern
 
 type _ identifier =
 | GoalId : [ `Goal ] identifier
 | FormulaId : GlobRef.t -> [ `Hyp ] identifier
+
+let goal_id = GoalId
+let formula_id env gr = FormulaId (Environ.QGlobRef.canonize env gr)
 
 type _ pattern =
 | LeftPattern : left_pattern -> [ `Hyp ] pattern
@@ -223,21 +302,20 @@ type _ pattern =
 
 type 'a t = {
   id : 'a identifier;
-  constr : constr;
+  constr : atom;
   pat : 'a pattern;
   atoms : atoms;
 }
 
 type any_formula = AnyFormula : 'a t -> any_formula
 
-let build_formula (type a) ~flags env sigma (side : a side) (nam : a identifier) typ metagen : (a t, atom) sum =
-  let normalize = special_nf ~flags env sigma in
+exception Is_atom of EConstr.t
+
+let build_formula (type a) ~flags state env sigma (side : a side) (nam : a identifier) typ metagen : Env.t * (a t, atom) sum =
     try
+      let state = ref state in
       let m=meta_succ(metagen false) in
-      let trivial,atoms=
-        if flags.qflag then
-          build_atoms ~flags env sigma metagen side typ
-        else no_atoms in
+      let trivial, atoms = build_atoms ~flags state env sigma metagen side typ in
       let pattern : a pattern =
         match side with
             Concl ->
@@ -259,18 +337,16 @@ let build_formula (type a) ~flags env sigma (side : a side) (nam : a identifier)
                     False(i,_)        ->  Lfalse
                   | Atom a       ->  raise (Is_atom a)
                   | And(i,_,b)         ->
-                      if b then
-                        let nftyp=normalize typ in raise (Is_atom { atom = nftyp })
+                      if b then raise (Is_atom typ)
                       else Land i
                   | Or(i,_,b)          ->
-                      if b then
-                        let nftyp=normalize typ in raise (Is_atom { atom = nftyp })
+                      if b then raise (Is_atom typ)
                       else Lor i
                   | Exists (ind,_) ->  Lexists ind
                   | Forall (d,_) ->
                       Lforall(m,d,trivial)
                   | Arrow (a,b) ->
-                      let nfa=normalize a in
+                    let nfa = fresh_atom ~flags state env sigma [] a in
                         LA (nfa,
                             match kind_of_formula ~flags env sigma a with
                                 False(i,l)-> LLfalse(i,l)
@@ -282,9 +358,10 @@ let build_formula (type a) ~flags env sigma (side : a side) (nam : a identifier)
                               | Forall(_,_)->LLforall a) in
                 LeftPattern pat
       in
-        Left {id=nam;
-              constr=normalize typ;
-              pat=pattern;
-              atoms=atoms}
-    with Is_atom a-> Right a (* already in nf *)
+      let typ = fresh_atom ~flags state env sigma [] typ in
+      !state, Left { id = nam; constr = typ; pat = pattern; atoms = atoms}
+    with Is_atom a ->
+      let state = ref state in
+      let a = fresh_atom ~flags state env sigma [] a in
+      !state, Right a (* already in nf *)
 

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -84,8 +84,10 @@ type multi = Equality.multi =
 | RepeatStar
 | RepeatPlus
 
+type orientation = bool
+
 type rewriting =
-  bool option *
+  orientation option *
   multi *
   constr_with_bindings tactic
 

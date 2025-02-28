@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -13,7 +13,7 @@ open Names
 (** * Load paths.
 
   A load path is a physical path in the file system; to each load path is
-  associated a Coq [DirPath.t] (the "logical" path of the physical path).
+  associated a Rocq [DirPath.t] (the "logical" path of the physical path).
 
 *)
 
@@ -21,7 +21,7 @@ type t
 (** Type of loadpath bindings. *)
 
 val logical : t -> DirPath.t
-(** Get the logical path (Coq module hierarchy) of a loadpath. *)
+(** Get the logical path (Rocq module hierarchy) of a loadpath. *)
 
 val physical : t -> CUnix.physical_path
 (** Get the physical path of a loadpath *)
@@ -52,36 +52,40 @@ val locate_file : string -> string
     it does not respect the visibility of paths. *)
 
 (** {6 Locate a library in the load path } *)
-type locate_error = LibUnmappedDir | LibNotFound
-type 'a locate_result = ('a, locate_error) result
+module Error : sig
+  type t = LibUnmappedDir | LibNotFound
+
+  (** Raise regular Rocq errors with default informative message;
+      usually document managers that have more information about the
+      workspace than rocq compile will override this with a better
+      mechanism / message. *)
+  val raise : DirPath.t -> t -> 'a
+end
 
 val locate_qualified_library
   :  ?root:DirPath.t
   -> Libnames.qualid
-  -> (DirPath.t * CUnix.physical_path) locate_result
+  -> (DirPath.t * CUnix.physical_path, Error.t) Result.t
 
 (** Locates a library by implicit name.
 
-  @raise LibUnmappedDir if the library is not in the path
-  @raise LibNotFound if there is no corresponding file in the path
+  @return LibUnmappedDir if the library is not in the path
+  @return LibNotFound if there is no corresponding file in the path
 
 *)
-
-val try_locate_absolute_library : DirPath.t -> string
+val locate_absolute_library : DirPath.t -> (CUnix.physical_path, Error.t) Result.t
 
 (** {6 Extending the Load Path } *)
 
-(** Adds a path to the Coq and ML paths *)
+(** Adds a path to the Rocq and ML paths *)
 type vo_path =
   { unix_path : string
   (** Filesystem path containing vo/ml files *)
   ; coq_path  : DirPath.t
-  (** Coq prefix for the path *)
+  (** Rocq prefix for the path *)
   ; implicit  : bool
   (** [implicit = true] avoids having to qualify with [coq_path]
       true for -R, false for -Q in command line *)
-  ; has_ml    : bool
-  (** If [has_ml] is true, the directory will also be added to the ml include path *)
   ; recursive : bool
   (** [recursive] will determine whether we explore sub-directories  *)
   }

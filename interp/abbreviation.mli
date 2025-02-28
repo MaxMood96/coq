@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -15,7 +15,7 @@ open Globnames
 
 (** Abbreviations. *)
 
-val declare_abbreviation : local:bool -> ?also_in_cases_pattern:bool -> Deprecation.t option -> Id.t ->
+val declare_abbreviation : local:bool -> Globnames.extended_global_reference UserWarn.with_qf option -> Id.t ->
   onlyparsing:bool -> interpretation -> unit
 
 val search_abbreviation : abbreviation -> interpretation

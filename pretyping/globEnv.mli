@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -55,12 +55,13 @@ val vars_of_env : t -> Id.Set.t
 
 val push_rel : hypnaming:naming_mode -> evar_map -> rel_declaration -> t -> rel_declaration * t
 val push_rel_context : hypnaming:naming_mode -> ?force_names:bool -> evar_map -> rel_context -> t -> rel_context * t
-val push_rec_types : hypnaming:naming_mode -> evar_map -> Name.t Context.binder_annot array * constr array -> t -> Name.t Context.binder_annot array * t
+val push_rec_types : hypnaming:naming_mode -> evar_map -> Name.t EConstr.binder_annot array * constr array -> t -> Name.t EConstr.binder_annot array * t
 
 (** Declare an evar using renaming information *)
 
 val new_evar : t -> evar_map -> ?src:Evar_kinds.t Loc.located ->
-  ?naming:Namegen.intro_pattern_naming_expr -> constr -> evar_map * constr
+  ?naming:Namegen.intro_pattern_naming_expr -> ?relevance:ERelevance.t ->
+  constr -> evar_map * constr
 
 val new_type_evar : t -> evar_map -> src:Evar_kinds.t Loc.located -> evar_map * constr
 

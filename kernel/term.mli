@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -23,9 +23,9 @@ val mkArrowR : types -> types -> constr
 (** For an always-relevant domain *)
 
 (** Named version of the functions from [Term]. *)
-val mkNamedLambda : Id.t Context.binder_annot -> types -> constr -> constr
-val mkNamedLetIn : Id.t Context.binder_annot -> constr -> types -> constr -> constr
-val mkNamedProd : Id.t Context.binder_annot -> types -> types -> types
+val mkNamedLambda : Id.t binder_annot -> types -> constr -> constr
+val mkNamedLetIn : Id.t binder_annot -> constr -> types -> constr -> constr
+val mkNamedProd : Id.t binder_annot -> types -> types -> types
 
 (** Constructs either [(x:t)c] or [[x=b:t]c] *)
 val mkProd_or_LetIn : Constr.rel_declaration -> types -> types
@@ -48,24 +48,24 @@ val appvectc : constr -> constr array -> constr
 
 (** [prodn n l b] = [forall (x_1:T_1)...(x_n:T_n), b]
    where [l] is [(x_n,T_n)...(x_1,T_1)...]. *)
-val prodn : int -> (Name.t Context.binder_annot * constr) list -> constr -> constr
+val prodn : int -> (Name.t binder_annot * constr) list -> constr -> constr
 
 (** [compose_prod l b]
    @return [forall (x_1:T_1)...(x_n:T_n), b]
    where [l] is [(x_n,T_n)...(x_1,T_1)].
    Inverse of [decompose_prod]. *)
-val compose_prod : (Name.t Context.binder_annot * constr) list -> constr -> constr
+val compose_prod : (Name.t binder_annot * constr) list -> constr -> constr
 
 (** [lamn n l b]
     @return [fun (x_1:T_1)...(x_n:T_n) => b]
    where [l] is [(x_n,T_n)...(x_1,T_1)...]. *)
-val lamn : int -> (Name.t Context.binder_annot * constr) list -> constr -> constr
+val lamn : int -> (Name.t binder_annot * constr) list -> constr -> constr
 
 (** [compose_lam l b]
    @return [fun (x_1:T_1)...(x_n:T_n) => b]
    where [l] is [(x_n,T_n)...(x_1,T_1)].
    Inverse of [it_destLam] *)
-val compose_lam : (Name.t Context.binder_annot * constr) list -> constr -> constr
+val compose_lam : (Name.t binder_annot * constr) list -> constr -> constr
 
 (** [to_lambda n l]
    @return [fun (x_1:T_1)...(x_n:T_n) => T]
@@ -112,22 +112,22 @@ val prod_applist_decls : int -> types -> constr list -> types
 
 (** Transforms a product term {% $ %}(x_1:T_1)..(x_n:T_n)T{% $ %} into the pair
    {% $ %}([(x_n,T_n);...;(x_1,T_1)],T){% $ %}, where {% $ %}T{% $ %} is not a product. *)
-val decompose_prod : constr -> (Name.t Context.binder_annot * constr) list * constr
+val decompose_prod : constr -> (Name.t binder_annot * constr) list * constr
 
 (** Transforms a lambda term {% $ %}[x_1:T_1]..[x_n:T_n]T{% $ %} into the pair
    {% $ %}([(x_n,T_n);...;(x_1,T_1)],T){% $ %}, where {% $ %}T{% $ %} is not a lambda. *)
-val decompose_lambda : constr -> (Name.t Context.binder_annot * constr) list * constr
+val decompose_lambda : constr -> (Name.t binder_annot * constr) list * constr
 
 (** Given a positive integer n, decompose a product term
    {% $ %}(x_1:T_1)..(x_n:T_n)T{% $ %}
    into the pair {% $ %}([(xn,Tn);...;(x1,T1)],T){% $ %}.
    Raise a user error if not enough products. *)
-val decompose_prod_n : int -> constr -> (Name.t Context.binder_annot * constr) list * constr
+val decompose_prod_n : int -> constr -> (Name.t binder_annot * constr) list * constr
 
 (** Given a positive integer {% $ %}n{% $ %}, decompose a lambda term
    {% $ %}[x_1:T_1]..[x_n:T_n]T{% $ %} into the pair {% $ %}([(x_n,T_n);...;(x_1,T_1)],T){% $ %}.
    Raise a user error if not enough lambdas. *)
-val decompose_lambda_n : int -> constr -> (Name.t Context.binder_annot * constr) list * constr
+val decompose_lambda_n : int -> constr -> (Name.t binder_annot * constr) list * constr
 
 (** Extract the premisses and the conclusion of a term of the form
    "(xi:Ti) ... (xj:=cj:Tj) ..., T" where T is not a product nor a let *)
@@ -139,7 +139,13 @@ val decompose_lambda_decls : constr -> Constr.rel_context * constr
 (** Idem but extract the first [n] premisses, counting let-ins. *)
 val decompose_prod_n_decls : int -> types -> Constr.rel_context * types
 
-(** Idem for lambdas, _not_ counting let-ins *)
+(** Idem but extracting simultaneously the first [n] premisses, counting let-ins, in a term and its type. *)
+val decompose_lambda_prod_n_decls : int -> constr -> types -> Constr.rel_context * constr * types
+
+(** Idem for lambdas, including let-ins but _not_ counting them;
+    This is typically the function to use to extract the context of a Fix
+    up to and including the decreasing argument, counting as many lambda's
+    as given by the decreasing index + 1 *)
 val decompose_lambda_n_assum : int -> constr -> Constr.rel_context * constr
 
 (** Idem, counting let-ins *)
@@ -185,36 +191,36 @@ val isArity : types -> bool
 
 (* Deprecated *)
 type sorts_family = Sorts.family = InSProp | InProp | InSet | InType | InQSort
-[@@ocaml.deprecated "Alias for Sorts.family"]
+[@@ocaml.deprecated "(8.8) Alias for Sorts.family"]
 
 type sorts = Sorts.t = private
   | SProp | Prop | Set
   | Type of Univ.Universe.t  (** Type *)
   | QSort of Sorts.QVar.t * Univ.Universe.t
-[@@ocaml.deprecated "Alias for Sorts.t"]
+[@@ocaml.deprecated "(8.8) Alias for Sorts.t"]
 
 val decompose_prod_assum : types -> Constr.rel_context * types
-[@@ocaml.deprecated "Use [decompose_prod_decls] instead."]
+[@@ocaml.deprecated "(8.18) Use [decompose_prod_decls] instead."]
 val decompose_lam_assum : constr -> Constr.rel_context * constr
-[@@ocaml.deprecated "Use [decompose_lambda_decls] instead."]
+[@@ocaml.deprecated "(8.18) Use [decompose_lambda_decls] instead."]
 val decompose_prod_n_assum : int -> types -> Constr.rel_context * types
-[@@ocaml.deprecated "Use [decompose_prod_n_decls] instead."]
+[@@ocaml.deprecated "(8.18) Use [decompose_prod_n_decls] instead."]
 val prod_assum : types -> Constr.rel_context
-[@@ocaml.deprecated "Use [prod_decls] instead."]
+[@@ocaml.deprecated "(8.18) Use [prod_decls] instead."]
 val lam_assum : constr -> Constr.rel_context
-[@@ocaml.deprecated "Use [lambda_decls] instead."]
+[@@ocaml.deprecated "(8.18) Use [lambda_decls] instead."]
 val prod_n_assum : int -> types -> Constr.rel_context
-[@@ocaml.deprecated "Use [prod_n_decls] instead."]
+[@@ocaml.deprecated "(8.18) Use [prod_n_decls] instead."]
 val strip_prod_assum : types -> types
-[@@ocaml.deprecated "Use [strip_prod_decls] instead."]
+[@@ocaml.deprecated "(8.18) Use [strip_prod_decls] instead."]
 val strip_lam_assum : constr -> constr
-[@@ocaml.deprecated "Use [strip_lambda_decls] instead."]
+[@@ocaml.deprecated "(8.18) Use [strip_lambda_decls] instead."]
 
-val decompose_lam : t -> (Name.t Context.binder_annot * t) list * t
-[@@ocaml.deprecated "Use [decompose_lambda] instead."]
-val decompose_lam_n : int -> t -> (Name.t Context.binder_annot * t) list * t
-[@@ocaml.deprecated "Use [decompose_lambda_n] instead."]
+val decompose_lam : t -> (Name.t binder_annot * t) list * t
+[@@ocaml.deprecated "(8.18) Use [decompose_lambda] instead."]
+val decompose_lam_n : int -> t -> (Name.t binder_annot * t) list * t
+[@@ocaml.deprecated "(8.18) Use [decompose_lambda_n] instead."]
 val decompose_lam_n_assum : int -> t -> rel_context * t
-[@@ocaml.deprecated "Use [decompose_lambda_n_assum] instead."]
+[@@ocaml.deprecated "(8.18) Use [decompose_lambda_n_assum] instead."]
 val decompose_lam_n_decls : int -> t -> rel_context * t
-[@@ocaml.deprecated "Use [decompose_lambda_n_decls] instead."]
+[@@ocaml.deprecated "(8.18) Use [decompose_lambda_n_decls] instead."]

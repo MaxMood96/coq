@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -49,14 +49,14 @@ let protect_pattern_in_binder bl c ctypopt =
   if List.exists (function Constrexpr.CLocalPattern _ -> true | _ -> false) bl
   then
     let t = match ctypopt with
-      | None -> CAst.make ?loc:c.CAst.loc (Constrexpr.CHole (None,Namegen.IntroAnonymous))
+      | None -> CAst.make ?loc:c.CAst.loc (Constrexpr.CHole (None))
       | Some t -> t in
     let loc = Loc.merge_opt c.CAst.loc t.CAst.loc in
     let c = CAst.make ?loc @@ Constrexpr.CCast (c, Some Constr.DEFAULTcast, t) in
     let loc = match List.hd bl with
-      | Constrexpr.CLocalAssum (a::_,_,_) | Constrexpr.CLocalDef (a,_,_) -> a.CAst.loc
+      | Constrexpr.CLocalAssum (a::_,_,_,_) | Constrexpr.CLocalDef (a,_,_,_) -> a.CAst.loc
       | Constrexpr.CLocalPattern {CAst.loc} -> loc
-      | Constrexpr.CLocalAssum ([],_,_) -> assert false in
+      | Constrexpr.CLocalAssum ([],_,_,_) -> assert false in
     let apply_under_binders f env evd c =
       let rec aux env evd c =
         let open Constr in
@@ -86,7 +86,7 @@ let interp_definition ~program_mode env evd impl_env bl red_option c ctypopt =
   let flags = Pretyping.{ all_no_fail_flags with program_mode } in
   let (bl, c, ctypopt, apply_under_binders) = protect_pattern_in_binder bl c ctypopt in
   (* Build the parameters *)
-  let evd, (impls, ((env_bl, ctx), imps1)) = interp_context_evars ~program_mode ~impl_env env evd bl in
+  let evd, (impls, ((env_bl, ctx), imps1, _locs)) = interp_context_evars ~program_mode ~impl_env env evd bl in
   (* Build the type *)
   let evd, tyopt = Option.fold_left_map
       (interp_type_evars_impls ~flags ~impls env_bl)
@@ -111,11 +111,13 @@ let interp_definition ~program_mode env evd impl_env bl red_option c ctypopt =
   let tyopt = Option.map (fun ty -> EConstr.it_mkProd_or_LetIn ty ctx) tyopt in
   evd, (c, tyopt), imps
 
-let definition_using env evd ~body ~types ~using =
-  let terms = Option.List.cons types [body] in
-  Option.map (fun using -> Proof_using.definition_using env evd ~using ~terms) using
+let interp_statement ~program_mode env evd ~flags ~scope name bl typ  =
+  let evd, (impls, ((env, ctx), imps, _locs)) = Constrintern.interp_context_evars ~program_mode env evd bl in
+  let evd, (t', imps') = Constrintern.interp_type_evars_impls ~flags ~impls env evd typ in
+  let ids = List.map Context.Rel.Declaration.get_name ctx in
+  evd, ids, EConstr.it_mkProd_or_LetIn t' ctx, imps @ imps'
 
-let do_definition ?hook ~name ?scope ?clearbody ~poly ?typing_flags ~kind ?using ?deprecation udecl bl red_option c ctypopt =
+let do_definition ?loc ?hook ~name ?scope ?clearbody ~poly ?typing_flags ~kind ?using ?user_warns udecl bl red_option c ctypopt =
   let program_mode = false in
   let env = Global.env() in
   let env = Environ.update_typing_flags ?typing_flags env in
@@ -124,23 +126,14 @@ let do_definition ?hook ~name ?scope ?clearbody ~poly ?typing_flags ~kind ?using
   let evd, (body, types), impargs =
     interp_definition ~program_mode env evd empty_internalization_env bl red_option c ctypopt
   in
-  let using = definition_using env evd ~body ~types ~using in
   let kind = Decls.IsDefinition kind in
-  let cinfo = Declare.CInfo.make ~name ~impargs ~typ:types ?using () in
-  let info = Declare.Info.make ?scope ?clearbody ~kind ?hook ~udecl ~poly ?typing_flags ?deprecation () in
+  let cinfo = Declare.CInfo.make ?loc ~name ~impargs ~typ:types () in
+  let info = Declare.Info.make ?scope ?clearbody ~kind ?hook ~udecl ~poly ?typing_flags ?user_warns () in
   let _ : Names.GlobRef.t =
-    Declare.declare_definition ~info ~cinfo ~opaque:false ~body evd
+    Declare.declare_definition ~info ~cinfo ~opaque:false ~body ?using evd
   in ()
 
-let do_definition_program ?hook ~pm ~name ~scope ?clearbody ~poly ?typing_flags ~kind ?using ?deprecation udecl bl red_option c ctypopt =
-  let () = if not poly then udecl |> Option.iter (fun udecl ->
-      if not udecl.UState.univdecl_extensible_instance
-      || not udecl.UState.univdecl_extensible_constraints
-      then
-        CErrors.user_err
-          Pp.(str "Non extensible universe declaration not supported \
-                   with monomorphic Program Definition."))
-  in
+let do_definition_program ?loc ?hook ~pm ~name ~scope ?clearbody ~poly ?typing_flags ~kind ?using ?user_warns udecl bl red_option c ctypopt =
   let env = Global.env() in
   let env = Environ.update_typing_flags ?typing_flags env in
   (* Explicitly bound universes and constraints *)
@@ -148,10 +141,28 @@ let do_definition_program ?hook ~pm ~name ~scope ?clearbody ~poly ?typing_flags 
   let evd, (body, types), impargs =
     interp_definition ~program_mode:true env evd empty_internalization_env bl red_option c ctypopt
   in
-  let using = definition_using env evd ~body ~types ~using in
-  let term, typ, uctx, obls = Declare.Obls.prepare_obligation ~name ~body ~types evd in
+  let body, typ, uctx, _, obls = Declare.Obls.prepare_obligations ~name ~body ?types env evd in
+  Evd.check_univ_decl_early ~poly ~with_obls:true evd udecl [body; typ];
   let pm, _ =
-    let cinfo = Declare.CInfo.make ~name ~typ ~impargs ?using () in
-    let info = Declare.Info.make ~udecl ~scope ?clearbody ~poly ~kind ?hook ?typing_flags ?deprecation () in
-    Declare.Obls.add_definition ~pm ~cinfo ~info ~term ~uctx obls
+    let cinfo = Declare.CInfo.make ?loc ~name ~typ ~impargs () in
+    let info = Declare.Info.make ~udecl ~scope ?clearbody ~poly ~kind ?hook ?typing_flags ?user_warns () in
+    Declare.Obls.add_definition ~pm ~info ~cinfo ~opaque:false ~body ~uctx ?using obls
   in pm
+
+let do_definition_interactive ?loc ~program_mode ?hook ~name ~scope ?clearbody ~poly ~typing_flags ~kind ?using ?user_warns udecl bl t =
+  let env = Global.env () in
+  let env = Environ.update_typing_flags ?typing_flags env in
+  let flags = Pretyping.{ all_no_fail_flags with program_mode } in
+  let evd, udecl = Constrintern.interp_univ_decl_opt env udecl in
+  let evd, args, typ,impargs = interp_statement ~program_mode ~flags ~scope env evd name bl t in
+  let evd =
+    let inference_hook = if program_mode then Some Declare.Obls.program_inference_hook else None in
+    Pretyping.solve_remaining_evars ?hook:inference_hook flags env evd in
+  let evd = Evd.minimize_universes evd in
+  Pretyping.check_evars_are_solved ~program_mode env evd;
+  let typ = EConstr.to_constr evd typ in
+  let info = Declare.Info.make ?hook ~poly ~scope ?clearbody ~kind ~udecl ?typing_flags ?user_warns () in
+  let cinfo = Declare.CInfo.make ?loc ~name ~typ ~args ~impargs () in
+  Evd.check_univ_decl_early ~poly ~with_obls:false evd udecl [typ];
+  let evd = if poly then evd else Evd.fix_undefined_variables evd in
+  Declare.Proof.start_definition ~info ~cinfo ?using evd

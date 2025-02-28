@@ -1,4 +1,4 @@
-Require Import Coq.ssr.ssreflect.
+Require Import Corelib.ssr.ssreflect.
 
 Axiom R : Type.
 

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -15,8 +15,7 @@ open Tacexpr
 
 (** {5 Tactic Definitions} *)
 
-val register_ltac : locality_flag -> ?deprecation:Deprecation.t ->
-  Tacexpr.tacdef_body list -> unit
+val register_ltac : Attributes.vernac_flags -> Tacexpr.tacdef_body list -> unit
 (** Adds new Ltac definitions to the environment. *)
 
 (** {5 Tactic Notations} *)
@@ -63,7 +62,7 @@ val add_ml_tactic_notation : ml_tactic_name -> level:int -> ?deprecation:Depreca
 (** {5 Tactic Quotations} *)
 
 val create_ltac_quotation : plugin:string -> string ->
-  ('grm Loc.located -> raw_tactic_arg) -> ('grm Pcoq.Entry.t * int option) -> unit
+  ('grm Loc.located -> raw_tactic_arg) -> ('grm Procq.Entry.t * int option) -> unit
 (** [create_ltac_quotation name f e] adds a quotation rule to Ltac, that is,
     Ltac grammar now accepts arguments of the form ["name" ":" "(" <e> ")"], and
     generates an argument using [f] on the entry parsed by [e]. *)
@@ -89,7 +88,7 @@ val ml_tactic_extend : plugin:string -> name:string -> local:locality_flag ->
   ?deprecation:Deprecation.t -> ('r, unit Proofview.tactic) ml_ty_sig -> 'r -> unit
 (** Helper function to define directly an Ltac function in OCaml without any
     associated parsing rule nor further shenanigans. The Ltac function will be
-    defined as [name] in the Coq file that loads the ML plugin where this
+    defined as [name] in the Rocq file that loads the ML plugin where this
     function is called. It will have the arity given by the [ml_ty_sig]
     argument. *)
 
@@ -156,7 +155,7 @@ type ('a, 'b) argument_intern =
 | ArgInternWit : ('a, 'b, 'c) Genarg.genarg_type -> ('a, 'b) argument_intern
 
 type 'b argument_subst =
-| ArgSubstFun : 'b Genintern.subst_fun -> 'b argument_subst
+| ArgSubstFun : 'b Gensubst.subst_fun -> 'b argument_subst
 | ArgSubstWit : ('a, 'b, 'c) Genarg.genarg_type -> 'b argument_subst
 
 type ('b, 'c) argument_interp =
@@ -176,4 +175,4 @@ type ('a, 'b, 'c) tactic_argument = {
 }
 
 val argument_extend : plugin:string -> name:string -> ('a, 'b, 'c) tactic_argument ->
-  ('a, 'b, 'c) Genarg.genarg_type * 'a Pcoq.Entry.t
+  ('a, 'b, 'c) Genarg.genarg_type * 'a Procq.Entry.t

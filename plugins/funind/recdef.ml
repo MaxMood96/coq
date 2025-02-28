@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -18,7 +18,6 @@ open Environ
 open Pp
 open Names
 open Libnames
-open Globnames
 open Nameops
 open CErrors
 open Util
@@ -27,25 +26,22 @@ open Tacticals
 open Tactics
 open Nametab
 open Tacred
-open Glob_term
-open Pretyping
 open Termops
 open Constrintern
 open Tactypes
 open Genredexpr
 open Equality
-open Auto
 open Eauto
 open Indfun_common
 open Context.Rel.Declaration
 
 (* Ugly things which should not be here *)
 
-let coq_constant s =
-  EConstr.of_constr @@ UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Coqlib.lib_ref s
+let rocq_constant s =
+  EConstr.of_constr @@ UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Rocqlib.lib_ref s
 
-let coq_init_constant s =
-  EConstr.of_constr (UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Coqlib.lib_ref s)
+let rocq_init_constant s =
+  EConstr.of_constr (UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Rocqlib.lib_ref s)
 
 let find_reference sl s =
   let dp = Names.DirPath.make (List.rev_map Id.of_string sl) in
@@ -112,10 +108,10 @@ let v_id = Id.of_string "v"
 let def_id = Id.of_string "def"
 let p_id = Id.of_string "p"
 let rec_res_id = Id.of_string "rec_res"
-let lt = function () -> coq_init_constant "num.nat.lt"
-let le = function () -> Coqlib.lib_ref "num.nat.le"
-let ex = function () -> coq_init_constant "core.ex.type"
-let nat = function () -> coq_init_constant "num.nat.type"
+let lt = function () -> rocq_init_constant "num.nat.lt"
+let le = function () -> Rocqlib.lib_ref "num.nat.le"
+let ex = function () -> rocq_init_constant "core.ex.type"
+let nat = function () -> rocq_init_constant "num.nat.type"
 
 let iter_ref () =
   try find_reference ["Recdef"] "iter"
@@ -124,27 +120,29 @@ let iter_ref () =
 let iter_rd = function
   | () -> constr_of_monomorphic_global (Global.env ()) (delayed_force iter_ref)
 
-let eq = function () -> coq_init_constant "core.eq.type"
+let eq = function () -> rocq_init_constant "core.eq.type"
 let le_lt_SS = function () -> constant ["Recdef"] "le_lt_SS"
-let le_lt_n_Sm = function () -> coq_constant "num.nat.le_lt_n_Sm"
-let le_trans = function () -> coq_constant "num.nat.le_trans"
-let le_lt_trans = function () -> coq_constant "num.nat.le_lt_trans"
-let lt_S_n = function () -> coq_constant "num.nat.lt_S_n"
-let le_n = function () -> coq_init_constant "num.nat.le_n"
+let le_lt_n_Sm = function () -> rocq_constant "num.nat.le_lt_n_Sm"
+let le_trans = function () -> rocq_constant "num.nat.le_trans"
+let le_lt_trans = function () -> rocq_constant "num.nat.le_lt_trans"
+let lt_S_n = function () -> rocq_constant "num.nat.lt_S_n"
+let le_n = function () -> rocq_init_constant "num.nat.le_n"
 
-let coq_sig_ref = function
-  | () -> find_reference ["Coq"; "Init"; "Specif"] "sig"
+let rocq_sig_ref = function
+  | () -> find_reference ["Corelib"; "Init"; "Specif"] "sig"
 
-let coq_O = function () -> coq_init_constant "num.nat.O"
-let coq_S = function () -> coq_init_constant "num.nat.S"
-let lt_n_O = function () -> coq_constant "num.nat.nlt_0_r"
+let rocq_proj1_sig = lazy (Rocqlib.build_sigma ()).proj1
+
+let rocq_O = function () -> rocq_init_constant "num.nat.O"
+let rocq_S = function () -> rocq_init_constant "num.nat.S"
+let lt_n_O = function () -> rocq_constant "num.nat.nlt_0_r"
 let max_ref = function () -> find_reference ["Recdef"] "max"
 
 let max_constr = function
   | () ->
     EConstr.of_constr (constr_of_monomorphic_global (Global.env ()) (delayed_force max_ref))
 
-let f_S t = mkApp (delayed_force coq_S, [|t|])
+let f_S t = mkApp (delayed_force rocq_S, [|t|])
 
 let rec n_x_id ids n =
   if Int.equal n 0 then []
@@ -161,55 +159,26 @@ let simpl_iter clause =
        ; rCofix = true
        ; rZeta = true
        ; rDelta = false
-       ; rConst = [EvalConstRef (const_of_ref (delayed_force iter_ref))] })
+       ; rConst = [EvalConstRef (const_of_ref (delayed_force iter_ref))]
+       ; rStrength = Norm })
     clause
 
-(* Others ugly things ... *)
-let (value_f : Constr.t list -> GlobRef.t -> Constr.t) =
-  let open Term in
-  let open Constr in
-  fun al fterm ->
-    let rev_x_id_l =
-      List.fold_left
-        (fun x_id_l _ ->
-          let x_id = next_ident_away_in_goal x_id x_id_l in
-          x_id :: x_id_l)
-        [] al
-    in
-    let context =
-      List.map
-        (fun (x, c) -> LocalAssum (make_annot (Name x) Sorts.Relevant, c))
-        (List.combine rev_x_id_l (List.rev al))
-    in
-    let env = Environ.push_rel_context context (Global.env ()) in
-    let glob_body =
-      DAst.make
-      @@ GCases
-           ( RegularStyle
-           , None
-           , [ ( DAst.make
-                 @@ GApp
-                      ( DAst.make @@ GRef (fterm, None)
-                      , List.rev_map
-                          (fun x_id -> DAst.make @@ GVar x_id)
-                          rev_x_id_l )
-               , (Anonymous, None) ) ]
-           , [ CAst.make
-                 ( [v_id]
-                 , [ DAst.make
-                     @@ PatCstr
-                          ( (destIndRef (delayed_force coq_sig_ref), 1)
-                          , [ DAst.make @@ PatVar (Name v_id)
-                            ; DAst.make @@ PatVar Anonymous ]
-                          , Anonymous ) ]
-                 , DAst.make @@ GVar v_id ) ] )
-    in
-    let body = fst (understand env (Evd.from_env env) glob_body) (*FIXME*) in
-    let body = EConstr.Unsafe.to_constr body in
-    it_mkLambda_or_LetIn body context
+(* [value_f ctx ref] build [fun ctx => proj1_sig (ref ctx)] where
+   proj1_sig is expanded *)
+let (value_f : Constr.rel_context -> GlobRef.t -> Constr.t) =
+  fun context fterm ->
+  let env = Global.env () in
+  let sigma = Evd.from_env env in
+  let env = Environ.push_rel_context context env in
+  let proj = Globnames.destConstRef (Lazy.force rocq_proj1_sig) in
+  let proj_body = constant_value_in env (proj, UVars.Instance.empty) in (* Why not to keep it named? *)
+  let arg = mkApp (mkRef (fterm, EInstance.empty), Context.Rel.instance mkRel 0 context) in
+  let t, p = Hipattern.match_sigma env sigma (Retyping.get_type_of env sigma arg) in
+  let body = Reduction.beta_applist proj_body (List.map (EConstr.to_constr sigma) [t; p; arg]) in
+  Term.it_mkLambda_or_LetIn body context
 
 let (declare_f :
-      Id.t -> Decls.logical_kind -> Constr.t list -> GlobRef.t -> GlobRef.t) =
+      Id.t -> Decls.logical_kind -> Constr.rel_context -> GlobRef.t -> GlobRef.t) =
  fun f_id kind input_type fterm_ref ->
   declare_fun f_id kind (value_f input_type fterm_ref)
 
@@ -272,7 +241,7 @@ let check_not_nested env sigma forbidden e =
   let rec check_not_nested e =
     match EConstr.kind sigma e with
     | Rel _ -> ()
-    | Int _ | Float _ -> ()
+    | Int _ | Float _ | String _ -> ()
     | Var x ->
       if Id.List.mem x forbidden then
         user_err
@@ -288,11 +257,11 @@ let check_not_nested env sigma forbidden e =
       Array.iter check_not_nested t;
       check_not_nested def;
       check_not_nested ty
-    | Proj (p, c) -> check_not_nested c
+    | Proj (p, _, c) -> check_not_nested c
     | Const _ -> ()
     | Ind _ -> ()
     | Construct _ -> ()
-    | Case (_, _, pms, (_, t), _, e, a) ->
+    | Case (_, _, pms, ((_, t), _), _, e, a) ->
       Array.iter check_not_nested pms;
       check_not_nested t;
       check_not_nested e;
@@ -358,7 +327,7 @@ type journey_info =
           -> constr infos
           -> unit Proofview.tactic)
       -> ( case_info
-           * constr
+           * (constr * ERelevance.t)
            * case_invert
            * constr
            * constr array
@@ -479,7 +448,7 @@ let rec travel_aux jinfo continuation_tac (expr_info : constr infos) =
           match EConstr.kind sigma f with
           | App _ -> assert false (* f is coming from a decompose_app *)
           | Const _ | Construct _ | Rel _ | Evar _ | Meta _ | Ind _ | Sort _
-           |Prod _ | Var _ ->
+          | Prod _ | Var _ ->
             let new_infos = {expr_info with info = (f, args)} in
             let new_continuation_tac =
               jinfo.apP (f, args) expr_info continuation_tac
@@ -496,14 +465,14 @@ let rec travel_aux jinfo continuation_tac (expr_info : constr infos) =
           | Fix _ -> user_err Pp.(str "Function cannot treat local fixpoint or cofixpoint")
           | Proj _ -> user_err Pp.(str "Function cannot treat projections")
           | Lambda _ | Cast _ | LetIn _
-          | CoFix _ | Array _ | Int _ | Float _ ->
+          | CoFix _ | Array _ | Int _ | Float _ | String _ ->
             anomaly
               ( Pp.str "travel_aux : unexpected "
               ++ Printer.pr_leconstr_env env sigma expr_info.info
               ++ Pp.str "." ) )
       | Cast (t, _, _) -> travel jinfo continuation_tac {expr_info with info = t}
       | Const _ | Var _ | Meta _ | Evar _ | Sort _ | Construct _ | Ind _
-       |Int _ | Float _ ->
+       |Int _ | Float _ | String _ ->
         let new_continuation_tac = jinfo.otherS () expr_info continuation_tac in
         new_continuation_tac expr_info)
 
@@ -563,13 +532,16 @@ let rec prove_lt hyple =
                 ++ Printer.Debug.pr_goal g)
               assumption ])
 
+let default_full_auto =
+  Auto.gen_auto (Some Auto.default_search_depth) [] None
+
 let rec destruct_bounds_aux infos (bound, hyple, rechyps) lbounds =
   let open Tacticals in
   Proofview.Goal.enter (fun g ->
       match lbounds with
       | [] ->
         let ids = Tacmach.pf_ids_of_hyps g in
-        let s_max = mkApp (delayed_force coq_S, [|bound|]) in
+        let s_max = mkApp (delayed_force rocq_S, [|bound|]) in
         let k = next_ident_away_in_goal k_id ids in
         let ids = k :: ids in
         let h' = next_ident_away_in_goal h'_id ids in
@@ -648,7 +620,7 @@ let rec destruct_bounds_aux infos (bound, hyple, rechyps) lbounds =
 
 let destruct_bounds infos =
   destruct_bounds_aux infos
-    (delayed_force coq_O, [], [])
+    (delayed_force rocq_O, [], [])
     infos.values_and_bounds
 
 let terminate_app f_and_args expr_info continuation_tac infos =
@@ -743,7 +715,7 @@ let mkDestructEq not_on_hyp env sigma expr =
     pf_typel new_hyps (fun _ ->
         observe_tclTHENLIST
           (fun _ _ -> str "mkDestructEq")
-          [ generalize new_hyps
+          [ Generalize.generalize new_hyps
           ; Proofview.Goal.enter (fun g2 ->
                 let changefun patvars env sigma =
                   pattern_occs
@@ -765,7 +737,7 @@ let terminate_case next_step (ci, a, iv, t, l) expr_info continuation_tac infos
         try
           check_not_nested env sigma
             (expr_info.f_id :: expr_info.forbidden_ids)
-            a;
+            (fst a);
           false
         with e when CErrors.noncritical e -> true
       in
@@ -1121,7 +1093,7 @@ let equation_app_rec (f, args) expr_info continuation_tac info =
             ; continuation_tac
                 { expr_info with
                   args_assoc =
-                    (args, delayed_force coq_O) :: expr_info.args_assoc }
+                    (args, delayed_force rocq_O) :: expr_info.args_assoc }
             ; observe_tac
                 (fun _ _ -> str "app_rec intros_values_eq")
                 (intros_values_eq expr_info []) ]
@@ -1134,7 +1106,7 @@ let equation_app_rec (f, args) expr_info continuation_tac info =
                 (continuation_tac
                    { expr_info with
                      args_assoc =
-                       (args, delayed_force coq_O) :: expr_info.args_assoc }) ])
+                       (args, delayed_force rocq_O) :: expr_info.args_assoc }) ])
 
 let equation_info =
   { message = "prove_equation with term "
@@ -1188,7 +1160,7 @@ let compute_terminate_type nb_args func =
   in
   let value =
     mkApp
-      ( constr_of_monomorphic_global (Global.env ()) (Util.delayed_force coq_sig_ref)
+      ( constr_of_monomorphic_global (Global.env ()) (Util.delayed_force rocq_sig_ref)
       , [|b; mkLambda (make_annot (Name v_id) Sorts.Relevant, b, nb_iter)|] )
   in
   compose_prod rev_args value
@@ -1249,7 +1221,7 @@ let termination_proof_header is_mes input_type ids args_id relation rec_arg_num
                    (fun _ _ -> str "generalize")
                    (onNLastHypsId (nargs + 1)
                       (tclMAP (fun id ->
-                           tclTHEN (Tactics.generalize [mkVar id]) (clear [id]))))
+                           tclTHEN (Generalize.generalize [mkVar id]) (clear [id]))))
                ; observe_tac (fun _ _ -> str "fix") (fix hrec (nargs + 1))
                ; h_intros args_id
                ; Simple.intro wf_rec_arg
@@ -1303,7 +1275,7 @@ let whole_start concl_tac nb_args is_mes func input_type relation rec_arg_num :
             ; (* we are on the main branche (i.e. still on a match ... with .... end *)
               is_final = true
             ; (* and on leaf (more or less) *)
-              f_terminate = delayed_force coq_O
+              f_terminate = delayed_force rocq_O
             ; nb_arg = nb_args
             ; concl_tac
             ; rec_arg_id
@@ -1332,7 +1304,7 @@ let abstract_type sigma gl =
     with Not_found -> true in
   Environ.fold_named_context_reverse (fun t decl ->
                                         if is_proof_var decl then
-                                          let decl = Termops.map_named_decl EConstr.of_constr decl in
+                                          let decl = EConstr.of_named_decl decl in
                                           mkNamedProd_or_LetIn sigma decl t
                                         else
                                           t
@@ -1347,9 +1319,9 @@ exception EmptySubgoals
 
 let build_and_l sigma l =
   let and_constr =
-    UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Coqlib.lib_ref "core.and.type"
+    UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Rocqlib.lib_ref "core.and.type"
   in
-  let conj_constr = Coqlib.lib_ref "core.and.conj" in
+  let conj_constr = Rocqlib.lib_ref "core.and.conj" in
   let mk_and p1 p2 = mkApp (EConstr.of_constr and_constr, [|p1; p2|]) in
   let rec is_well_founded t =
     match EConstr.kind sigma t with
@@ -1414,6 +1386,7 @@ let is_opaque_constant c =
   | Declarations.Undef _ -> Opaque
   | Declarations.Def _ -> Transparent
   | Declarations.Primitive _ -> Opaque
+  | Declarations.Symbol _ -> Opaque
 
 let open_new_goal ~lemma build_proof sigma using_lemmas ref_ goal_name
     (gls_type, decompose_and_tac, nb_goal) =
@@ -1451,7 +1424,7 @@ let open_new_goal ~lemma build_proof sigma using_lemmas ref_ goal_name
           let hid = next_ident_away_in_goal h_id (pf_ids_of_hyps gl) in
           observe_tclTHENLIST
             (fun _ _ -> mt ())
-            [ generalize [lemma]
+            [ Generalize.generalize [lemma]
             ; Simple.intro hid
             ; Proofview.Goal.enter (fun gl ->
                   let ids = pf_ids_of_hyps gl in
@@ -1470,7 +1443,7 @@ let open_new_goal ~lemma build_proof sigma using_lemmas ref_ goal_name
           let sigma = project gl in
           match EConstr.kind sigma (pf_concl gl) with
           | App (f, _) when EConstr.eq_constr sigma f (well_founded ()) ->
-            Auto.h_auto None [] (Some [])
+            Auto.gen_auto None [] (Some [])
           | _ ->
             incr h_num;
             tclCOMPLETE
@@ -1548,7 +1521,7 @@ let com_terminate interactive_proof tcc_lemma_name tcc_lemma_ref is_mes
   in
   try
     let sigma, new_goal_type = build_new_goal_type lemma in
-    let sigma = Evd.from_ctx (Evd.evar_universe_context sigma) in
+    let sigma = Evd.from_ctx (Evd.ustate sigma) in
     open_new_goal ~lemma start_proof sigma using_lemmas tcc_lemma_ref
       (Some tcc_lemma_name) new_goal_type
   with EmptySubgoals ->
@@ -1642,6 +1615,16 @@ let com_eqn uctx nb_arg eq_name functional_ref f_ref terminate_ref
   in
   ()
 
+let check_relation_type env evd relation =
+  let err () = CErrors.user_err (strbrk "a well-founded relation is expected to be of type A->A->Prop for some type A.") in
+  let evd, t = Typing.type_of env evd relation in
+  let open Reductionops in
+  match EConstr.kind evd (whd_all env evd t) with
+  | Prod (_, typ, _) ->
+    let rel = mkArrowR typ (mkArrowR (Vars.lift 1 typ) mkProp) in
+    if not (is_conv env evd rel t) then err ()
+  | _ -> err ()
+
 (*      Pp.msgnl (fun _ _ -> str "eqn finished"); *)
 
 let recursive_definition ~interactive_proof ~is_mes function_name rec_impls
@@ -1655,7 +1638,7 @@ let recursive_definition ~interactive_proof ~is_mes function_name rec_impls
   let evd, function_type =
     interp_type_evars ~program_mode:false env evd type_of_f
   in
-  let function_r = Sorts.Relevant in
+  let function_r = ERelevance.relevant in
   (* TODO relevance *)
   let env =
     EConstr.push_named
@@ -1700,10 +1683,7 @@ let recursive_definition ~interactive_proof ~is_mes function_name rec_impls
     decompose_prod_n (rec_arg_num - 1) function_type
   in
   let _, rec_arg_type, _ = destProd function_type_before_rec_arg in
-  let arg_types =
-    List.rev_map snd
-      (fst (decompose_prod_n (List.length res_vars) function_type))
-  in
+  let arg_ctx, _ = decompose_prod_n_decls (List.length res_vars) function_type in
   let equation_id = add_suffix function_name "_equation" in
   let functional_id = add_suffix function_name "_F" in
   let term_id = add_suffix function_name "_terminate" in
@@ -1719,14 +1699,15 @@ let recursive_definition ~interactive_proof ~is_mes function_name rec_impls
       env
   in
   let relation, evuctx = interp_constr env_with_pre_rec_args evd r in
+  let () = check_relation_type env_with_pre_rec_args evd relation in
   let evd = Evd.from_ctx evuctx in
   let tcc_lemma_name = add_suffix function_name "_tcc" in
   let tcc_lemma_constr = ref Undefined in
   (* let _ = Pp.msgnl (fun _ _ -> str "relation := " ++ Printer.pr_lconstr_env env_with_pre_rec_args relation) in *)
-  let hook {Declare.Hook.S.uctx; _} =
-    let term_ref = Nametab.locate (qualid_of_ident term_id) in
+  let hook {Declare.Hook.S.uctx; dref; _ } =
+    assert (match dref with GlobRef.ConstRef cst -> Id.equal (Label.to_id (Constant.label cst)) term_id | _ -> assert false);
     let f_ref =
-      declare_f function_name Decls.(IsProof Lemma) arg_types term_ref
+      declare_f function_name Decls.(IsProof Lemma) arg_ctx dref
     in
     let _ =
       Extraction_plugin.Table.extraction_inline true [qualid_of_ident term_id]
@@ -1736,7 +1717,7 @@ let recursive_definition ~interactive_proof ~is_mes function_name rec_impls
       (* XXX: What is the correct way to get sign at hook time *)
       try
         com_eqn uctx (List.length res_vars) equation_id functional_ref f_ref
-          term_ref
+          dref
           (subst_var function_name equation_lemma_type);
         false
       with e when CErrors.noncritical e ->

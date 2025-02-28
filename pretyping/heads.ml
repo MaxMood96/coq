@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -32,7 +32,7 @@ type head_approximation =
 | NotImmediatelyComputableHead
 
 let rec compute_head_const env sigma cst =
-  let body = Environ.constant_opt_value_in env (cst,Univ.Instance.empty) in
+  let body = Environ.constant_opt_value_in env (cst,UVars.Instance.empty) in
   match body with
   | None -> RigidHead (RigidParameter cst)
   | Some c -> kind_of_head env sigma (EConstr.of_constr c)
@@ -42,7 +42,7 @@ and compute_head_var env sigma id = match lookup_named id env with
 | _ -> RigidHead RigidOther
 
 and kind_of_head env sigma t =
-  let rec aux k l t b = match EConstr.kind sigma (Reductionops.clos_whd_flags CClosure.betaiotazeta env sigma t) with
+  let rec aux k l t b = match EConstr.kind sigma (Reductionops.clos_whd_flags RedFlags.betaiotazeta env sigma t) with
   | Rel n when n > k -> NotImmediatelyComputableHead
   | Rel n -> FlexibleHead (k,k+1-n,List.length l,b)
   | Var id ->
@@ -73,10 +73,10 @@ and kind_of_head env sigma t =
   | LetIn _ -> assert false
   | Meta _ | Evar _ -> NotImmediatelyComputableHead
   | App (c,al) -> aux k (Array.to_list al @ l) c b
-  | Proj (p,c) -> RigidHead RigidOther
+  | Proj (p,_,c) -> RigidHead RigidOther
 
   | Case (_,_,_,_,_,c,_) -> aux k [] c true
-  | Int _ | Float _ | Array _ -> ConstructorHead
+  | Int _ | Float _ | String _ | Array _ -> ConstructorHead
   | Fix ((i,j),_) ->
       let n = i.(j) in
       try aux k [] (List.nth l n) true

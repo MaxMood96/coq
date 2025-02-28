@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -23,7 +23,7 @@ open Constrexpr
 
 let whd_prod env sigma typ =
   let open CClosure in
-  let infos = Evarutil.create_clos_infos env sigma CClosure.all in
+  let infos = Evarutil.create_clos_infos env sigma RedFlags.all in
   let tab = create_tab () in
   let typ = inject (EConstr.Unsafe.to_constr typ) in
   let typ, stk = whd_stack infos tab typ [] in
@@ -31,7 +31,7 @@ let whd_prod env sigma typ =
   | FProd (na, c1, c2, e) ->
     let c1 = EConstr.of_constr @@ term_of_fconstr c1 in
     let c2 = EConstr.of_constr @@ term_of_fconstr (mk_clos (CClosure.usubs_lift e) c2) in
-    Some (na, c1, c2)
+    Some (EConstr.of_binder_annot na, c1, c2)
   | _ -> None
 
 module NamedDecl = Context.Named.Declaration
@@ -210,7 +210,7 @@ let is_reversible_pattern sigma bound depth f l =
 (* Precondition: rels in env are for inductive types only *)
 let add_free_rels_until strict strongly_strict revpat bound env sigma m pos acc =
   let rec frec rig (env,depth as ed) c =
-    let hd = if strict then Reductionops.clos_whd_flags CClosure.all env sigma c else c in
+    let hd = if strict then Reductionops.clos_whd_flags RedFlags.all env sigma c else c in
     let c = if strongly_strict then hd else c in
     match kind sigma hd with
     | Rel n when (n < bound+depth) && (n >= depth) ->
@@ -222,7 +222,7 @@ let add_free_rels_until strict strongly_strict revpat bound env sigma m pos acc 
     | App (f,_) when rig && is_flexible_reference env sigma bound depth f ->
         if strict then () else
           iter_with_full_binders env sigma push_lift (frec false) ed c
-    | Proj (p, _) when rig ->
+    | Proj (p, _, _) when rig ->
       if strict then () else
         iter_with_full_binders env sigma push_lift (frec false) ed c
     | Case _ when rig ->
@@ -241,19 +241,19 @@ let rec is_rigid_head sigma t = match kind sigma t with
   | Rel _ | Evar _ -> false
   | Ind _ | Const _ | Var _ | Sort _ -> true
   | Case (_,_,_,_,_,f,_) -> is_rigid_head sigma f
-  | Proj (p,c) -> true
+  | Proj _ -> true
   | App (f,args) ->
       (match kind sigma f with
         | Fix ((fi,i),_) -> is_rigid_head sigma (args.(fi.(i)))
         | _ -> is_rigid_head sigma f)
   | Lambda _ | LetIn _ | Construct _ | CoFix _ | Fix _
-  | Prod _ | Meta _ | Cast _ | Int _ | Float _ | Array _ -> assert false
+  | Prod _ | Meta _ | Cast _ | Int _ | Float _ | String _ | Array _ -> assert false
 
 let is_rigid env sigma t =
   let open Context.Rel.Declaration in
   match whd_prod env sigma t with
   | Some (na,a,b) ->
-     let (_,t) = hnf_decompose_prod (push_rel (LocalAssum (na,a)) env) sigma b in
+     let (_,t) = whd_decompose_prod (push_rel (LocalAssum (na,a)) env) sigma b in
      is_rigid_head sigma t
   | _ -> true
 
@@ -317,9 +317,14 @@ type force_inference = bool (* true = always infer, never turn into evar/subgoal
 
 type implicit_position = Name.t * int * int option
 
-type implicit_status =
-    (* None = Not implicit *)
-    (implicit_position * implicit_explanation * (maximal_insertion * force_inference)) option
+type implicit_status_info = {
+  impl_pos : implicit_position;
+  impl_expl : implicit_explanation;
+  impl_max : maximal_insertion;
+  impl_force : force_inference;
+}
+
+type implicit_status = implicit_status_info option
 
 type implicit_side_condition = DefaultImpArgs | LessArgsThan of int
 
@@ -332,47 +337,48 @@ let is_status_implicit = function
 let name_of_pos k = Id.of_string ("arg_" ^ string_of_int k)
 
 let binding_kind_of_status = function
-  | Some (_, _, (false, _)) -> NonMaxImplicit
-  | Some (_, _, (true, _)) -> MaxImplicit
+  | Some { impl_max = false } -> NonMaxImplicit
+  | Some { impl_max = true } -> MaxImplicit
   | None -> Explicit
 
 let name_of_implicit = function
   | None -> anomaly (Pp.str "Not an implicit argument.")
-  | Some ((Name id,_,_),_,_) -> id
-  | Some ((Anonymous,k,_),_,_) -> name_of_pos k
+  | Some { impl_pos = (Name id, _, _) } -> id
+  | Some { impl_pos = (Anonymous, k, _) } -> name_of_pos k
 
 let match_implicit imp pos = match imp, pos with
   | None, _ -> anomaly (Pp.str "Not an implicit argument.")
-  | Some ((Name id,_,_),_,_), ExplByName id' -> Id.equal id id'
-  | Some ((_,_,Some n),_,_), ExplByPos n' -> Int.equal n n'
-  | Some ((_,n,_),_,_), ExplByName id -> Id.equal id (name_of_pos n)
+  | Some { impl_pos = (Name id, _, _) }, ExplByName id' -> Id.equal id id'
+  | Some { impl_pos = (_, _, Some n) }, ExplByPos n' -> Int.equal n n'
+  | Some { impl_pos = (_, n, _) }, ExplByName id -> Id.equal id (name_of_pos n)
   | _ -> false
 
 let maximal_insertion_of = function
-  | Some (_,_,(b,_)) -> b
+  | Some imp -> imp.impl_max
   | None -> anomaly (Pp.str "Not an implicit argument.")
 
 let force_inference_of = function
-  | Some (_, _, (_, b)) -> b
+  | Some imp -> imp.impl_force
   | None -> anomaly (Pp.str "Not an implicit argument.")
 
 let is_nondep_implicit p imps =
-  List.exists (function Some ((_,_,Some p'),_,_) -> Int.equal p p' | _ -> false) imps
+  List.exists (function Some { impl_pos = (_,_,Some p') } -> Int.equal p p' | _ -> false) imps
 
 (* [in_ctx] means we know the expected type, [n] is the index of the argument *)
 let is_inferable_implicit in_ctx n = function
   | None -> false
-  | Some (_,DepRigid (Hyp p),_) -> in_ctx || n >= p
-  | Some (_,DepFlex (Hyp p),_) -> false
-  | Some (_,DepFlexAndRigid (_,Hyp q),_) -> in_ctx || n >= q
-  | Some (_,DepRigid Conclusion,_) -> in_ctx
-  | Some (_,DepFlex Conclusion,_) -> false
-  | Some (_,DepFlexAndRigid (_,Conclusion),_) -> in_ctx
-  | Some (_,Manual,_) -> true
+  | Some { impl_expl = DepRigid (Hyp p) } -> in_ctx || n >= p
+  | Some { impl_expl = DepFlex (Hyp p) } -> false
+  | Some { impl_expl = DepFlexAndRigid (_,Hyp q) } -> in_ctx || n >= q
+  | Some { impl_expl = DepRigid Conclusion } -> in_ctx
+  | Some { impl_expl = DepFlex Conclusion } -> false
+  | Some { impl_expl = DepFlexAndRigid (_,Conclusion) } -> in_ctx
+  | Some { impl_expl = Manual } -> true
 
 let explicitation = function
   | None -> anomaly (Pp.str "not implicit")
-  | Some ((na,_,p),_,_) ->
+  | Some imp ->
+    let (na, _, p) = imp.impl_pos in
     match na, p with
     | Name id, _ -> ExplByName id
     | _, Some p -> ExplByPos p
@@ -391,7 +397,13 @@ let rec prepare_implicits i f = function
   | [] -> []
   | ((na,_,_ as pos), Some imp)::imps ->
       let imps' = prepare_implicits (i+1) f imps in
-      Some (pos,imp,(set_maximality Silent na i imps' f.maximal,true)) :: imps'
+      let data = {
+        impl_pos = pos;
+        impl_expl = imp;
+        impl_max = set_maximality Silent na i imps' f.maximal;
+        impl_force = true
+      } in
+      Some data :: imps'
   | _::imps -> None :: prepare_implicits (i+1) f imps
 
 let set_manual_implicits silent flags enriching autoimps l =
@@ -401,11 +413,26 @@ let set_manual_implicits silent flags enriching autoimps l =
        let imps' = merge (k+1) autoimps explimps in
        begin match autoimp, explimp.CAst.v with
        | ((Name _ as na,_,_ as pos),_), Some (_,max) ->
-          Some (pos, Manual, (set_maximality (if silent then Silent else Error) na k imps' max, true))
+          Some {
+            impl_pos = pos;
+            impl_expl = Manual;
+            impl_max = set_maximality (if silent then Silent else Error) na k imps' max;
+            impl_force = true;
+          }
        | ((Anonymous,n1,n2),_), Some (na,max) ->
-          Some ((na,n1,n2),Manual,(max,true))
+          Some {
+            impl_pos = (na,n1,n2);
+            impl_expl = Manual;
+            impl_max = max;
+            impl_force = true;
+          }
        | ((na,_,_ as pos),Some exp), None when enriching ->
-          Some (pos, exp, (set_maximality (if silent then Silent else Info) na k imps' flags.maximal, true))
+          Some {
+            impl_pos = pos;
+            impl_expl = exp;
+            impl_max = set_maximality (if silent then Silent else Info) na k imps' flags.maximal;
+            impl_force = true;
+          }
        | (pos,_), None -> None
        end :: imps'
     | [], [] -> []
@@ -445,7 +472,7 @@ let compute_mib_implicits flags kn =
         (fun i mip ->
           (* No need to care about constraints here *)
           let ty, _ = Typeops.type_of_global_in_context env (GlobRef.IndRef (kn,i)) in
-          let r = Inductive.relevance_of_inductive env (kn,i) in
+          let r = (snd @@ Inductive.lookup_mind_specif env (kn,i)).mind_relevance in
           Context.Rel.Declaration.LocalAssum (Context.make_annot (Name mip.mind_typename) r, ty))
         mib.mind_packets) in
   let env_ar = Environ.push_rel_context ar env in
@@ -488,7 +515,7 @@ let merge_impls (cond,oldimpls) (_,newimpls) =
   let oldimpls,usersuffiximpls = List.chop (List.length newimpls) oldimpls in
   cond, (List.map2 (fun orig ni ->
     match orig with
-    | Some (_, Manual, _) -> orig
+    | Some { impl_expl = Manual } -> orig
     | _ -> ni) oldimpls newimpls)@usersuffiximpls
 
 (* Caching implicits *)
@@ -514,15 +541,15 @@ let implicits_of_global ref =
       let rec rename implicits names = match implicits, names with
         | [], _ -> []
         | _, [] -> implicits
-        | Some ((_,n1,n2), x,y) :: implicits, Name id :: names ->
-           Some ((Name id,n1,n2), x,y) :: rename implicits names
+        | Some ({ impl_pos = (_, n1, n2) } as impl) :: implicits, Name id :: names ->
+           Some { impl with impl_pos = (Name id, n1, n2) } :: rename implicits names
         | imp :: implicits, _ :: names -> imp :: rename implicits names
       in
       List.map (fun (t, il) -> t, rename il rename_l) l
     with Not_found -> l
   with Not_found -> [DefaultImpArgs,[]]
 
-let cache_implicits_decl (ref,imps) =
+let cache_implicits_decl (ref, imps) =
   implicits_table := GlobRef.Map.add ref imps !implicits_table
 
 let load_implicits _ (_,l) = List.iter cache_implicits_decl l
@@ -543,9 +570,12 @@ let sec_implicits =
 
 let impls_of_context vars =
   let map n id =
+    let impl_pos = (Name id, n, None) in
     match Id.Map.get id !sec_implicits with
-    | NonMaxImplicit -> Some ((Name id,n,None), Manual, (false, true))
-    | MaxImplicit -> Some ((Name id,n,None), Manual, (true, true))
+    | NonMaxImplicit ->
+      Some { impl_pos; impl_expl = Manual; impl_max = false; impl_force = true }
+    | MaxImplicit ->
+      Some { impl_pos; impl_expl = Manual; impl_max = true; impl_force = true }
     | Explicit -> None
   in
   List.map_i map 1 vars
@@ -564,7 +594,9 @@ let lift_explanation p = function
   | DepFlexAndRigid (e1,e2) -> DepFlexAndRigid (lift_argument_position p e1,lift_argument_position p e2)
   | Manual -> Manual
 
-let lift_implicits p ((na,n1,o),e,b) = ((na,n1+p,o),lift_explanation p e,b)
+let lift_implicits p imp =
+  let (na, n1, o) = imp.impl_pos in
+  { imp with impl_pos = (na, n1 + p, o); impl_expl = lift_explanation p imp.impl_expl }
 
 let add_section_impls vars extra_impls (cond,impls) =
   let p = List.length vars - List.length extra_impls in
@@ -666,9 +698,9 @@ let declare_mib_implicits kn =
 (* Declare manual implicits *)
 type manual_implicits = (Name.t * bool) option CAst.t list
 
-let compute_implicits_with_manual env sigma typ enriching l =
+let compute_implicits_with_manual env sigma ?(silent=true) typ enriching l =
   let autoimpls = compute_auto_implicits env sigma !implicit_args enriching typ in
-  set_manual_implicits true !implicit_args enriching autoimpls l
+  set_manual_implicits silent !implicit_args enriching autoimpls l
 
 let check_inclusion l =
   (* Check strict inclusion *)
@@ -686,7 +718,7 @@ let check_rigidity isrigid =
 
 let projection_implicits env p impls =
   let npars = Projection.npars p in
-  CList.skipn_at_least npars impls
+  CList.skipn_at_best npars impls
 
 let declare_manual_implicits local ref ?enriching l =
   let flags = !implicit_args in
@@ -715,11 +747,23 @@ let compute_implicit_statuses autoimps l =
   let rec aux i = function
     | _ :: autoimps, (_, Explicit) :: manualimps -> None :: aux (i+1) (autoimps, manualimps)
     | pos :: autoimps, (na, MaxImplicit) :: manualimps ->
-       Some (set_name pos na, Manual, (true, true)) :: aux (i+1) (autoimps, manualimps)
+      let imp = {
+        impl_pos = set_name pos na;
+        impl_expl = Manual;
+        impl_max = true;
+        impl_force = true;
+      } in
+      Some imp :: aux (i+1) (autoimps, manualimps)
     | pos :: autoimps, (na, NonMaxImplicit) :: manualimps ->
-       let imps' = aux (i+1) (autoimps, manualimps) in
-       let max = set_maximality Error na i imps' false in
-       Some (set_name pos na, Manual, (max, true)) :: imps'
+      let imps' = aux (i+1) (autoimps, manualimps) in
+      let max = set_maximality Error na i imps' false in
+      let imp = {
+        impl_pos = set_name pos na;
+        impl_expl = Manual;
+        impl_max = max;
+        impl_force = true;
+      } in
+      Some imp :: imps'
     | autoimps, [] -> List.map (fun _ -> None) autoimps
     | [], _::_ -> assert false
   in aux 1 (autoimps, l)
@@ -769,7 +813,7 @@ let rec drop_first_implicits p l =
   | DefaultImpArgs,imp::impls ->
       drop_first_implicits (p-1) (DefaultImpArgs,impls)
   | LessArgsThan n,imp::impls ->
-      let n = if is_status_implicit imp then n-1 else n in
+      let n = if is_status_implicit imp then n else n-1 in
       drop_first_implicits (p-1) (LessArgsThan n,impls)
 
 let rec chop_and_adjust n l1 l2 =
