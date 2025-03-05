@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -16,7 +16,7 @@ open Names
 
 let project_hint ~poly pri l2r r =
   let open EConstr in
-  let open Coqlib in
+  let open Rocqlib in
   let gr = Smartlocate.global_with_alias r in
   let env = Global.env () in
   let sigma = Evd.from_env env in
@@ -41,8 +41,8 @@ let project_hint ~poly pri l2r r =
     it_mkLambda_or_LetIn
       (mkApp
          ( p
-         , [| mkArrow a Sorts.Relevant (Vars.lift 1 b)
-            ; mkArrow b Sorts.Relevant (Vars.lift 1 a)
+         , [| mkArrow a ERelevance.relevant (Vars.lift 1 b)
+            ; mkArrow b ERelevance.relevant (Vars.lift 1 a)
             ; c |] ))
       sign
   in
@@ -62,25 +62,31 @@ let project_hint ~poly pri l2r r =
       cb
   in
   let info = {Typeclasses.hint_priority = pri; hint_pattern = None} in
-  (info, true, Hints.PathAny, Hints.hint_globref (GlobRef.ConstRef c))
+  (info, true, Hints.hint_globref (GlobRef.ConstRef c))
+
+let warning_deprecated_hint_constr =
+  CWarnings.create_warning ~from:[CWarnings.CoreCategories.automation; Deprecation.Version.v8_20] ~name:"fragile-hint-constr" ~default:AsError ()
 
 let warn_deprecated_hint_constr =
-  CWarnings.create ~name:"fragile-hint-constr" ~category:CWarnings.CoreCategories.automation
+  CWarnings.create_in warning_deprecated_hint_constr
     (fun () ->
       Pp.strbrk
-        "Declaring arbitrary terms as hints is fragile; it is recommended to \
-         declare a toplevel constant instead")
+        "Declaring arbitrary terms as hints is fragile and deprecated; it is \
+         recommended to declare a toplevel constant instead")
 
 (* Only error when we have to (axioms may be instantiated if from functors)
    XXX maybe error if not from a functor argument?
  *)
-let soft_evaluable =
-  let open GlobRef in
-  let open Tacred in
-  function
-  | ConstRef c -> EvalConstRef c
-  | VarRef id -> EvalVarRef id
-  | (IndRef _ | ConstructRef _) as r -> Tacred.error_not_evaluable r
+let soft_evaluable = Tacred.soft_evaluable_of_global_reference
+
+(* Slightly more lenient global hint syntax for backwards compatibility *)
+let rectify_hint_constr h = match h with
+| Vernacexpr.HintsReference _ -> h
+| Vernacexpr.HintsConstr c ->
+  let open Constrexpr in
+  match c.CAst.v with
+  | CAppExpl ((qid, None), []) -> Vernacexpr.HintsReference qid
+  | _ -> Vernacexpr.HintsConstr c
 
 let interp_hints ~poly h =
   let env = Global.env () in
@@ -90,14 +96,14 @@ let interp_hints ~poly h =
     Dumpglob.add_glob ?loc:r.CAst.loc gr;
     gr
   in
-  let fr r = soft_evaluable (fref r) in
+  let fr r = soft_evaluable ?loc:r.CAst.loc (fref r) in
   let fi c =
     let open Hints in
     let open Vernacexpr in
-    match c with
+    match rectify_hint_constr c with
     | HintsReference c ->
       let gr = Smartlocate.global_with_alias c in
-      (PathHints [gr], hint_globref gr)
+      (hint_globref gr)
     | HintsConstr c ->
       let () = warn_deprecated_hint_constr () in
       let env = Global.env () in
@@ -105,30 +111,30 @@ let interp_hints ~poly h =
       let c, uctx = Constrintern.interp_constr env sigma c in
       let uctx = UState.normalize_variables uctx in
       let c = Evarutil.nf_evar (Evd.from_ctx uctx) c in
-      let diff = UState.context_set uctx in
       let c =
-        if poly then (c, Some diff)
+        if poly then (c, Some (UState.sort_context_set uctx))
         else
-          let () = DeclareUctx.declare_universe_context ~poly:false diff in
+          let () = Global.push_context_set (UState.context_set uctx) in
           (c, None)
       in
-      (PathAny, Hints.hint_constr c) [@ocaml.warning "-3"]
+      (Hints.hint_constr c) [@ocaml.warning "-3"]
   in
   let fp = Constrintern.intern_constr_pattern env sigma in
   let fres (info, b, r) =
-    let path, gr = fi r in
+    let gr = fi r in
     let info =
       { info with
         Typeclasses.hint_pattern = Option.map fp info.Typeclasses.hint_pattern
       }
     in
-    (info, b, path, gr)
+    (info, b, gr)
   in
   let open Hints in
   let open Vernacexpr in
   let ft = function
     | HintsVariables -> HintsVariables
     | HintsConstants -> HintsConstants
+    | HintsProjections -> HintsProjections
     | HintsReferences lhints -> HintsReferences (List.map fr lhints)
   in
   let fp = Constrintern.intern_constr_pattern (Global.env ()) in
@@ -151,7 +157,6 @@ let interp_hints ~poly h =
           let gr = GlobRef.ConstructRef c in
           ( empty_hint_info
           , true
-          , PathHints [gr]
           , hint_globref gr ))
     in
     HintsResolveEntry (List.flatten (List.map constr_hints_of_ind lqid))

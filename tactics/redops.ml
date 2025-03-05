@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,9 +12,15 @@ open Genredexpr
 
 let union_consts l1 l2 = Util.List.union (=) l1 l2 (* FIXME *)
 
+
+let all_flags =
+  {rBeta = true; rMatch = true; rFix = true; rCofix = true;
+   rZeta = true; rDelta = true; rConst = []; rStrength = Norm; }
+
 let make_red_flag l =
   let rec add_flag red = function
     | [] -> red
+    | FHead :: lf -> add_flag { red with rStrength = Head } lf
     | FBeta :: lf -> add_flag { red with rBeta = true } lf
     | FMatch :: lf -> add_flag { red with rMatch = true } lf
     | FFix :: lf -> add_flag { red with rFix = true } lf
@@ -35,13 +41,12 @@ let make_red_flag l =
   in
   add_flag
     {rBeta = false; rMatch = false; rFix = false; rCofix = false;
-     rZeta = false; rDelta = false; rConst = []}
+     rZeta = false; rDelta = false; rConst = []; rStrength = Norm; }
     l
 
-
-let all_flags =
-  {rBeta = true; rMatch = true; rFix = true; rCofix = true;
-   rZeta = true; rDelta = true; rConst = []}
+let make_red_flag = function
+  | [FHead] -> { all_flags with rStrength = Head }
+  | l -> make_red_flag l
 
 (** Mapping [red_expr_gen] *)
 
@@ -61,4 +66,4 @@ let map_red_expr_gen f g h = function
   | CbvVm occs_o -> CbvVm (Option.map (map_occs (Util.map_union g h)) occs_o)
   | CbvNative occs_o -> CbvNative (Option.map (map_occs (Util.map_union g h)) occs_o)
   | Cbn flags -> Cbn (map_flags g flags)
-  | ExtraRedExpr _ | Red _ | Hnf as x -> x
+  | ExtraRedExpr _ | Red | Hnf as x -> x

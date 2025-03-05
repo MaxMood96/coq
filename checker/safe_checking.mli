@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,5 +12,16 @@
 open Safe_typing
 (*i*)
 
-val import : safe_environment -> Names.Cset.t Names.Cmap.t -> compiled_library -> Univ.ContextSet.t -> vodigest -> safe_environment * Names.Cset.t Names.Cmap.t
-val unsafe_import : safe_environment -> compiled_library -> Univ.ContextSet.t -> vodigest -> safe_environment
+val import
+  : safe_environment
+  -> Names.Cset.t Names.Cmap.t
+  -> compiled_library
+  -> Vmlibrary.on_disk
+  -> vodigest -> safe_environment * Names.Cset.t Names.Cmap.t
+
+val unsafe_import
+  : safe_environment
+  -> compiled_library
+  -> Vmlibrary.on_disk
+  -> vodigest
+  -> safe_environment

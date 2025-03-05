@@ -8,25 +8,24 @@ Program
 :Author: Matthieu Sozeau
 
 We present here the |Program| tactic commands, used to build
-certified Coq programs, elaborating them from their algorithmic
+certified Rocq programs, elaborating them from their algorithmic
 skeleton and a rich specification :cite:`sozeau06`. It can be thought of as a
 dual of :ref:`Extraction <extraction>`. The goal of |Program| is to
 program as in a regular functional programming language whilst using
 as rich a specification as desired and proving that the code meets the
-specification using the whole Coq proof apparatus. This is done using
+specification using the whole Rocq proof apparatus. This is done using
 a technique originating from the “Predicate subtyping” mechanism of
 PVS :cite:`Rushby98`, which generates type checking conditions while typing a
 term constrained to a particular type. Here we insert existential
 variables in the term, which must be filled with proofs to get a
-complete Coq term. |Program| replaces the |Program| tactic by Catherine
+complete Rocq term. |Program| replaces the |Program| tactic by Catherine
 Parent :cite:`Parent95b` which had a similar goal but is no longer maintained.
 
-The languages available as input are currently restricted to Coq’s
-term language, but may be extended to OCaml, Haskell and
-others in the future. We use the same syntax as Coq and permit to use
+The languages available as input is Rocq's term language.
+We use the same syntax as Rocq and permit to use
 implicit arguments and the existing coercion mechanism. Input terms
-and types are typed in an extended system (Russell) and interpreted
-into Coq terms. The interpretation process may produce some proof
+and types are typed in an extended system (Russell) and elaborated
+into Rocq terms. The elaboration process may produce some proof
 obligations which need to be resolved to create the final term.
 
 
@@ -35,7 +34,7 @@ obligations which need to be resolved to create the final term.
 Elaborating programs
 --------------------
 
-The main difference from Coq is that an object in a type :g:`T : Set` can
+The main difference from plain Rocq is that an object in a type :g:`T : Set` can
 be considered as an object of type :g:`{x : T | P}` for any well-formed
 :g:`P : Prop`. If we go from :g:`T` to the subset of :g:`T` verifying property
 :g:`P`, we must prove that the object under consideration verifies it. Russell
@@ -86,7 +85,7 @@ coercions.
    This :term:`flag` controls the special treatment of pattern matching generating equalities
    and disequalities when using |Program| (it is on by default). All
    pattern-matches and let-patterns are handled using the standard algorithm
-   of Coq (see :ref:`extendedpatternmatching`) when this flag is
+   of Rocq (see :ref:`extendedpatternmatching`) when this flag is
    deactivated.
 
 .. flag:: Program Generalized Coercion
@@ -122,14 +121,14 @@ if construct is not treated specially by |Program| so boolean tests in
 the code are not automatically reflected in the obligations. One can
 use the :g:`dec` combinator to get the correct hypotheses as in:
 
-.. coqtop:: in
+.. rocqtop:: in
 
-   Require Import Program Arith.
+   From Corelib.Program Require Import Basics Tactics.
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Program Definition id (n : nat) : { x : nat | x = n } :=
-     if dec (leb n 0) then 0
+     if sumbool_of_bool (Nat.leb n 0) then 0
      else S (pred n).
 
 The :g:`let` tupling construct :g:`let (x1, ..., xn) := t in b` does not
@@ -150,13 +149,13 @@ Program Definition
 A :cmd:`Definition` command with the :attr:`program` attribute types
 the value term in Russell and generates proof
 obligations. Once solved using the commands shown below, it binds the
-final Coq term to the name :n:`@ident` in the global environment.
+final Rocq term to the name :n:`@ident` in the global environment.
 
 :n:`Program Definition @ident_decl : @type := @term`
 
 Interprets the type :n:`@type`, potentially generating proof
-obligations to be resolved. Once done with them, we have a Coq
-type :n:`@type__0`. It then elaborates the preterm :n:`@term` into a Coq
+obligations to be resolved. Once done with them, we have a Rocq
+type :n:`@type__0`. It then elaborates the preterm :n:`@term` into a Rocq
 term :n:`@term__0`, checking that the type of :n:`@term__0` is coercible to
 :n:`@type__0`, and registers :n:`@ident` as being of type :n:`@type__0` once the
 set of obligations generated during the interpretation of :n:`@term__0`
@@ -176,11 +175,11 @@ Program Fixpoint
 A :cmd:`Fixpoint` command with the :attr:`program` attribute may also generate obligations. It works
 with mutually recursive definitions too.  For example:
 
-.. coqtop:: reset in
+.. rocqtop:: reset in
 
-   Require Import Program Arith.
+   From Corelib.Program Require Import Basics Tactics.
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Program Fixpoint div2 (n : nat) : { x : nat | n = 2 * x \/ n = 2 * x + 1 } :=
      match n with
@@ -203,24 +202,30 @@ Here we have one obligation for each branch (branches for :g:`0` and
 ``(S 0)`` are automatically generated by the pattern matching
 compilation algorithm).
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Obligation 1.
 
-.. coqtop:: reset none
+.. rocqtop:: reset none
 
-   Require Import Program Arith.
+   From Corelib.Program Require Import Basics Tactics Wf.
 
 One can use a well-founded order or a measure as termination orders
 using the syntax:
 
-.. coqtop:: in
+.. rocqtop:: in
 
    Program Fixpoint div2 (n : nat) {measure n} : { x : nat | n = 2 * x \/ n = 2 * x + 1 } :=
      match n with
      | S (S p) => S (div2 p)
      | _ => O
      end.
+
+.. note:: The :g:`measure f R` and :g:`wf R x` annotations add an
+   implicit argument to the functions being defined. When the function
+   name is prefixed with :g:`@` (see :ref:`deactivation-of-implicit-arguments`),
+   the position of the extra argument needs to be taken into account,
+   e.g. by providing :g:`_` or an an explicit value.
 
 .. caution:: When defining structurally recursive functions, the generated
    obligations should have the prototype of the currently defined
@@ -287,7 +292,7 @@ optional tactic is replaced by the default one if not specified.
 
    Displays all remaining obligations.
 
-.. cmd:: Obligation @natural {? of @ident } {? : @type {? with @ltac_expr } }
+.. cmd:: Obligation @natural {? of @ident } {? with @ltac_expr }
 
    Start the proof of obligation :token:`natural`.
 
@@ -299,7 +304,7 @@ optional tactic is replaced by the default one if not specified.
 
    Like :cmd:`Next Obligation`, starts the proof of the next unsolved
    obligation. Additionally, at :cmd:`Qed` time, after the
-   automatic solver has run on any remaining obligations, Coq checks
+   automatic solver has run on any remaining obligations, Rocq checks
    that no obligations remain for the given :token:`ident` when
    provided and otherwise in the current module.
 
@@ -329,8 +334,8 @@ optional tactic is replaced by the default one if not specified.
    (the default), or if the system should infer which obligations can be
    declared opaque.
 
-The module :g:`Coq.Program.Tactics` defines the default tactic for solving
-obligations called :g:`program_simpl`. Importing :g:`Coq.Program.Program` also
+The module :g:`Corelib.Program.Tactics` defines the default tactic for solving
+obligations called :g:`program_simpl`. Importing :g:`Stdlib.Program.Program` also
 adds some useful notations, as documented in the file itself.
 
 .. _program-faq:
@@ -342,7 +347,7 @@ Frequently Asked Questions
 .. exn:: Ill-formed recursive definition.
 
   This error can happen when one tries to define a function by structural
-  recursion on a subset object, which means the Coq function looks like:
+  recursion on a subset object, which means the Rocq function looks like:
 
   ::
 

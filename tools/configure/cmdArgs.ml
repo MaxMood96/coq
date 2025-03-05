@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -18,6 +18,7 @@ module Prefs = struct
 
 type t = {
   prefix : string option;
+  quiet : bool;
   interactive : bool;
   libdir : string option;
   configdir : string option;
@@ -30,7 +31,6 @@ type t = {
   bytecodecompiler : bool;
   nativecompiler : nativecompiler;
   coqwebsite : string;
-  warn_error : bool;
   debug : bool;
 }
 
@@ -40,6 +40,7 @@ open Prefs
 
 let default_prefs = {
   prefix = None;
+  quiet = false;
   interactive = true;
   libdir = None;
   configdir = None;
@@ -52,7 +53,6 @@ let default_prefs = {
   bytecodecompiler = true;
   nativecompiler = NativeNo;
   coqwebsite = "http://coq.inria.fr/";
-  warn_error = false;
   debug = false;
 }
 
@@ -80,18 +80,25 @@ let arg_native f = Arg.String (fun s -> prefs := f !prefs (get_native s))
 
 (* TODO : earlier any option -foo was also available as --foo *)
 
-let check_absolute = function
-  | None -> ()
+let warn_warn_error () =
+  Format.eprintf "****** the -warn-error option is deprecated, \
+                  warnings are not set in the config section of the \
+                  corresponding build tool [coq_makefile, dune]@\n%!"
+
+let make_absolute = function
+  | None -> None
   | Some path ->
     if Filename.is_relative path then
-      die "argument to -prefix must be an absolute path"
-    else ()
+      Some (Sys.getcwd() ^ "/" ^ path)
+    else Some path
 
 let args_options = Arg.align [
-  "-prefix", arg_string_option (fun p prefix -> check_absolute prefix; { p with prefix }),
-    "<dir> Set installation directory to <dir> (absolute path required)";
+  "-prefix", arg_string_option (fun p prefix -> { p with prefix = make_absolute prefix }),
+    "<dir> Set installation directory to <dir>";
+  "-quiet", arg_set (fun p -> { p with quiet = true }),
+    " Don't print variables during configure";
   "-no-ask", arg_set (fun p -> { p with interactive = false }),
-    " Don't ask questions / print variables during configure [questions will be filled with defaults]";
+    " Don't ask questions during configure [questions will be filled with defaults]";
   "-libdir", arg_string_option (fun p libdir -> { p with libdir }),
     "<dir> Where to install lib files";
   "-configdir", arg_string_option (fun p configdir -> { p with configdir }),
@@ -109,16 +116,16 @@ let args_options = Arg.align [
   "-browser", arg_string_option (fun p browser -> { p with browser }),
     "<command> Use <command> to open URL %s";
   "-bytecode-compiler", arg_bool (fun p bytecodecompiler -> { p with bytecodecompiler }),
-    "(yes|no) Enable Coq's bytecode reduction machine (VM)";
+    "(yes|no) Enable Rocq's bytecode reduction machine (VM)";
   "-native-compiler", arg_native (fun p nativecompiler -> { p with nativecompiler }),
     "(yes|no|ondemand) Compilation to native code for conversion and normalization
      yes: -native-compiler option of coqc will default to 'yes', stdlib will be precompiled
      no (default): no native compilation available at all
      ondemand: -native-compiler option of coqc will default to 'ondemand', stdlib will not be precompiled";
+  "-warn-error", arg_bool (fun p _warn_error -> warn_warn_error (); p),
+    "Deprecated option: warnings are now adjusted in the corresponding build tool.";
   "-coqwebsite", arg_string (fun p coqwebsite -> { p with coqwebsite }),
-    " URL of the coq website";
-  "-warn-error", arg_bool (fun p warn_error -> { p with warn_error }),
-    "(yes|no) Make OCaml warnings into errors (default no)";
+    " URL of the rocq website";
   "-debug", arg_set (fun p -> { p with debug = true }), " Enable debug information for package detection"
 ]
 
@@ -131,6 +138,6 @@ let parse_args () =
 
 (* Support don't ask *)
 let cprintf prefs x =
-  if prefs.interactive
+  if not prefs.quiet
   then cprintf x
   else Printf.ifprintf stdout x

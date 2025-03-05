@@ -52,15 +52,18 @@ Overflow in int63 literal: 9223372036854775808.
      : int
 t = 2%ui63
      : int
+File "./output/Int63NumberSyntax.v", line 34, characters 0-36:
+Warning: Hiding binding of key uint63 to uint63_scope
+[hiding-delimiting-key,parsing,default]
 t = 2%ui63
      : int
 2
      : nat
 2
      : int
-(2 + 2)%uint63
+add 2 2
      : int
-2 + 2
+add 2 2
      : int
      = 4
      : int
@@ -80,7 +83,7 @@ t = 2%ui63
      : int
      = 12
      : int
-     = 3 + x
+     = add 3 x
      : int
-     = 1 + 2 + x
+     = add (add 1 2) x
      : int

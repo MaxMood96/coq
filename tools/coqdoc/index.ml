@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -87,7 +87,7 @@ let find m l = Hashtbl.find reftable (m, l)
 
 let find_string s = let (m,s,t) = Hashtbl.find byidtable s in Ref (m,s,t)
 
-(* Coq modules *)
+(* Rocq modules *)
 let split_sp s =
   try
     let i = String.rindex s '.' in
@@ -120,7 +120,7 @@ let find_external_library logicalpath =
         else aux rest
   in aux !external_libraries
 
-let init_coqlib_library () = add_external_library "Coq" !prefs.coqlib_url
+let init_coqlib_library () = add_external_library "Corelib" !prefs.coqlib_url
 
 let find_module m =
   if Hashtbl.mem local_modules m then

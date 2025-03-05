@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,7 +12,7 @@ open Util
 open Names
 open Libnames
 open Tac2expr
-open Tac2ffi
+open Tac2val
 
 type global_data = {
   gdata_expr : glb_tacexpr;
@@ -43,6 +43,7 @@ type alias_data = {
 
 type ltac_state = {
   ltac_tactics : global_data KNmap.t;
+  constructors_warn : UserWarn.t KNmap.t;
   ltac_constructors : constructor_data KNmap.t;
   ltac_projections : projection_data KNmap.t;
   ltac_types : glb_quant_typedef KNmap.t;
@@ -51,15 +52,31 @@ type ltac_state = {
 
 let empty_state = {
   ltac_tactics = KNmap.empty;
+  constructors_warn = KNmap.empty;
   ltac_constructors = KNmap.empty;
   ltac_projections = KNmap.empty;
   ltac_types = KNmap.empty;
   ltac_aliases = KNmap.empty;
 }
 
+type compile_info = {
+  source : string;
+}
+
 let ltac_state = Summary.ref empty_state ~name:"ltac2-state"
 
-let ltac_notations = Summary.ref KNmap.empty ~stage:Summary.Stage.Synterp ~name:"ltac2-notations"
+let compiled_tacs = Summary.ref ~local:true ~name:"ltac2-compiled-state" KNmap.empty
+
+type notation_data =
+  | UntypedNota of raw_tacexpr
+  | TypedNota of {
+      nota_prms : int;
+      nota_argtys : int glb_typexpr Id.Map.t;
+      nota_ty : int glb_typexpr;
+      nota_body : glb_tacexpr;
+    }
+
+let ltac_notations = Summary.ref KNmap.empty ~name:"ltac2-notations"
 
 let define_global kn e =
   let state = !ltac_state in
@@ -69,13 +86,29 @@ let interp_global kn =
   let data = KNmap.find kn ltac_state.contents.ltac_tactics in
   data
 
+let set_compiled_global kn info v =
+  assert (not (interp_global kn).gdata_mutable);
+  compiled_tacs := KNmap.add kn (info,v) !compiled_tacs
+
+let get_compiled_global kn = KNmap.find_opt kn !compiled_tacs
+
 let globals () = (!ltac_state).ltac_tactics
 
-let define_constructor kn t =
+let define_constructor ?warn kn t =
   let state = !ltac_state in
-  ltac_state := { state with ltac_constructors = KNmap.add kn t state.ltac_constructors }
+  ltac_state := {
+    state with
+    ltac_constructors = KNmap.add kn t state.ltac_constructors;
+    constructors_warn = Option.fold_left (fun ctorwarn warn ->
+        KNmap.add kn warn ctorwarn)
+        state.constructors_warn
+        warn;
+  }
 
 let interp_constructor kn = KNmap.find kn ltac_state.contents.ltac_constructors
+
+let find_all_constructors_in_type kn =
+  KNmap.filter (fun _ data -> KerName.equal kn data.cdata_type) (!ltac_state).ltac_constructors
 
 let define_projection kn t =
   let state = !ltac_state in
@@ -195,10 +228,10 @@ let locate_extended_all_ltac qid =
 
 let path_of_ltac kn = RfMap.find kn (!nametab).tab_ltac_rev
 
-let shortest_qualid_of_ltac kn =
+let shortest_qualid_of_ltac avoid kn =
   let tab = !nametab in
   let sp = RfMap.find kn tab.tab_ltac_rev in
-  RfTab.shortest_qualid Id.Set.empty sp tab.tab_ltac
+  RfTab.shortest_qualid avoid sp tab.tab_ltac
 
 let push_constructor vis sp kn =
   let tab = !nametab in
@@ -221,6 +254,17 @@ let shortest_qualid_of_constructor kn =
   let sp = KNmap.find kn tab.tab_cstr_rev in
   KnTab.shortest_qualid Id.Set.empty sp tab.tab_cstr
 
+let constructor_user_warning =
+  UserWarn.create_depr_and_user_warnings
+    ~object_name:"Ltac2 constructor"
+    ~warning_name_base:"ltac2-constructor"
+    (fun kn -> pr_qualid (shortest_qualid_of_constructor kn))
+    ()
+
+let constructor_user_warn ?loc kn =
+  let warn = KNmap.find_opt kn (!ltac_state).constructors_warn in
+  Option.iter (constructor_user_warning ?loc kn) warn
+
 let push_type vis sp kn =
   let tab = !nametab in
   let tab_type = KnTab.push vis sp kn tab.tab_type in
@@ -234,6 +278,8 @@ let locate_type qid =
 let locate_extended_all_type qid =
   let tab = !nametab in
   KnTab.find_prefixes qid tab.tab_type
+
+let path_of_type kn = KNmap.find kn (!nametab).tab_type_rev
 
 let shortest_qualid_of_type ?loc kn =
   let tab = !nametab in
@@ -270,10 +316,11 @@ type environment = {
 type ('a, 'b, 'r) intern_fun = Genintern.glob_sign -> 'a -> 'b * 'r glb_typexpr
 
 type ('a, 'b) ml_object = {
-  ml_intern : 'r. (raw_tacexpr, glb_tacexpr, 'r) intern_fun -> ('a, 'b or_glb_tacexpr, 'r) intern_fun;
+  ml_intern : 'r. ('a, 'b or_glb_tacexpr, 'r) intern_fun;
   ml_subst : Mod_subst.substitution -> 'b -> 'b;
   ml_interp : environment -> 'b -> valexpr Proofview.tactic;
   ml_print : Environ.env -> Evd.evar_map -> 'b -> Pp.t;
+  ml_raw_print : Environ.env -> Evd.evar_map -> 'a -> Pp.t;
 }
 
 module MLTypeObj =
@@ -297,8 +344,10 @@ let interp_ml_object t =
 
 (** Absolute paths *)
 
-let coq_prefix =
+let rocq_prefix =
   MPfile (DirPath.make (List.map Id.of_string ["Init"; "Ltac2"]))
+
+let coq_prefix = rocq_prefix
 
 let std_prefix =
   MPfile (DirPath.make (List.map Id.of_string ["Std"; "Ltac2"]))
@@ -308,16 +357,13 @@ let ltac1_prefix =
 
 (** Generic arguments *)
 
-let wit_ltac2in1 = Genarg.make0 "ltac2in1"
-let wit_ltac2in1_val = Genarg.make0 "ltac2in1val"
-let wit_ltac2_constr = Genarg.make0 "ltac2:in-constr"
-let wit_ltac2_quotation = Genarg.make0 "ltac2:quotation"
-let wit_ltac2_val = Genarg.make0 "ltac2:value"
+type var_quotation_kind =
+  | ConstrVar
+  | PretermVar
+  | PatternVar
 
-let () = Geninterp.register_val0 wit_ltac2in1 None
-let () = Geninterp.register_val0 wit_ltac2in1_val None
-let () = Geninterp.register_val0 wit_ltac2_constr None
-let () = Geninterp.register_val0 wit_ltac2_quotation None
+let wit_ltac2_constr = Genarg.make0 "ltac2:in-constr"
+let wit_ltac2_var_quotation = Genarg.make0 "ltac2:quotation"
 
 let is_constructor_id id =
   let id = Id.to_string id in

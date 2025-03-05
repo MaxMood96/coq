@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -45,12 +45,11 @@ let reset_info () =
      s_info.branch_successes <- 0;
      s_info.nd_branching     <- 0
 
-let pruning =
+let { Goptions.get = pruning } =
   declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Rtauto";"Pruning"]
     ~value:true
+    ()
 
 type form=
     Atom of int

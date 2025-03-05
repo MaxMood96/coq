@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -62,6 +62,7 @@
 open Util
 open Names
 open Declarations
+open Mod_declarations
 open Constr
 open Context.Named.Declaration
 
@@ -80,7 +81,7 @@ module NamedDecl = Context.Named.Declaration
       module parameters [params] and earlier environment [oldsenv]
     * SIG (params,oldsenv) : same for a local module type
   - [modresolver] : delta_resolver concerning the module content, that needs to
-    be marshalled on disk
+    be marshalled on disk. Its root must be [modpath].
   - [paramresolver] : delta_resolver in scope but not part of the library per
     se, that is from functor parameters and required libraries
   - [revstruct] : current module content, most recent declarations first
@@ -101,28 +102,90 @@ module NamedDecl = Context.Named.Declaration
 
 type vodigest =
   | Dvo_or_vi of Digest.t        (* The digest of the seg_lib part *)
-  | Dvivo of Digest.t * Digest.t (* The digest of the seg_lib + seg_univ part *)
 
 let digest_match ~actual ~required =
   match actual, required with
-  | Dvo_or_vi d1, Dvo_or_vi d2
-  | Dvivo (d1,_), Dvo_or_vi d2 -> String.equal d1 d2
-  | Dvivo (d1,e1), Dvivo (d2,e2) -> String.equal d1 d2 && String.equal e1 e2
-  | Dvo_or_vi _, Dvivo _ -> false
+  | Dvo_or_vi d1, Dvo_or_vi d2 -> String.equal d1 d2
 
 type library_info = DirPath.t * vodigest
 
 (** Functor and funsig parameters, most recent first *)
 type module_parameters = (MBId.t * module_type_body) list
 
+type permanent_flags = {
+  rewrite_rules_allowed : bool;
+}
+
+module ParamResolver :
+sig
+  type t
+  val empty : DirPath.t -> t
+  val add_delta_resolver : ModPath.t -> Mod_subst.delta_resolver -> t -> t
+  val constant_of_delta_kn : t -> KerName.t -> Constant.t
+  val mind_of_delta_kn : t -> KerName.t -> MutInd.t
+end =
+struct
+  type t = {
+    root : DirPath.t;
+    data : Mod_subst.delta_resolver MPmap.t;
+    (** Invariant: No [MPdot] in data *)
+  }
+
+  let empty root = {
+    root = root;
+    data = MPmap.empty;
+  }
+
+  let rec head mp = match mp with
+  | MPfile _ | MPbound _ -> mp
+  | MPdot (mp, _) -> head mp
+
+  let add_delta_resolver mp delta preso =
+    let self = MPfile preso.root in
+    let data =
+      if ModPath.subpath self mp then
+        match MPmap.find_opt self preso.data with
+        | None ->
+          (* we were at toplevel *)
+          MPmap.add self delta preso.data
+        | Some reso ->
+          MPmap.add self (Mod_subst.add_delta_resolver delta reso) preso.data
+      else
+        let () = match mp with
+        | MPfile _ | MPbound _ -> ()
+        | MPdot _ -> assert false
+        in
+        let () = assert (not (MPmap.mem mp preso.data)) in
+        MPmap.add mp delta preso.data
+    in
+    { preso with data }
+
+  let kn_of_delta preso kn =
+    let head = head (KerName.modpath kn) in
+    match MPmap.find_opt head preso.data with
+    | None -> kn
+    | Some delta -> Mod_subst.kn_of_delta delta kn
+
+  let constant_of_delta_kn preso kn = Constant.make kn (kn_of_delta preso kn)
+
+  let mind_of_delta_kn preso kn = MutInd.make kn (kn_of_delta preso kn)
+
+end
+
 type compiled_library = {
   comp_name : DirPath.t;
   comp_mod : module_body;
   comp_univs : Univ.ContextSet.t;
   comp_deps : library_info array;
+  comp_flags : permanent_flags;
 }
 
-type reimport = compiled_library * Univ.ContextSet.t * vodigest
+type reimport = compiled_library * Vmlibrary.on_disk * vodigest
+
+type required_lib = {
+  req_root : bool; (* true if a root of the dependency DAG *)
+  req_digest : vodigest;
+}
 
 (** Part of the safe_env at a section opening time to be backtracked *)
 type section_data = {
@@ -131,6 +194,7 @@ type section_data = {
   rev_objlabels : Label.Set.t;
   rev_reimport : reimport list;
   rev_revstruct : structure_body;
+  rev_paramresolver : ParamResolver.t;
 }
 
 module HandleMap = Opaqueproof.HandleMap
@@ -157,13 +221,13 @@ type safe_environment =
     modpath : ModPath.t;
     modvariant : modvariant;
     modresolver : Mod_subst.delta_resolver;
-    paramresolver : Mod_subst.delta_resolver;
+    paramresolver : ParamResolver.t;
     revstruct : structure_body;
     modlabels : Label.Set.t;
     objlabels : Label.Set.t;
     univ : Univ.ContextSet.t;
     future_cst : (Constant_typing.typing_context * safe_environment * Nonce.t) HandleMap.t;
-    required : vodigest DPmap.t;
+    required : required_lib DPmap.t;
     loads : (ModPath.t * module_body) list;
     local_retroknowledge : Retroknowledge.action list;
     opaquetab : Opaqueproof.opaquetab;
@@ -185,8 +249,8 @@ let empty_environment =
   { env = Environ.empty_env;
     modpath = ModPath.dummy;
     modvariant = NONE;
-    modresolver = Mod_subst.empty_delta_resolver;
-    paramresolver = Mod_subst.empty_delta_resolver;
+    modresolver = Mod_subst.empty_delta_resolver ModPath.dummy;
+    paramresolver = ParamResolver.empty DirPath.dummy;
     revstruct = [];
     modlabels = Label.Set.empty;
     objlabels = Label.Set.empty;
@@ -206,13 +270,17 @@ let is_initial senv =
 
 let sections_are_opened senv = not (Option.is_empty senv.sections)
 
-let delta_of_senv senv = senv.modresolver,senv.paramresolver
+let delta_of_senv senv = senv.modresolver
 
 let constant_of_delta_kn_senv senv kn =
-  Mod_subst.constant_of_deltas_kn senv.paramresolver senv.modresolver kn
+  let mp = KerName.modpath kn in
+  if ModPath.subpath senv.modpath mp then Mod_subst.constant_of_delta_kn senv.modresolver kn
+  else ParamResolver.constant_of_delta_kn senv.paramresolver kn
 
 let mind_of_delta_kn_senv senv kn =
-  Mod_subst.mind_of_deltas_kn senv.paramresolver senv.modresolver kn
+  let mp = KerName.modpath kn in
+  if ModPath.subpath senv.modpath mp then Mod_subst.mind_of_delta_kn senv.modresolver kn
+  else ParamResolver.mind_of_delta_kn senv.paramresolver kn
 
 (** The safe_environment state monad *)
 
@@ -272,6 +340,10 @@ let set_native_compiler b senv =
 
 let set_allow_sprop b senv = { senv with env = Environ.set_allow_sprop b senv.env }
 
+let set_rewrite_rules_allowed b senv =
+  if b then { senv with env = Environ.allow_rewrite_rules senv.env }
+  else senv
+
 (* Temporary sets custom typing flags *)
 let with_typing_flags ?typing_flags senv ~f =
   match typing_flags with
@@ -291,13 +363,13 @@ sig
 
   val universes : t -> Univ.ContextSet.t
 
-  (** Checks whether [dst] is a valid extension of [src] *)
-  val check : src:t -> dst:t -> bool
+  (** Checks whether [dst] is a valid extension of [src], possibly adding universes and constraints. *)
+  val safe_extend : src:t -> dst:t -> t option
 end =
 struct
 
 type t = {
-  certif_struc : Declarations.structure_body;
+  certif_struc : Mod_declarations.structure_body;
   certif_univs : Univ.ContextSet.t;
 }
 
@@ -310,12 +382,11 @@ let is_suffix l suf = match l with
 | [] -> false
 | _ :: l -> l == suf
 
-let is_subset (s1, cst1) (s2, cst2) =
-  Univ.Level.Set.subset s1 s2 && Univ.Constraints.subset cst1 cst2
-
-let check ~src ~dst =
-  is_suffix dst.certif_struc src.certif_struc &&
-  is_subset src.certif_univs dst.certif_univs
+let safe_extend ~src ~dst =
+  if is_suffix dst.certif_struc src.certif_struc then
+    Some { certif_struc = dst.certif_struc;
+           certif_univs = Univ.ContextSet.union src.certif_univs dst.certif_univs }
+  else None
 
 let universes c = c.certif_univs
 
@@ -324,12 +395,12 @@ end
 type side_effect = {
   seff_certif : Certificate.t CEphemeron.key;
   seff_constant : Constant.t;
-  seff_body : Constr.t Declarations.pconstant_body;
+  seff_body : (Constr.t, Vmemitcodes.body_code option) Declarations.pconstant_body;
   seff_univs : Univ.ContextSet.t;
 }
-(* Invariant: For any senv, if [Certificate.check senv seff_certif] then
-  senv where univs := Certificate.universes seff_certif] +
-  (c.seff_constant -> seff_body) is well-formed. *)
+(* Invariant: For any senv, if [Certificate.safe_extend senv seff_certif] returns [Some certif'] then
+   [senv + Certificate.universes certif' + (c.seff_constant -> seff_body)] is well-formed
+   (if no univ inconsistency). *)
 
 module SideEffects :
 sig
@@ -366,6 +437,10 @@ end
 
 type private_constants = SideEffects.t
 
+let debug_print_private_constants seff =
+  let open Pp in
+  prlist_with_sep spc (fun seff -> Constant.print seff.seff_constant) (SideEffects.repr seff)
+
 let side_effects_of_private_constants l =
   List.rev (SideEffects.repr l)
 
@@ -373,15 +448,32 @@ let side_effects_of_private_constants l =
 let lift_constant c =
   let body = match c.const_body with
   | OpaqueDef _ -> Undef None
-  | Def _ | Undef _ | Primitive _ as body -> body
+  | Def _ | Undef _ | Primitive _ | Symbol _ as body -> body
   in
   { c with const_body = body }
+
+let push_bytecode vmtab code =
+  let open Vmemitcodes in
+  let vmtab, code = match code with
+  | None -> vmtab, None
+  | Some (BCdefined (mask, code, patches)) ->
+    let vmtab, index = Vmlibrary.add code vmtab in
+    vmtab, Some (BCdefined (mask, index, patches))
+  | Some BCconstant -> vmtab, Some BCconstant
+  | Some (BCalias kn) -> vmtab, Some (BCalias kn)
+  in
+  vmtab, code
 
 let push_private_constants env eff =
   let eff = side_effects_of_private_constants eff in
   let add_if_undefined env eff =
     if Environ.mem_constant eff.seff_constant env then env
-    else Environ.add_constant eff.seff_constant (lift_constant eff.seff_body) env
+    else
+      let cb = eff.seff_body in
+      let vmtab, code = push_bytecode (Environ.vm_library env) cb.const_body_code in
+      let cb = { cb with const_body_code = code } in
+      let env = Environ.set_vm_library vmtab env in
+      Environ.add_constant eff.seff_constant (lift_constant cb) env
   in
   List.fold_left add_if_undefined env eff
 
@@ -472,17 +564,28 @@ let check_empty_struct senv =
     with the correct digests. *)
 
 let check_required current_libs needed =
-  let check (id,required) =
-    try
-      let actual = DPmap.find id current_libs in
-      if not(digest_match ~actual ~required) then
-        CErrors.user_err Pp.(pr_sequence str
-          ["Inconsistent assumptions over module"; DirPath.to_string id; "."])
-    with Not_found ->
-      CErrors.user_err Pp.(pr_sequence str ["Reference to unknown module"; DirPath.to_string id; "."])
+  let check current (id, required) = match DPmap.find_opt id current with
+  | None ->
+    CErrors.user_err Pp.(pr_sequence str ["Reference to unknown module"; DirPath.to_string id; "."])
+  | Some { req_root; req_digest = actual } ->
+    if not (digest_match ~actual ~required) then
+      CErrors.user_err Pp.(pr_sequence str
+        ["Inconsistent assumptions over module"; DirPath.to_string id; "."])
+    else if req_root then
+      (* the library is being transitively required, not a root anymore *)
+      DPmap.set id { req_root = false; req_digest = actual } current
+    else
+      (* nothing to do *)
+      current
   in
-  Array.iter check needed
+  Array.fold_left check current_libs needed
 
+(** When loading a library, the current flags should match
+    those needed for the library *)
+
+let check_flags_for_library lib senv =
+  let { rewrite_rules_allowed } = lib.comp_flags in
+  set_rewrite_rules_allowed rewrite_rules_allowed senv
 
 (** {6 Insertion of section variables} *)
 
@@ -503,7 +606,7 @@ let safe_push_named d env =
 
 let push_named_def (id,de) senv =
   let sections = get_section senv.sections in
-  let c, r, typ = Constant_typing.translate_local_def senv.env id de in
+  let c, r, typ = Constant_typing.infer_local_def senv.env id de in
   let d = LocalDef (Context.make_annot id r, c, typ) in
   let env'' = safe_push_named d senv.env in
   let sections = Section.push_local d sections in
@@ -511,7 +614,7 @@ let push_named_def (id,de) senv =
 
 let push_named_assum (x,t) senv =
   let sections = get_section senv.sections in
-  let t, r = Constant_typing.translate_local_assum senv.env t in
+  let t, r = Constant_typing.infer_local_assum senv.env t in
   let d = LocalAssum (Context.make_annot x r, t) in
   let sections = Section.push_local d sections in
   let env'' = safe_push_named d senv.env in
@@ -521,12 +624,11 @@ let push_section_context uctx senv =
   let sections = get_section senv.sections in
   let sections = Section.push_local_universe_context uctx sections in
   let senv = { senv with sections=Some sections } in
-  let ctx = Univ.ContextSet.of_context uctx in
-  (* We check that the universes are fresh. FIXME: This should be done
-     implicitly, but we have to work around the API. *)
-  let () = assert (Univ.Level.Set.for_all (fun u -> not (Univ.Level.Set.mem u (fst senv.univ))) (fst ctx)) in
+  let qualities, ctx = UVars.UContext.to_context_set uctx in
+  assert (Sorts.QVar.Set.is_empty qualities);
+  (* push_context checks freshness *)
   { senv with
-    env = Environ.push_context_set ~strict:false ctx senv.env;
+    env = Environ.push_context ~strict:false uctx senv.env;
     univ = Univ.ContextSet.union ctx senv.univ }
 
 (** {6 Insertion of new declarations to current environment } *)
@@ -555,15 +657,16 @@ let add_retroknowledge pttc senv =
 type generic_name =
   | C of Constant.t
   | I of MutInd.t
-  | M (** name already known, cf the mod_mp field *)
-  | MT (** name already known, cf the mod_mp field *)
+  | R
+  | M of ModPath.t
+  | MT of ModPath.t
 
 let add_field ((l,sfb) as field) gn senv =
   let mlabs,olabs = match sfb with
     | SFBmind mib ->
       let l = labels_of_mib mib in
       check_objlabels l senv; (Label.Set.empty,l)
-    | SFBconst _ ->
+    | SFBconst _ | SFBrules _ ->
       check_objlabel l senv; (Label.Set.empty, Label.Set.singleton l)
     | SFBmodule _ | SFBmodtype _ ->
       check_modlabel l senv; (Label.Set.singleton l, Label.Set.empty)
@@ -571,8 +674,9 @@ let add_field ((l,sfb) as field) gn senv =
   let env' = match sfb, gn with
     | SFBconst cb, C con -> Environ.add_constant con cb senv.env
     | SFBmind mib, I mind -> Environ.add_mind mind mib senv.env
-    | SFBmodtype mtb, MT -> Environ.add_modtype mtb senv.env
-    | SFBmodule mb, M -> Modops.add_module mb senv.env
+    | SFBmodtype mtb, MT mp -> Environ.add_modtype mp mtb senv.env
+    | SFBmodule mb, M mp -> Modops.add_module mp mb senv.env
+    | SFBrules r, R -> Environ.add_rewrite_rules r.rewrules_rules senv.env
     | _ -> assert false
   in
   let sections = match senv.sections with
@@ -585,7 +689,7 @@ let add_field ((l,sfb) as field) gn senv =
       | SFBmind mib, I mind ->
         let poly = Declareops.inductive_is_polymorphic mib in
         Some Section.(push_global ~poly env' (SecInductive mind) sections)
-      | _, (M | MT) -> Some sections
+      | _, (M _ | MT _) -> Some sections
       | _ -> assert false
   in
   { senv with
@@ -599,14 +703,10 @@ let add_field ((l,sfb) as field) gn senv =
 
 let update_resolver f senv = { senv with modresolver = f senv.modresolver }
 
-type global_declaration =
-| ConstantEntry : Entries.constant_entry -> global_declaration
-| OpaqueEntry : unit Entries.opaque_entry -> global_declaration
-
 type exported_opaque = {
   exp_handle : Opaqueproof.opaque_handle;
   exp_body : Constr.t;
-  exp_univs : int option;
+  exp_univs : (int * int) option;
   (* Minimal amount of data needed to rebuild the private universes. We enforce
      in the API that private constants have no internal constraints. *)
 }
@@ -619,10 +719,28 @@ let repr_exported_opaque o =
   in
   (o.exp_handle, (o.exp_body, priv))
 
-let add_constant_aux senv (kn, cb) =
+let set_vm_library lib senv =
+  { senv with env = Environ.set_vm_library lib senv.env }
+
+let push_const_bytecode senv cb =
+  let vmtab, code = push_bytecode (Environ.vm_library senv.env) cb.const_body_code in
+  let cb = { cb with const_body_code = code } in
+  let senv = set_vm_library vmtab senv in
+  senv, cb
+
+let make_hbody = function
+  | None -> None
+  | Some hc -> Some (fun c ->
+      assert (c == HConstr.self hc);
+      HConstr.hcons hc)
+
+let add_constant_aux senv ?hbody (kn, cb) =
   let l = Constant.label kn in
   (* This is the only place where we hashcons the contents of a constant body *)
-  let cb = if sections_are_opened senv then cb else Declareops.hcons_const_body cb in
+  let senv, cb = push_const_bytecode senv cb in
+  let cb = if sections_are_opened senv then cb else
+      Declareops.hcons_const_body ?hbody:(make_hbody hbody) cb
+  in
   let senv' = add_field (l,SFBconst cb) (C kn) senv in
   let senv'' = match cb.const_body with
     | Undef (Some lev) ->
@@ -641,7 +759,7 @@ let inline_side_effects env body side_eff =
   in
   (* CAVEAT: we assure that most recent effects come first *)
   let side_eff = List.map_filter filter (SideEffects.repr side_eff) in
-  let sigs = List.rev_map (fun e -> e.seff_certif) side_eff in
+  let sigs = List.rev_map (fun e -> e.seff_constant, e.seff_certif) side_eff in
   (** Most recent side-effects first in side_eff *)
   if List.is_empty side_eff then (body, Univ.ContextSet.empty, sigs, 0)
   else
@@ -705,24 +823,32 @@ let inline_private_constants env ((body, ctx), side_eff) =
   let ctx' = Univ.ContextSet.union ctx ctx' in
   (body, ctx')
 
+let warn_failed_cert = CWarnings.create ~name:"failed-abstract-certificate"
+    ~category:CWarnings.CoreCategories.tactics ~default:CWarnings.Disabled
+    Pp.(fun kn ->
+        str "Certificate for private constant " ++
+        Label.print (Constant.label kn) ++
+        str " failed.")
+
 (* Given the list of signatures of side effects, checks if they match.
  * I.e. if they are ordered descendants of the current revstruct.
-   Returns the number of effects that can be trusted. *)
+   Returns the universes needed to trust the side effects (None if they can't be trusted). *)
 let check_signatures senv sl =
   let curmb = Certificate.make senv in
-  let is_direct_ancestor accu mb =
+  let is_direct_ancestor accu (kn, mb) =
     match accu with
     | None -> None
     | Some curmb ->
         try
           let mb = CEphemeron.get mb in
-          if Certificate.check ~src:curmb ~dst:mb
-          then Some mb
-          else None
+          let mb = Certificate.safe_extend ~src:curmb ~dst:mb in
+          let () = if Option.is_empty mb then warn_failed_cert kn in
+          mb
         with CEphemeron.InvalidKey -> None in
   let sl = List.fold_left is_direct_ancestor (Some curmb) sl in
   match sl with
-  | None -> None
+  | None ->
+    None
   | Some mb ->
     let univs = Certificate.universes mb in
     Some (Univ.ContextSet.diff univs senv.univ)
@@ -739,7 +865,7 @@ let constant_entry_of_side_effect eff =
     | Monomorphic ->
       Monomorphic_entry
     | Polymorphic auctx ->
-      Polymorphic_entry (Univ.AbstractContext.repr auctx)
+      Polymorphic_entry (UVars.AbstractContext.repr auctx)
   in
   let p =
     match cb.const_body with
@@ -755,11 +881,11 @@ let constant_entry_of_side_effect eff =
   }
   else
   DefinitionEff {
-    const_entry_body = p;
-    const_entry_secctx = Some (Context.Named.to_vars cb.const_hyps);
-    const_entry_type = Some cb.const_type;
-    const_entry_universes = univs;
-    const_entry_inline_code = cb.const_inline_code }
+    definition_entry_body = p;
+    definition_entry_secctx = Some (Context.Named.to_vars cb.const_hyps);
+    definition_entry_type = Some cb.const_type;
+    definition_entry_universes = univs;
+    definition_entry_inline_code = cb.const_inline_code }
 
 let export_eff eff =
   (eff.seff_constant, eff.seff_body)
@@ -768,13 +894,17 @@ let is_empty_private = function
 | Opaqueproof.PrivateMonomorphic ctx -> Univ.ContextSet.is_empty ctx
 | Opaqueproof.PrivatePolymorphic ctx -> Univ.ContextSet.is_empty ctx
 
+let compile_bytecode env cb =
+  let code = Vmbytegen.compile_constant_body ~fail_on_error:false env cb.const_universes cb.const_body in
+  { cb with const_body_code = code }
+
 (* Special function to call when the body of an opaque definition is provided.
   It performs the type-checking of the body immediately. *)
-let translate_direct_opaque ~sec_univs env kn ce =
-  let cb, ctx = Constant_typing.translate_opaque ~sec_univs env kn ce in
+let infer_direct_opaque ~sec_univs env ce =
+  let cb, ctx = Constant_typing.infer_opaque ~sec_univs env ce in
   let body = ce.Entries.opaque_entry_body, Univ.ContextSet.empty in
   let handle _env c () = (c, Univ.ContextSet.empty, 0) in
-  let (c, u) = Constant_typing.check_delayed handle ctx (body, ()) in
+  let (_hbody, c, u) = Constant_typing.check_delayed handle ctx (body, ()) in
   (* No constraints can be generated, we set it empty everywhere *)
   let () = assert (is_empty_private u) in
   { cb with const_body = OpaqueDef c }
@@ -785,11 +915,14 @@ let export_side_effects senv eff =
   let not_exists e = not (Environ.mem_constant e.seff_constant env) in
   let aux (acc,sl) e =
     if not (not_exists e) then acc, sl
-    else e :: acc, e.seff_certif :: sl in
+    else e :: acc, (e.seff_constant, e.seff_certif) :: sl in
   let seff, signatures = List.fold_left aux ([],[]) (SideEffects.repr eff) in
   let trusted = check_signatures senv signatures in
   let push_seff env eff =
     let { seff_constant = kn; seff_body = cb ; _ } = eff in
+    let vmtab, code = push_bytecode (Environ.vm_library env) cb.const_body_code in
+    let env = Environ.set_vm_library vmtab env in
+    let cb = { cb with const_body_code = code } in
     let env = Environ.add_constant kn (lift_constant cb) env in
     env
   in
@@ -804,15 +937,14 @@ let export_side_effects senv eff =
         let env = Environ.push_context_set ~strict:true uctx env in
         let univs = Univ.ContextSet.union uctx univs in
         let env, cb =
-          let kn = eff.seff_constant in
           let ce = constant_entry_of_side_effect eff in
-          let open Entries in
-          let cb = match ce with
+          let _hbody, cb = match ce with
             | DefinitionEff ce ->
-              Constant_typing.translate_constant ~sec_univs env kn (DefinitionEntry ce)
+              Constant_typing.infer_definition ~sec_univs env ce
             | OpaqueEff ce ->
-              translate_direct_opaque ~sec_univs env kn ce
+              None, infer_direct_opaque ~sec_univs env ce
           in
+          let cb = compile_bytecode env cb in
           let eff = { eff with seff_body = cb } in
           (push_seff env eff, export_eff eff)
         in
@@ -830,17 +962,17 @@ let export_private_constants eff senv =
   let senv = push_context_set ~strict:true uctx senv in
   let map senv (kn, c) = match c.const_body with
   | OpaqueDef body ->
-    (* Don't care about the body, it has been checked by {!translate_direct_opaque} *)
+    (* Don't care about the body, it has been checked by {!infer_direct_opaque} *)
     let senv, o = push_opaque_proof senv in
     let (_, _, _, h) = Opaqueproof.repr o in
     let univs = match c.const_universes with
     | Monomorphic -> None
-    | Polymorphic auctx -> Some (Univ.AbstractContext.size auctx)
+    | Polymorphic auctx -> Some (UVars.AbstractContext.size auctx)
     in
     let body = Constr.hcons body in
     let opaque = { exp_body = body; exp_handle = h; exp_univs = univs } in
     senv, (kn, { c with const_body = OpaqueDef o }, Some opaque)
-  | Def _ | Undef _ | Primitive _ as body ->
+  | Def _ | Undef _ | Primitive _ | Symbol _ as body ->
     senv, (kn, { c with const_body = body }, None)
   in
   let senv, bodies = List.fold_left_map map senv exported in
@@ -852,30 +984,34 @@ let export_private_constants eff senv =
 
 let add_constant l decl senv =
   let kn = Constant.make2 senv.modpath l in
-  let senv, cb =
+  let senv, (hbody, cb) =
     let sec_univs = Option.map Section.all_poly_univs senv.sections in
       match decl with
-      | OpaqueEntry ce ->
+      | Entries.OpaqueEntry ce ->
         let senv, o = push_opaque_proof senv in
-        let cb, ctx = Constant_typing.translate_opaque ~sec_univs senv.env kn ce in
+        let cb, ctx = Constant_typing.infer_opaque ~sec_univs senv.env ce in
         (* Push the delayed data in the environment *)
         let (_, _, _, i) = Opaqueproof.repr o in
         let nonce = Nonce.create () in
         let future_cst = HandleMap.add i (ctx, senv, nonce) senv.future_cst in
         let senv = { senv with future_cst } in
-        senv, { cb with const_body = OpaqueDef o }
-      | ConstantEntry ce ->
-        senv, Constant_typing.translate_constant ~sec_univs senv.env kn ce
+        senv, (None, { cb with const_body = OpaqueDef o })
+      | Entries.DefinitionEntry entry ->
+        senv, Constant_typing.infer_definition ~sec_univs senv.env entry
+      | Entries.ParameterEntry entry ->
+        senv, (None, Constant_typing.infer_parameter ~sec_univs senv.env entry)
+      | Entries.PrimitiveEntry entry ->
+        let senv = match entry with
+        | { Entries.prim_entry_content = CPrimitives.OT_type t; _ } ->
+          if sections_are_opened senv then CErrors.anomaly (Pp.str "Primitive type not allowed in sections");
+          add_retroknowledge (Retroknowledge.Register_type(t,kn)) senv
+        | _ -> senv in
+        senv, (None, Constant_typing.infer_primitive senv.env entry)
+      | Entries.SymbolEntry entry ->
+        senv, (None, Constant_typing.infer_symbol senv.env entry)
   in
-  let senv = add_constant_aux senv (kn, cb) in
-
-  let senv =
-    match decl with
-    | ConstantEntry (Entries.PrimitiveEntry { Entries.prim_entry_content = CPrimitives.OT_type t; _ }) ->
-      if sections_are_opened senv then CErrors.anomaly (Pp.str "Primitive type not allowed in sections");
-      add_retroknowledge (Retroknowledge.Register_type(t,kn)) senv
-    | _ -> senv
-  in
+  let cb = compile_bytecode senv.env cb in
+  let senv = add_constant_aux senv ?hbody (kn, cb) in
   kn, senv
 
 let add_constant ?typing_flags l decl senv =
@@ -903,8 +1039,11 @@ let check_opaque senv (i : Opaqueproof.opaque_handle) pf =
     in
     body, uctx, trusted
   in
-  let (c, ctx) = Constant_typing.check_delayed handle ty_ctx pf in
-  let c = Constr.hcons c in
+  let (hbody, c, ctx) = Constant_typing.check_delayed handle ty_ctx pf in
+  let c = match hbody with
+    | Some hbody -> assert (c == HConstr.self hbody); HConstr.hcons hbody
+    | None -> Constr.hcons c
+  in
   let ctx = match ctx with
   | Opaqueproof.PrivateMonomorphic u ->
     Opaqueproof.PrivateMonomorphic (Univ.hcons_universe_context_set u)
@@ -945,16 +1084,17 @@ let check_constraints uctx = function
 let add_private_constant l uctx decl senv : (Constant.t * private_constants) * safe_environment =
   let kn = Constant.make2 senv.modpath l in
   let senv = push_context_set ~strict:true uctx senv in
-    let cb =
+    let hbody, cb =
       let sec_univs = Option.map Section.all_poly_univs senv.sections in
       match decl with
       | OpaqueEff ce ->
         let () = assert (check_constraints uctx ce.Entries.opaque_entry_universes) in
-        translate_direct_opaque ~sec_univs senv.env kn ce
+        None, infer_direct_opaque ~sec_univs senv.env ce
       | DefinitionEff ce ->
-        let () = assert (check_constraints uctx ce.Entries.const_entry_universes) in
-        Constant_typing.translate_constant ~sec_univs senv.env kn (Entries.DefinitionEntry ce)
+        let () = assert (check_constraints uctx ce.Entries.definition_entry_universes) in
+        Constant_typing.infer_definition ~sec_univs senv.env ce
     in
+  let cb = compile_bytecode senv.env cb in
   let dcb = match cb.const_body with
   | Def _ as const_body -> { cb with const_body }
   | OpaqueDef _ ->
@@ -963,9 +1103,9 @@ let add_private_constant l uctx decl senv : (Constant.t * private_constants) * s
        and depending of the opaque status of the latter, this proof term will be
        either inlined or reexported. *)
     { cb with const_body = Undef None }
-  | Undef _ | Primitive _ -> assert false
+  | Undef _ | Primitive _ | Symbol _ -> assert false
   in
-  let senv = add_constant_aux senv (kn, dcb) in
+  let senv = add_constant_aux senv ?hbody (kn, dcb) in
   let eff =
     let from_env = CEphemeron.create (Certificate.make senv) in
     let eff = {
@@ -977,6 +1117,14 @@ let add_private_constant l uctx decl senv : (Constant.t * private_constants) * s
     SideEffects.add eff empty_private_constants
   in
   (kn, eff), senv
+
+(** Rewrite rules *)
+
+let add_rewrite_rules l rules senv =
+  if Option.has_some senv.sections
+  then CErrors.user_err Pp.(str "Adding rewrite rules not supported in sections.");
+  (* TODO: Hashconsing? *)
+  add_field (l, SFBrules rules) R senv
 
 (** Insertion of inductive types *)
 
@@ -998,15 +1146,19 @@ let add_mind l mie senv =
   let () = check_mind mie l in
   let kn = MutInd.make2 senv.modpath l in
   let sec_univs = Option.map Section.all_poly_univs senv.sections in
-  let mib = Indtypes.check_inductive senv.env ~sec_univs kn mie in
+  let mib, why_not_prim_record = Indtypes.check_inductive senv.env ~sec_univs kn mie in
   (* We still have to add the template monomorphic constraints, and only those
      ones. In all other cases, they are already part of the environment at this
      point. *)
   let senv = match mib.mind_template with
   | None -> senv
-  | Some { template_context = ctx; _ } -> push_context_set ~strict:true ctx senv
+  | Some { template_context = ctx; template_defaults = u; _ } ->
+    let qs, levels = UVars.Instance.levels u in
+    assert (Sorts.Quality.Set.for_all (fun q -> Sorts.Quality.equal Sorts.Quality.qtype q) qs);
+    let csts = UVars.AbstractContext.instantiate u ctx in
+    push_context_set ~strict:true (levels,csts) senv
   in
-  kn, add_checked_mind kn mib senv
+  (kn, why_not_prim_record), add_checked_mind kn mib senv
 
 let add_mind ?typing_flags l mie senv =
   with_typing_flags ?typing_flags senv ~f:(add_mind l mie)
@@ -1016,37 +1168,47 @@ let add_mind ?typing_flags l mie senv =
 let check_state senv =
   (Environ.universes senv.env, Conversion.checked_universes)
 
+let vm_handler env univs c vmtab =
+  let env = Environ.set_vm_library vmtab env in
+  let code = Vmbytegen.compile_constant_body ~fail_on_error:false env univs (Def c) in
+  let vmtab, code = push_bytecode vmtab code in
+  vmtab, code
+
+let vm_state senv =
+  (Environ.vm_library senv.env, { Mod_typing.vm_handler })
+
 let add_modtype l params_mte inl senv =
   let mp = MPdot(senv.modpath, l) in
   let state = check_state senv in
-  let mtb, _ = Mod_typing.translate_modtype state senv.env mp inl params_mte  in
-  let mtb = Declareops.hcons_module_type mtb in
-  let senv = add_field (l,SFBmodtype mtb) MT senv in
+  let vmstate = vm_state senv in
+  let mtb, _, vmtab = Mod_typing.translate_modtype state vmstate senv.env mp inl params_mte  in
+  let senv = set_vm_library vmtab senv in
+  let mtb = Mod_declarations.hcons_module_type mtb in
+  let senv = add_field (l,SFBmodtype mtb) (MT mp) senv in
   mp, senv
 
 (** full_add_module adds module with universes and constraints *)
 
-let full_add_module mb senv =
-  let dp = ModPath.dp mb.mod_mp in
+let full_add_module mp mb senv =
+  let dp = ModPath.dp mp in
   let linkinfo = Nativecode.link_info_of_dirpath dp in
-  { senv with env = Modops.add_linked_module mb linkinfo senv.env }
-
-let full_add_module_type mp mt senv =
-  { senv with env = Modops.add_module_type mp mt senv.env }
+  { senv with env = Modops.add_linked_module mp mb linkinfo senv.env }
 
 (** Insertion of modules *)
 
 let add_module l me inl senv =
   let mp = MPdot(senv.modpath, l) in
   let state = check_state senv in
-  let mb, _ = Mod_typing.translate_module state senv.env mp inl me in
-  let mb = Declareops.hcons_module_body mb in
-  let senv = add_field (l,SFBmodule mb) M senv in
-  let senv =
-    if Modops.is_functor mb.mod_type then senv
-    else update_resolver (Mod_subst.add_delta_resolver mb.mod_delta) senv
+  let vmstate = vm_state senv in
+  let mb, _, vmtab = Mod_typing.translate_module state vmstate senv.env mp inl me in
+  let senv = set_vm_library vmtab senv in
+  let mb = Mod_declarations.hcons_module_body mb in
+  let senv = add_field (l,SFBmodule mb) (M mp) senv in
+  let senv = match mod_global_delta mb with
+  | None -> senv
+  | Some delta -> update_resolver (Mod_subst.add_delta_resolver delta) senv
   in
-  (mp,mb.mod_delta),senv
+  (mp, mod_delta mb), senv
 
 (** {6 Starting / ending interactive modules and module types } *)
 
@@ -1063,8 +1225,8 @@ let start_mod_modtype ~istype l senv =
     (* carried over fields *)
     env = senv.env;
     future_cst = senv.future_cst;
-    modresolver = Mod_subst.empty_delta_resolver;
-    paramresolver = Mod_subst.add_delta_resolver senv.modresolver senv.paramresolver;
+    modresolver = Mod_subst.empty_delta_resolver mp;
+    paramresolver = ParamResolver.add_delta_resolver senv.modpath senv.modresolver senv.paramresolver;
     univ = senv.univ;
     required = senv.required;
     opaquetab = senv.opaquetab;
@@ -1089,18 +1251,20 @@ let add_module_parameter mbid mte inl senv =
   let () = check_empty_struct senv in
   let mp = MPbound mbid in
   let state = check_state senv in
-  let mtb, _ = Mod_typing.translate_modtype state senv.env mp inl ([],mte) in
-  let senv = full_add_module_type mp mtb senv in
+  let vmstate = vm_state senv in
+  let mtb, _, vmtab = Mod_typing.translate_modtype state vmstate senv.env mp inl ([],mte) in
+  let senv = set_vm_library vmtab senv in
+  let senv = { senv with env = Modops.add_module_parameter mbid mtb senv.env } in
   let new_variant = match senv.modvariant with
     | STRUCT (params,oldenv) -> STRUCT ((mbid,mtb) :: params, oldenv)
     | SIG (params,oldenv) -> SIG ((mbid,mtb) :: params, oldenv)
     | _ -> assert false
   in
-  let new_paramresolver =
-    if Modops.is_functor mtb.mod_type then senv.paramresolver
-    else Mod_subst.add_delta_resolver mtb.mod_delta senv.paramresolver
+  let new_paramresolver = match mod_global_delta mtb with
+  | None -> senv.paramresolver
+  | Some delta -> ParamResolver.add_delta_resolver mp delta senv.paramresolver
   in
-  mtb.mod_delta,
+  mod_delta mtb,
   { senv with
     modvariant = new_variant;
     paramresolver = new_paramresolver }
@@ -1122,31 +1286,25 @@ let functorize params init =
 
 let propagate_loads senv =
   List.fold_left
-    (fun env (_,mb) -> full_add_module mb env)
+    (fun env (mp, mb) -> full_add_module mp mb env)
     senv
     (List.rev senv.loads)
 
 (** Build the module body of the current module, taking in account
     a possible return type (_:T) *)
 
-let functorize_module params mb =
-  let f x = functorize params x in
-  let fe x = iterate (fun e -> MEMoreFunctor e) (List.length params) x in
-  { mb with
-    mod_expr = Modops.implem_smart_map (fun x -> x) fe mb.mod_expr;
-    mod_type = f mb.mod_type;
-    mod_type_alg = Option.map fe mb.mod_type_alg }
-
 let build_module_body params restype senv =
   let struc = NoFunctor (List.rev senv.revstruct) in
   let restype' = Option.map (fun (ty,inl) -> (([],ty),inl)) restype in
   let state = check_state senv in
-  let mb, _ =
-    Mod_typing.finalize_module state senv.env senv.modpath
+  let vmstate = vm_state senv in
+  let mb, _, vmtab =
+    Mod_typing.finalize_module state vmstate senv.env senv.modpath
       (struc, senv.modresolver) restype'
   in
+  let senv = set_vm_library vmtab senv in
   let mb' = functorize_module params mb in
-  { mb' with mod_retroknowledge = ModBodyRK senv.local_retroknowledge }
+  set_retroknowledge mb' senv.local_retroknowledge
 
 (** Returning back to the old pre-interactive-module environment,
     with one extra component and some updated fields
@@ -1182,22 +1340,18 @@ let end_module l restype senv =
   let mbids = List.rev_map fst params in
   let mb = build_module_body params restype senv in
   let newenv = Environ.set_universes (Environ.universes senv.env) oldsenv.env in
+  let newenv = if Environ.rewrite_rules_allowed senv.env then Environ.allow_rewrite_rules newenv else newenv in
+  let newenv = Environ.set_vm_library (Environ.vm_library senv.env) newenv in
   let senv' = propagate_loads { senv with env = newenv } in
-  let newenv = Modops.add_module mb senv'.env in
-  let newresolver =
-    if Modops.is_functor mb.mod_type then oldsenv.modresolver
-    else Mod_subst.add_delta_resolver mb.mod_delta oldsenv.modresolver
+  let newenv = Modops.add_module mp mb senv'.env in
+  let newresolver = match mod_global_delta mb with
+  | None -> oldsenv.modresolver
+  | Some delta -> Mod_subst.add_delta_resolver delta oldsenv.modresolver
   in
-  (mp,mbids,mb.mod_delta),
+  (mp, mbids, mod_delta mb),
   propagate_senv (l,SFBmodule mb) newenv newresolver senv' oldsenv
 
-let build_mtb mp sign delta =
-  { mod_mp = mp;
-    mod_expr = ();
-    mod_type = sign;
-    mod_type_alg = None;
-    mod_delta = delta;
-    mod_retroknowledge = ModTypeRK }
+let build_mtb = Mod_declarations.make_module_type
 
 let end_modtype l senv =
   let mp = senv.modpath in
@@ -1206,10 +1360,12 @@ let end_modtype l senv =
   let () = check_empty_context senv in
   let mbids = List.rev_map fst params in
   let newenv = Environ.set_universes (Environ.universes senv.env) oldsenv.env in
+  let newenv = if Environ.rewrite_rules_allowed senv.env then Environ.allow_rewrite_rules newenv else newenv in
+  let newenv = Environ.set_vm_library (Environ.vm_library senv.env) newenv in
   let senv' = propagate_loads {senv with env=newenv} in
   let auto_tb = functorize params (NoFunctor (List.rev senv.revstruct)) in
-  let mtb = build_mtb mp auto_tb senv.modresolver in
-  let newenv = Environ.add_modtype mtb senv'.env in
+  let mtb = build_mtb auto_tb senv.modresolver in
+  let newenv = Environ.add_modtype mp mtb senv'.env in
   let newresolver = oldsenv.modresolver in
   (mp,mbids),
   propagate_senv (l,SFBmodtype mtb) newenv newresolver senv' oldsenv
@@ -1220,23 +1376,25 @@ let add_include me is_module inl senv =
   let open Mod_typing in
   let mp_sup = senv.modpath in
   let state = check_state senv in
-  let sign,(),resolver, _ =
-    translate_mse_include is_module state senv.env mp_sup inl me
+  let vmstate = vm_state senv in
+  let sign,(),resolver, _, vmtab =
+    translate_mse_include is_module state vmstate senv.env mp_sup inl me
   in
+  let senv = set_vm_library vmtab senv in
   (* Include Self support  *)
   let struc = NoFunctor (List.rev senv.revstruct) in
-  let mb = build_mtb mp_sup struc senv.modresolver in
+  let mb = build_mtb struc senv.modresolver in
   let rec compute_sign sign resolver =
     match sign with
     | MoreFunctor(mbid,mtb,str) ->
       let state = check_state senv in
-      let (_ : UGraph.t) = Subtyping.check_subtypes state senv.env mb mtb in
+      let (_ : UGraph.t) = Subtyping.check_subtypes state senv.env mp_sup mb (MPbound mbid) mtb in
       let mpsup_delta =
         Modops.inline_delta_resolver senv.env inl mp_sup mbid mtb senv.modresolver
       in
       let subst = Mod_subst.map_mbid mbid mp_sup mpsup_delta in
       let resolver = Mod_subst.subst_codom_delta_resolver subst resolver in
-      compute_sign (Modops.subst_signature subst str) resolver
+      compute_sign (Modops.subst_signature subst mp_sup str) resolver
     | NoFunctor str -> resolver, str
   in
   let resolver, str = compute_sign sign resolver in
@@ -1247,14 +1405,17 @@ let add_include me is_module inl senv =
         C (Mod_subst.constant_of_delta_kn resolver (KerName.make mp_sup l))
       | SFBmind _ ->
         I (Mod_subst.mind_of_delta_kn resolver (KerName.make mp_sup l))
-      | SFBmodule _ -> M
-      | SFBmodtype _ -> MT
+      | SFBrules _ -> R
+      | SFBmodule _ -> M (MPdot (mp_sup, l))
+      | SFBmodtype _ -> MT (MPdot (mp_sup, l))
     in
     add_field field new_name senv
   in
   resolver, List.fold_left add senv str
 
 (** {6 Libraries, i.e. compiled modules } *)
+
+let dirpath_of_library lib = lib.comp_name
 
 let module_of_library lib = lib.comp_mod
 
@@ -1272,14 +1433,16 @@ let start_library dir senv =
   assert (is_initial senv);
   assert (not (DirPath.is_empty dir));
   let mp = MPfile dir in
+  let vmtab = Vmlibrary.set_path dir (Environ.vm_library senv.env) in
+  let env = Environ.set_vm_library vmtab senv.env in
   mp,
-  { env = senv.env;
+  { env = env;
     modpath = mp;
     modvariant = LIBRARY;
     required = senv.required;
 
-    modresolver = Mod_subst.empty_delta_resolver;
-    paramresolver = Mod_subst.empty_delta_resolver;
+    modresolver = Mod_subst.empty_delta_resolver mp;
+    paramresolver = ParamResolver.empty dir;
     revstruct = [];
     modlabels = Label.Set.empty;
     objlabels = Label.Set.empty;
@@ -1293,60 +1456,66 @@ let start_library dir senv =
 
 let export ~output_native_objects senv dir =
   let () = check_current_library dir senv in
+  (* qualities are in the senv only during sections *)
+  let () = assert (Sorts.QVar.Set.is_empty @@ Environ.qualities senv.env) in
   let mp = senv.modpath in
   let str = NoFunctor (List.rev senv.revstruct) in
-  let mb =
-    { mod_mp = mp;
-      mod_expr = FullStruct;
-      mod_type = str;
-      mod_type_alg = None;
-      mod_delta = senv.modresolver;
-      mod_retroknowledge = ModBodyRK senv.local_retroknowledge
-    }
-  in
+  let mb = Mod_declarations.make_module_body str senv.modresolver senv.local_retroknowledge in
   let ast, symbols =
     if output_native_objects then
       Nativelibrary.dump_library mp senv.env str
     else [], Nativevalues.empty_symbols
   in
+  let permanent_flags = {
+    rewrite_rules_allowed = Environ.rewrite_rules_allowed senv.env;
+  } in
+  let filter_dep (dp, { req_root; req_digest }) =
+    if req_root then Some (dp, req_digest) else None
+  in
+  let comp_deps = List.map_filter filter_dep (DPmap.bindings senv.required) in
   let lib = {
     comp_name = dir;
     comp_mod = mb;
     comp_univs = senv.univ;
-    comp_deps = Array.of_list (DPmap.bindings senv.required);
+    comp_deps = Array.of_list comp_deps;
+    comp_flags = permanent_flags
   } in
-  mp, lib, (ast, symbols)
+  let vmlib = Vmlibrary.export @@ Environ.vm_library senv.env in
+  mp, lib, vmlib, (ast, symbols)
 
-(* cst are the constraints that were computed by the vi2vo step and hence are
- * not part of the [lib.comp_univs] field (but morally should be) *)
-let import lib cst vodigest senv =
-  check_required senv.required lib.comp_deps;
+let import lib vmtab vodigest senv =
+  let senv = check_flags_for_library lib senv in
+  let required = check_required senv.required lib.comp_deps in
   if DirPath.equal (ModPath.dp senv.modpath) lib.comp_name then
     CErrors.user_err
       Pp.(strbrk "Cannot load a library with the same name as the current one ("
           ++ DirPath.print lib.comp_name ++ str").");
   let mp = MPfile lib.comp_name in
   let mb = lib.comp_mod in
-  let env = Environ.push_context_set ~strict:true
-      (Univ.ContextSet.union lib.comp_univs cst)
-      senv.env
-  in
+  let env = Environ.push_context_set ~strict:true lib.comp_univs senv.env in
+  let env = Environ.link_vm_library vmtab env in
   let env =
     let linkinfo = Nativecode.link_info_of_dirpath lib.comp_name in
-    Modops.add_linked_module mb linkinfo env
+    Modops.add_linked_module mp mb linkinfo env
   in
   let sections =
     Option.map (Section.map_custom (fun custom ->
-        {custom with rev_reimport = (lib,cst,vodigest) :: custom.rev_reimport}))
+        {custom with rev_reimport = (lib,vmtab,vodigest) :: custom.rev_reimport}))
       senv.sections
+  in
+  let required =
+    if DPmap.mem lib.comp_name required then
+      (* should probably be an error, we are requiring the same library twice *)
+      required
+    else DPmap.add lib.comp_name { req_root = true; req_digest = vodigest } required
   in
   mp,
   { senv with
     env;
     (* Do NOT store the name quotient from the dependencies in the set of
        constraints that will be marshalled on disk. *)
-    paramresolver = Mod_subst.add_delta_resolver mb.mod_delta senv.paramresolver;
-    required = DPmap.add lib.comp_name vodigest senv.required;
+    paramresolver = ParamResolver.add_delta_resolver mp (mod_delta mb) senv.paramresolver;
+    required;
     loads = (mp,mb)::senv.loads;
     sections;
   }
@@ -1360,6 +1529,7 @@ let open_section senv =
     rev_objlabels = senv.objlabels;
     rev_reimport = [];
     rev_revstruct = senv.revstruct;
+    rev_paramresolver = senv.paramresolver;
   } in
   let sections = Section.open_section ~custom senv.sections in
   { senv with sections=Some sections }
@@ -1375,10 +1545,11 @@ let close_section senv =
      that are going to be replayed. Those that are not forced are not readded
      by {!add_constant_aux}. *)
   let { rev_env = env; rev_univ = univ; rev_objlabels = objlabels;
-        rev_reimport; rev_revstruct = revstruct } = revert in
-  let senv = { senv with env; revstruct; sections; univ; objlabels; } in
+        rev_reimport; rev_revstruct = revstruct; rev_paramresolver = paramresolver } = revert in
+  let env = if Environ.rewrite_rules_allowed env0 then Environ.allow_rewrite_rules env else env in
+  let senv = { senv with env; revstruct; sections; univ; objlabels; paramresolver } in
   (* Second phase: replay Requires *)
-  let senv = List.fold_left (fun senv (lib,cst,vodigest) -> snd (import lib cst vodigest senv))
+  let senv = List.fold_left (fun senv (lib,vmtab,vodigest) -> snd (import lib vmtab vodigest senv))
       senv (List.rev rev_reimport)
   in
   (* Third phase: replay the discharged section contents *)
@@ -1389,6 +1560,7 @@ let close_section senv =
     let cb = Environ.lookup_constant kn env0 in
     let info = Section.segment_of_constant kn sections0 in
     let cb = Discharge.cook_constant senv.env info cb in
+    let cb = compile_bytecode senv.env cb in
     (* Delayed constants are already in the global environment *)
     add_constant_aux senv (kn, cb)
   | SecInductive ind ->
@@ -1398,6 +1570,16 @@ let close_section senv =
     add_checked_mind ind mib senv
   in
   List.fold_right fold entries senv
+
+let flatten_env senv =
+  let label = function MPdot (_,l) -> l | _ -> assert false in
+  let rec close senv =
+    match senv.modvariant with
+    | STRUCT _ -> close (snd (end_module (label senv.modpath) None senv))
+    | SIG (params,env) -> close (snd (end_module (label senv.modpath) None {senv with modvariant = STRUCT (params,env)}))
+    | LIBRARY | NONE -> senv in
+  let senv = close senv in
+  (senv.modpath, senv.revstruct)
 
 (** {6 Safe typing } *)
 

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -86,12 +86,12 @@ let mk_dectype { eqonleft; op; eq1; eq2; noteq } t x y =
 let generalize_right dty typ c1 c2 =
   Proofview.Goal.enter begin fun gl ->
     let env = Proofview.Goal.env gl in
-  Refine.refine ~typecheck:false begin fun sigma ->
+  Refine.refine_with_principal ~typecheck:false begin fun sigma ->
     let na = Name (next_name_away_with_default "x" Anonymous (Termops.vars_of_env env)) in
     let r = Retyping.relevance_of_type env sigma typ in
     let newconcl = mkProd (make_annot na r, typ, mk_dectype dty typ c1 (mkRel 1)) in
-    let (sigma, x) = Evarutil.new_evar env sigma ~principal:true newconcl in
-    (sigma, mkApp (x, [|c2|]))
+    let (sigma, x) = Evarutil.new_evar env sigma newconcl in
+    (sigma, mkApp (x, [|c2|]), Some (fst @@ destEvar sigma x))
   end
   end
 
@@ -138,8 +138,8 @@ let mkGenDecideEqGoal rectype ops g =
   let hypnames = pf_ids_set_of_hyps g in
   let xname    = next_ident_away idx hypnames in
   let yname    = next_ident_away idy (Id.Set.add xname hypnames) in
-  (mkNamedProd sigma (make_annot xname Sorts.Relevant) rectype
-     (mkNamedProd sigma (make_annot yname Sorts.Relevant) rectype
+  (mkNamedProd sigma (make_annot xname ERelevance.relevant) rectype
+     (mkNamedProd sigma (make_annot yname ERelevance.relevant) rectype
         (mkDecideEqGoal true ops
           rectype (mkVar xname) (mkVar yname))))
 
@@ -170,7 +170,7 @@ let diseqCase hyps eqonleft =
   (intro_using_then absurd (fun absurd ->
   tclTHEN  (Simple.apply (mkVar diseq))
   (tclTHEN  (injHyp absurd)
-            (full_trivial []))))))))
+            (Auto.gen_trivial [] None))))))))
 
 open Proofview.Notations
 
@@ -273,7 +273,7 @@ let decideGralEquality =
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
         match_eqdec env sigma concl >>= fun (dty, c1, c2, typ as data) ->
-        let headtyp = hd_app sigma (pf_compute gl typ) in
+        let headtyp = hd_app sigma (pf_whd_compute gl typ) in
         begin match EConstr.kind sigma headtyp with
         | Ind (mi,_) -> Proofview.tclUNIT mi
         | _ -> tclZEROMSG (Pp.str"This decision procedure only works for inductive objects.")
@@ -301,7 +301,7 @@ let decideEquality rectype ops =
 (* The tactic Compare *)
 
 let compare c1 c2 =
-  let open Coqlib in
+  let open Rocqlib in
   pf_constr_of_global (lib_ref "core.sumbool.type") >>= fun opc ->
   pf_constr_of_global (lib_ref "core.eq.type") >>= fun eqc ->
   pf_constr_of_global (lib_ref "core.not.type") >>= fun notc ->

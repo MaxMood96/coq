@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -27,6 +27,10 @@ let output_context = ref false
 let pr_impredicative_set env =
   if is_impredicative_set env then str "Theory: Set is impredicative"
   else str "Theory: Set is predicative"
+
+let pr_rewrite_rules env =
+  if rewrite_rules_allowed env then str "Theory: Rewrite rules are allowed (consistency, subject reduction, confluence and normalization might be broken)"
+  else str "Theory: Rewrite rules are not allowed"
 
 let pr_assumptions ass axs =
   if axs = [] then
@@ -65,6 +69,7 @@ let print_context env opac =
       (fnl() ++ str"CONTEXT SUMMARY" ++ fnl() ++
       str"===============" ++ fnl() ++ fnl() ++
       str "* " ++ hov 0 (pr_impredicative_set env ++ fnl()) ++ fnl() ++
+      str "* " ++ hov 0 (pr_rewrite_rules env ++ fnl()) ++ fnl() ++
       str "* " ++ hov 0 (pr_axioms env opac ++ fnl()) ++ fnl() ++
       str "* " ++ hov 0 (pr_type_in_type env ++ fnl()) ++ fnl() ++
       str "* " ++ hov 0 (pr_unguarded env ++ fnl()) ++ fnl() ++

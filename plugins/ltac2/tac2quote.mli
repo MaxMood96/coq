@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -42,7 +42,7 @@ val of_preterm : ?delimiters:Id.t list -> Constrexpr.constr_expr -> raw_tacexpr
 
 val of_list : ?loc:Loc.t -> ('a -> raw_tacexpr) -> 'a list -> raw_tacexpr
 
-val array_of_list : ?loc:Loc.t -> raw_tacexpr -> raw_tacexpr
+val array_literal : ?loc:Loc.t -> raw_tacexpr list -> raw_tacexpr
 
 val of_bindings : bindings -> raw_tacexpr
 
@@ -57,6 +57,8 @@ val of_destruction_arg : destruction_arg -> raw_tacexpr
 val of_induction_clause : induction_clause -> raw_tacexpr
 
 val of_conversion : conversion -> raw_tacexpr
+
+val of_orient : orientation -> raw_tacexpr
 
 val of_rewriting : rewriting -> raw_tacexpr
 
@@ -93,7 +95,7 @@ val of_format : lstring -> raw_tacexpr
 
 (** {5 Generic arguments} *)
 
-val wit_pattern : (Constrexpr.constr_expr, Pattern.constr_pattern) Arg.tag
+val wit_pattern : (Constrexpr.constr_expr, [`uninstantiated] Pattern.constr_pattern_r) Arg.tag
 
 val wit_ident : (Id.t, Id.t) Arg.tag
 
@@ -104,9 +106,3 @@ val wit_constr : (Constrexpr.constr_expr, Glob_term.glob_constr) Arg.tag
 val wit_open_constr : (Constrexpr.constr_expr, Glob_term.glob_constr) Arg.tag
 
 val wit_preterm : (Constrexpr.constr_expr, Id.Set.t * Glob_term.glob_constr) Arg.tag
-
-val wit_ltac1 : (Id.t CAst.t list * Ltac_plugin.Tacexpr.raw_tactic_expr, Id.t list * Ltac_plugin.Tacexpr.glob_tactic_expr) Arg.tag
-(** Ltac1 AST quotation, seen as a 'tactic'. Its type is unit in Ltac2. *)
-
-val wit_ltac1val : (Id.t CAst.t list * Ltac_plugin.Tacexpr.raw_tactic_expr, Id.t list * Ltac_plugin.Tacexpr.glob_tactic_expr) Arg.tag
-(** Ltac1 AST quotation, seen as a value-returning expression, with type Ltac1.t. *)

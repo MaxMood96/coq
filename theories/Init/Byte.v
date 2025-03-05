@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -10,13 +10,13 @@
 
 (** * Bytes *)
 
-Require Import Coq.Init.Ltac.
-Require Import Coq.Init.Datatypes.
-Require Import Coq.Init.Logic.
-Require Import Coq.Init.Specif.
-Require Coq.Init.Nat.
+Require Import Corelib.Init.Ltac.
+Require Import Corelib.Init.Datatypes.
+Require Import Corelib.Init.Logic.
+Require Import Corelib.Init.Specif.
+Require Corelib.Init.Nat.
 
-Declare ML Module "number_string_notation_plugin:coq-core.plugins.number_string_notation".
+Declare ML Module "rocq-runtime.plugins.number_string_notation".
 
 (** We define an inductive for use with the [String Notation] command
     which contains all ascii characters.  We use 256 constructors for

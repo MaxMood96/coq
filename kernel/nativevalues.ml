@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -60,7 +60,6 @@ type reloc_table = (tag * arity) array
 
 type annot_sw = {
     asw_ind : inductive;
-    asw_ci : case_info;
     asw_reloc : reloc_table;
     asw_finite : bool;
     asw_prefix : string
@@ -105,7 +104,7 @@ type symbol =
   | SymbMatch of annot_sw
   | SymbInd of inductive
   | SymbEvar of Evar.t
-  | SymbLevel of Univ.Level.t
+  | SymbInstance of UVars.Instance.t
   | SymbProj of (inductive * int)
 
 type block
@@ -120,13 +119,13 @@ let accumulate_tag = 0
 (** Unique pointer used to drive the accumulator function *)
 let ret_accu = Obj.repr (ref ())
 
-type accu_val = { mutable acc_atm : atom; acc_arg : Obj.t list }
+type accu_val = { mutable acc_atm : atom; acc_arg : t list }
 
-external set_tag : Obj.t -> int -> unit = "coq_obj_set_tag"
+external set_tag : Obj.t -> int -> unit = "rocq_obj_set_tag"
 
 let mk_accu (a : atom) : t =
   let rec accumulate data x =
-    if x == ret_accu then Obj.repr data
+    if Obj.repr x == ret_accu then Obj.repr data
     else
       let data = { data with acc_arg = x :: data.acc_arg } in
       let ans = Obj.repr (accumulate data) in
@@ -170,24 +169,13 @@ let mk_rels_accu lvl len =
 let napply (f:t) (args: t array) =
   Array.fold_left (fun f a -> apply f a) f args
 
-let mk_constant_accu kn u =
-  mk_accu (Aconstant (kn,Univ.Instance.of_array u))
+let mk_constant_accu kn u = mk_accu (Aconstant (kn,u))
 
-let mk_ind_accu ind u =
-  mk_accu (Aind (ind,Univ.Instance.of_array u))
+let mk_ind_accu ind u = mk_accu (Aind (ind,u))
 
 let mk_sort_accu s u =
-  let open Sorts in
-  match s with
-  | SProp | Prop | Set -> mk_accu (Asort s)
-  | Type s ->
-     let u = Univ.Instance.of_array u in
-     let s = Sorts.sort_of_univ (Univ.subst_instance_universe u s) in
-     mk_accu (Asort s)
-  | QSort (q, s) ->
-     let u = Univ.Instance.of_array u in
-     let s = Sorts.qsort q (Univ.subst_instance_universe u s) in
-     mk_accu (Asort s)
+  let s = UVars.subst_instance_sort u s in
+  mk_accu (Asort s)
 
 let mk_var_accu id =
   mk_accu (Avar id)
@@ -224,8 +212,7 @@ let accu_nargs (k:accumulator) =
   List.length (get_accu k).acc_arg
 
 let args_of_accu (k:accumulator) =
-  let acc = (get_accu k).acc_arg in
-  (Obj.magic (Array.of_list acc) : t array)
+  (get_accu k).acc_arg
 
 let mk_fix_accu rec_pos pos types bodies =
   mk_accu (Afix(types,bodies,rec_pos, pos))
@@ -246,7 +233,7 @@ let force_cofix (cofix : t) =
   match atom with
   | Acofix (typ, norm, pos, CofixLazy f) ->
     let args = args_of_accu accu in
-    let f = Array.fold_right (fun arg f -> apply f arg) args f in
+    let f = List.fold_right (fun arg f -> apply f arg) args f in
     let v = apply f (Obj.magic ()) in
     let () = set_atom_of_accu accu (Acofix (typ, norm, pos, CofixValue v)) in
       v
@@ -274,7 +261,7 @@ let cast_accu v = (Obj.magic v:accumulator)
 let mk_int (x : int) = (Obj.magic x : t)
 [@@ocaml.inline always]
 
-(* Coq's booleans are reversed... *)
+(* Rocq's booleans are reversed... *)
 let mk_bool (b : bool) = (Obj.magic (not b) : t)
 [@@ocaml.inline always]
 
@@ -282,6 +269,9 @@ let mk_uint (x : Uint63.t) = (Obj.magic x : t)
 [@@ocaml.inline always]
 
 let mk_float (x : Float64.t) = (Obj.magic x : t)
+[@@ocaml.inline always]
+
+let mk_string (x : Pstring.t) = (Obj.magic x : t)
 [@@ocaml.inline always]
 
 let block_size (b:block) =
@@ -308,6 +298,7 @@ let kind_of_value (v:t) =
       else Vaccu (Obj.magic v)
     else if Int.equal tag Obj.custom_tag then Vint64 (Obj.magic v)
     else if Int.equal tag Obj.double_tag then Vfloat64 (Obj.magic v)
+    else if Int.equal tag Obj.string_tag then Vstring (Obj.magic v)
     else if (tag < Obj.lazy_tag) then Vblock (Obj.magic v)
       else
         (* assert (tag = Obj.closure_tag || tag = Obj.infix_tag);
@@ -448,12 +439,12 @@ let l_or accu x y =
   else apply2 accu x y
 
 [@@@ocaml.warning "-37"]
-type coq_carry =
+type rocq_carry =
   | Caccu of t
   | C0 of t
   | C1 of t
 
-type coq_pair =
+type rocq_pair =
   | Paccu of t
   | PPair of t * t
 
@@ -541,12 +532,12 @@ let addMulDiv accu x y z =
   else apply3 accu x y z
 
 [@@@ocaml.warning "-34"]
-type coq_bool =
+type rocq_bool =
   | Baccu of t
   | Btrue
   | Bfalse
 
-type coq_cmp =
+type rocq_cmp =
   | CmpAccu of t
   | CmpEq
   | CmpLt
@@ -619,7 +610,7 @@ let print x =
 
 (** Support for machine floating point values *)
 
-external is_float : t -> bool = "coq_is_double"
+external is_float : t -> bool = "rocq_is_double"
 [@@noalloc]
 
 let to_float (x:t) = (Obj.magic x : Float64.t)
@@ -643,6 +634,7 @@ let fabs accu x =
 
 let no_check_feq x y =
   mk_bool (Float64.eq (to_float x) (to_float y))
+[@@ocaml.inline always]
 
 let feq accu x y =
   if is_float x && is_float y then no_check_feq x y
@@ -650,6 +642,7 @@ let feq accu x y =
 
 let no_check_flt x y =
   mk_bool (Float64.lt (to_float x) (to_float y))
+[@@ocaml.inline always]
 
 let flt accu x y =
   if is_float x && is_float y then no_check_flt x y
@@ -657,12 +650,13 @@ let flt accu x y =
 
 let no_check_fle x y =
   mk_bool (Float64.le (to_float x) (to_float y))
+[@@ocaml.inline always]
 
 let fle accu x y =
   if is_float x && is_float y then no_check_fle x y
   else apply2 accu x y
 
-type coq_fcmp =
+type rocq_fcmp =
   | CFcmpAccu of t
   | CFcmpEq
   | CFcmpLt
@@ -680,12 +674,13 @@ let fcompare accu x y =
 
 let no_check_fequal x y =
   mk_bool (Float64.equal (to_float x) (to_float y))
+[@@ocaml.inline always]
 
 let fequal accu x y =
   if is_float x && is_float y then no_check_fequal x y
   else apply2 accu x y
 
-type coq_fclass =
+type rocq_fclass =
   | CFclassAccu of t
   | CFclassPNormal
   | CFclassNNormal
@@ -795,6 +790,79 @@ let next_down accu x =
   if is_float x then no_check_next_down x
   else apply accu x
 
+(** Support for primitive strings *)
+
+let is_string (x:t) =
+  let o = Obj.repr x in
+  Int.equal (Obj.tag o) Obj.string_tag
+
+let to_string (x:t) = (Obj.magic x : Pstring.t)
+[@@ocaml.inline always]
+
+let no_check_string_make n c =
+  mk_string (Pstring.make (to_uint n) (to_uint c))
+[@@ocaml.inline always]
+
+let no_check_string_length s =
+  mk_uint (Pstring.length (to_string s))
+[@@ocaml.inline always]
+
+let no_check_string_get s i =
+  mk_uint (Pstring.get (to_string s) (to_uint i))
+[@@ocaml.inline always]
+
+let no_check_string_sub s off len =
+  mk_string (Pstring.sub (to_string s) (to_uint off) (to_uint len))
+[@@ocaml.inline always]
+
+let no_check_string_cat s1 s2 =
+  mk_string (Pstring.cat (to_string s1) (to_string s2))
+[@@ocaml.inline always]
+
+let no_check_string_compare s1 s2 =
+  match Pstring.compare (to_string s1) (to_string s2) with
+  | x when x < 0 -> (Obj.magic CmpLt:t)
+  | 0 -> (Obj.magic CmpEq:t)
+  | _ -> (Obj.magic CmpGt:t)
+
+let string_make accu n c =
+  if is_int n && is_int c then
+    no_check_string_make n c
+  else
+    apply2 accu n c
+
+let string_length accu s =
+  if is_string s then
+    no_check_string_length s
+  else
+    apply accu s
+
+let string_get accu s i =
+  if is_string s && is_int i then
+    no_check_string_get s i
+  else
+    apply2 accu s i
+
+let string_sub accu s off len =
+  if is_string s && is_int off && is_int len then
+    no_check_string_sub s off len
+  else
+    apply3 accu s off len
+
+let string_cat accu s1 s2 =
+  if is_string s1 && is_string s2 then
+    no_check_string_cat s1 s2
+  else
+    apply2 accu s1 s2
+
+let string_compare accu s1 s2 =
+  if is_string s1 && is_string s2 then
+    no_check_string_compare s1 s2
+  else
+    apply2 accu s1 s2
+
+(** Support for primitive arrays *)
+
 let is_parray t =
   (* This is only used over values known to inhabit an array type, so we just
      have to discriminate between actual arrays and accumulators. The latter
@@ -807,6 +875,7 @@ let of_parray t = Obj.magic t
 
 let no_check_arraymake n def =
   of_parray (Parray.make (to_uint n) def)
+[@@ocaml.inline always]
 
 let arraymake accu vA n def =
   if is_int n then

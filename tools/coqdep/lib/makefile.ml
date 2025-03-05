@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -52,20 +52,20 @@ let set_dyndep = function
   | "var" -> option_dynlink := Variable
   | o -> CErrors.user_err Pp.(str "Incorrect -dyndep option: " ++ str o)
 
-let mldep_to_make (base, suff) =
+let mldep_to_make base =
   match !option_dynlink with
   | No -> []
-  | Byte -> [sprintf "%s%s" base suff]
+  | Byte -> [sprintf "%s.cma" base]
   | Opt -> [sprintf "%s.cmxs" base]
   | Both ->
-    [sprintf "%s%s" base suff ; sprintf "%s.cmxs" base]
+    [sprintf "%s.cma" base; sprintf "%s.cmxs" base]
   | Variable ->
-    [sprintf "%s%s" base (if suff=".cmo" then "$(DYNOBJ)" else "$(DYNLIB)")]
+    [sprintf "%s%s" base "$(DYNLIB)"]
 
 let string_of_dep ~suffix = let open Dep_info.Dep in
   function
   | Require basename -> [escape basename ^ suffix]
-  | Ml (base,suff) -> mldep_to_make (escape base,suff)
+  | Ml base -> mldep_to_make (escape base)
   | Other s -> [escape s]
 
 let string_of_dependency_list ~suffix deps =
@@ -82,8 +82,6 @@ let print_dep fmt { Dep_info.name; deps } =
     let glob = if !option_noglob then "" else ename^".glob " in
   fprintf fmt "%s.vo %s%s.v.beautified %s.required_vo: %s.v %s\n" ename glob ename ename ename
     (string_of_dependency_list ~suffix:".vo" deps);
-  fprintf fmt "%s.vio: %s.v %s\n" ename ename
-    (string_of_dependency_list ~suffix:".vio" deps);
   if !option_write_vos then
     fprintf fmt "%s.vos %s.vok %s.required_vos: %s.v %s\n" ename ename ename ename
       (string_of_dependency_list ~suffix:".vos" deps);

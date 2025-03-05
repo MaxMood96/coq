@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -60,7 +60,7 @@ let rec find_and_remove_assoc (i : int) = function
 type backtrace = Printexc.raw_backtrace
 let backtrace_to_string = Printexc.raw_backtrace_to_string
 
-let backtrace_info : backtrace t = make ()
+let backtrace_info : backtrace t = make "exninfo_backtrace"
 
 let is_recording = ref false
 

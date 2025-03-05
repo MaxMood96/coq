@@ -6,6 +6,10 @@ open Gramext
 open Format
 open Util
 
+exception Error of string
+(** Raised by parsers when the first component of a stream pattern is
+   accepted, but one of the following components is rejected. *)
+
 (* Functorial interface *)
 
 type norec
@@ -18,7 +22,7 @@ module type S = sig
   type ty_pattern = TPattern : 'a pattern -> ty_pattern
 
   (** Type combinators to factor the module type between explicit
-      state passing in Grammar and global state in Pcoq *)
+      state passing in Grammar and global state in Procq *)
 
   type 'a with_gstate
   (** Reader of grammar state *)
@@ -34,7 +38,7 @@ module type S = sig
 
   module Parsable : sig
     type t
-    (** [Parsable.t] Stream tokenizers with Coq-specific funcitonality *)
+    (** [Parsable.t] Stream tokenizers with Rocq-specific functionality *)
 
     val make : ?loc:Loc.t -> (unit,char) Stream.t -> t
     (** [make ?loc strm] Build a parsable from stream [strm], resuming
@@ -62,7 +66,7 @@ module type S = sig
     val print : Format.formatter -> 'a t -> unit with_estate
     val is_empty : 'a t -> bool with_estate
     type any_t = Any : 'a t -> any_t
-    val accumulate_in : 'a t -> any_t list CString.Map.t with_estate
+    val accumulate_in : any_t list -> any_t list CString.Map.t with_estate
   end
 
   module rec Symbol : sig
@@ -116,7 +120,7 @@ module type S = sig
   | Reuse of string option * 'a Production.t list
   | Fresh of Gramext.position * 'a single_extend_statement list
 
-  val generalize_symbol : ('a, 'tr, 'c) Symbol.t -> ('a, norec, 'c) Symbol.t option
+  val generalize_symbol : ('a, 'tr, 'c) Symbol.t -> ('b, norec, 'c) Symbol.t option
 
   (* Used in custom entries, should tweak? *)
   val level_of_nonterm : ('a, norec, 'c) Symbol.t -> string option
@@ -180,9 +184,11 @@ type ('a, 'b, 'c, 'd) ty_and_rec3 =
 | MayRec3 : ('a, 'b, 'c, mayrec) ty_and_rec3
 
 type _ tag = ..
+module DMap = PolyMap.Make (struct type nonrec 'a tag = 'a tag = .. end)
+
 type 'a ty_entry = {
   ename : string;
-  etag : 'a tag;
+  etag : 'a DMap.onetag;
 }
 
 and 'a ty_desc =
@@ -241,8 +247,6 @@ type ('t,'a) entry_data = {
   econtinue : 't -> int -> int -> 'a -> 'a parser_t;
 }
 
-module DMap = PolyMap.Make (struct type nonrec 'a tag = 'a tag = .. end)
-
 module rec EState : DMap.MapS
   with type 'a value := (GState.t, 'a) entry_data
   = DMap.Map(struct type 'a t = (GState.t, 'a) entry_data end)
@@ -260,7 +264,8 @@ end = struct
 end
 open GState
 
-let get_entry estate e = try EState.find e.etag estate with Not_found -> assert false
+let get_entry estate e = try EState.find (DMap.tag_of_onetag e.etag) estate
+  with Not_found -> assert false
 
 type 'a ty_rules =
 | TRules : (_, norec, 'act, Loc.t -> 'a) ty_rule * 'act -> 'a ty_rules
@@ -288,10 +293,8 @@ and tree_derive_eps : type s tr a. (s, tr, a) ty_tree -> bool =
       derive_eps s && tree_derive_eps son || tree_derive_eps bro
   | DeadEnd -> false
 
-(** FIXME: find a way to do that type-safely *)
 let eq_entry : type a1 a2. a1 ty_entry -> a2 ty_entry -> (a1, a2) eq option = fun e1 e2 ->
-  if (Obj.magic e1) == (Obj.magic e2) then Some (Obj.magic Refl)
-  else None
+  DMap.eq_onetag e1.etag (DMap.tag_of_onetag e2.etag)
 
 let tok_pattern_eq_list pl1 pl2 =
   let f (TPattern p1) (TPattern p2) = Option.has_some (L.tok_pattern_eq p1 p2) in
@@ -384,7 +387,7 @@ type ('s, 'tr, 'k, 'r) ty_belast_rule =
 
 (* unfortunately, this is quadratic, but ty_rules aren't too long
  * (99% of the time of length less or equal 10 and maximum is 22
- * when compiling Coq and its standard library) *)
+ * when compiling Rocq and its standard library) *)
 let rec get_symbols : type s trec k r. (s, trec, k, r) ty_rule -> (s, trec, unit, k, r) any_symbols =
   let rec belast_rule : type s trr trs tr a k r. (trr, trs, tr) ty_and_rec -> (s, trr, k, r) ty_rule -> (s, trs, a) ty_symbol -> (s, tr, a -> k, r) ty_belast_rule =
     fun ar r s -> match ar, r with
@@ -1155,7 +1158,7 @@ let token_ematch tok =
   fun tok -> tematch tok
 
 let empty_entry ename levn strm =
-  raise (Stream.Error ("entry [" ^ ename ^ "] is empty"))
+  raise (Error ("entry [" ^ ename ^ "] is empty"))
 
 let start_parser_of_entry gstate entry levn (strm:_ LStream.t) =
   (get_entry gstate.estate entry).estart gstate levn strm
@@ -1165,7 +1168,7 @@ let continue_parser_of_entry gstate entry levn bp a (strm:_ LStream.t) =
 
 (**
   nlevn: level for Snext
-  alevn: level for recursive calls on the left-hand side of the rule (depending on associativity)
+  alevn: level for recursive calls on the right-hand side of the rule (depending on associativity)
 *)
 let rec parser_of_tree : type s tr r. s ty_entry -> int -> int -> (s, tr, r) ty_tree -> GState.t -> r parser_t =
   fun entry nlevn alevn ->
@@ -1202,7 +1205,7 @@ let rec parser_of_tree : type s tr r. s ty_entry -> int -> int -> (s, tr, r) ty_
              let act =
                try p1 gstate bp a strm__ with
                  Stream.Failure ->
-                   raise (Stream.Error (tree_failed entry a s son))
+                   raise (Error (tree_failed entry a s son))
              in
              act a)
   | Node (_, {node = s; son = son; brother = bro}) ->
@@ -1218,7 +1221,7 @@ let rec parser_of_tree : type s tr r. s ty_entry -> int -> int -> (s, tr, r) ty_
                    (try Some (p1 gstate bp a strm) with Stream.Failure -> None)
                  with
                    Some act -> act a
-                 | None -> raise (Stream.Error (tree_failed entry a s son))
+                 | None -> raise (Error (tree_failed entry a s son))
                  end
              | None -> p2 gstate strm)
 and parser_cont : type s tr tr' a r.
@@ -1260,7 +1263,7 @@ and parser_cont : type s tr tr' a r.
         let a = continue_parser_of_entry gstate (entry_of_symb entry s) 0 bp a strm__ in
         let act =
           try p1 gstate strm__ with
-            Stream.Failure -> raise (Stream.Error (tree_failed entry a s son))
+            Stream.Failure -> raise (Error (tree_failed entry a s son))
         in
         fun _ -> act a
 
@@ -1318,8 +1321,12 @@ and parser_of_token_list : type s tr lt r.
     match LStream.peek gstate.kwstate strm with
     | Some tok' ->
       let a = tematch tok' in
-      begin try let act = ps gstate a strm in act a
-      with TokenListFailed (entry, a, tok, tree) -> raise (Stream.Error (tree_failed entry a tok tree)) end
+      begin
+        try let act = ps gstate a strm in act a
+        with
+        | TokenListFailed (entry, a, tok, tree) ->
+          raise (Error (tree_failed entry a tok tree))
+      end
     | None -> raise Stream.Failure
 and parser_of_symbol : type s tr a.
   s ty_entry -> int -> (s, tr, a) ty_symbol -> GState.t -> a parser_t =
@@ -1343,7 +1350,7 @@ and parser_of_symbol : type s tr a.
             let al =
               try ps gstate strm__ :: al with
                 Stream.Failure ->
-                  raise (Stream.Error (symb_failed entry v sep symb))
+                  raise (Error (symb_failed entry v sep symb))
             in
             kont gstate al strm__
         | _ -> al
@@ -1392,7 +1399,7 @@ and parser_of_symbol : type s tr a.
                   let a =
                     try parse_top_symb entry symb gstate strm__ with
                       Stream.Failure ->
-                        raise (Stream.Error (symb_failed entry v sep symb))
+                        raise (Error (symb_failed entry v sep symb))
                   in
                   a :: al
             in
@@ -1480,7 +1487,7 @@ and parse_top_symb : type s tr a. s ty_entry -> (s, tr, a) ty_symbol -> GState.t
     [start_parser_of_levels entry 0 entry.edesc], thus practically
     going from [levn] to the end.
 
-    More schematically, assuming each level has the form
+    More schematically, assuming each level has the normalized form
 
     level n: [ a = SELF; b = suffix_tree_n -> action_n(a,b)
              | a = prefix_tree_n -> action'_n(a) ]
@@ -1604,9 +1611,12 @@ let make_entry_data entry desc = {
 
 (* Extend syntax *)
 
-let modify_entry estate e f = try EState.modify e.etag f estate with Not_found -> assert false
+let modify_entry estate e f = try EState.modify (DMap.tag_of_onetag e.etag) f estate
+  with Not_found -> assert false
 
-let add_entry otag estate e v = assert (not (EState.mem e.etag estate)); EState.add otag v estate
+let add_entry otag estate e v =
+  assert (not (EState.mem (DMap.tag_of_onetag e.etag) estate));
+  EState.add otag v estate
 
 let extend_entry add_kw estate kwstate entry statement =
   let kwstate = ref kwstate in
@@ -1656,9 +1666,9 @@ module Parsable = struct
       let exn, info = Exninfo.capture exn in
       let loc = get_parsing_loc () in
       let info = Loc.add_loc info loc in
-      let exn = Stream.Error ("illegal begin of " ^ entry.ename) in
+      let exn = Error ("illegal begin of " ^ entry.ename) in
       Exninfo.iraise (exn, info)
-    | Stream.Error _ as exn ->
+    | Error _ as exn ->
       let exn, info = Exninfo.capture exn in
       let loc = get_parsing_loc () in
       let info = Loc.add_loc info loc in
@@ -1698,8 +1708,8 @@ module Entry = struct
   type 'a t = 'a ty_entry
 
   let fresh n =
-    let otag = DMap.make () in
-    { ename = n; etag = DMap.tag_of_onetag otag }, otag
+    let etag = DMap.make () in
+    { ename = n; etag }, etag
 
   let make n estate =
     let e, otag = fresh n in
@@ -1764,23 +1774,24 @@ module Entry = struct
           List.iter (fun (ExS rule) -> iter_in_symbols f rule) rules)
         elev
 
-  let same_entry (Any e) (Any e') = (Obj.magic e) == (Obj.magic e')
+  let same_entry (Any e) (Any e') = Option.has_some (eq_entry e e')
 
-  let accumulate_in e estate =
-    let initial = Any e in
-    let todo = ref [initial] in
-    let visited = ref (String.Map.singleton (name e) [initial]) in
+  let accumulate_in initial estate =
+    let add_visited visited (Any e as any) =
+      String.Map.update e.ename (function
+          | None -> Some [any]
+          | Some vl as v ->
+            if List.mem_f same_entry any vl then v else Some (any :: vl))
+        visited
+    in
+    let todo = ref initial in
+    let visited = List.fold_left add_visited String.Map.empty initial in
+    let visited = ref visited in
     while not (List.is_empty !todo) do
       let Any e = List.hd !todo in
       todo := List.tl !todo;
       iter_in estate (fun (Any e as any) ->
-          let visited' = String.Map.update e.ename (function
-              | None -> Some [any]
-              | Some vl as v ->
-                let any = any in
-                if List.mem_f same_entry any vl then v else Some (any :: vl))
-              !visited
-          in
+          let visited' = add_visited !visited any in
           if not (!visited == visited') then begin
             visited := visited';
             todo := any :: !todo
@@ -1892,7 +1903,7 @@ let level_of_nonterm sym = match sym with
 exception SelfSymbol
 
 let rec generalize_symbol :
-  type a tr s. (s, tr, a) Symbol.t -> (s, norec, a) ty_symbol =
+  type a tr s u. (s, tr, a) Symbol.t -> (u, norec, a) ty_symbol =
   function
   | Stoken tok ->
     Stoken tok
@@ -1922,8 +1933,8 @@ let rec generalize_symbol :
     Snterml (e, l)
   | Stree r ->
     Stree (generalize_tree r)
-and generalize_tree : type a tr s .
-  (s, tr, a) ty_tree -> (s, norec, a) ty_tree = fun r ->
+and generalize_tree : type a tr s u.
+  (s, tr, a) ty_tree -> (u, norec, a) ty_tree = fun r ->
   match r with
   | Node (fi, n) ->
     let fi = match fi with

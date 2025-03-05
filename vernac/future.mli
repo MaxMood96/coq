@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -83,6 +83,3 @@ val compute : 'a computation -> 'a value
 
 (** Debug: print a computation given an inner printing function. *)
 val print : ('a -> Pp.t) -> 'a computation -> Pp.t
-
-val customize_not_ready_msg : (string -> Pp.t) -> unit
-val customize_not_here_msg : (string -> Pp.t) -> unit

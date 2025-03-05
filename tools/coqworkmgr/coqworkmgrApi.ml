@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -64,9 +64,9 @@ let parse_response s =
   | [ "TOKENS"; n ] -> Tokens (positive_int_of_string n)
   | [ "NOLUCK" ] -> Noluck
   | [ "PONG"; n; m; p ] ->
-      let n = try int_of_string n with _ -> raise ParseError in
-      let m = try int_of_string m with _ -> raise ParseError in
-      let p = try int_of_string p with _ -> raise ParseError in
+      let n = try int_of_string n with Failure _ -> raise ParseError in
+      let m = try int_of_string m with Failure _ -> raise ParseError in
+      let p = try int_of_string p with Failure _ -> raise ParseError in
       Pong (n,m,p)
   | _ -> raise ParseError
 
@@ -100,7 +100,7 @@ let option_map f = function None -> None | Some x -> Some (f x)
 
 let init p =
   try
-    let sock = Sys.getenv "COQWORKMGR_SOCK" in
+    let sock = try Sys.getenv "ROCQWORKMGR_SOCK" with Not_found -> Sys.getenv "COQWORKMGR_SOCK" in
     manager := option_map (fun s ->
       let cout = Unix.out_channel_of_descr s in
       set_binary_mode_out cout true;

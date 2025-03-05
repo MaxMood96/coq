@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -25,12 +25,12 @@ end
 
 module type S = Map.S
 
-module type ExtS =
+module type UExtS =
 sig
-  include CSig.MapS
+  include CSig.UMapS
   (** The underlying Map library *)
 
-  module Set : CSig.SetS with type elt = key
+  module Set : CSig.USetS with type elt = key
   (** Sets used by the domain function *)
 
   val get : key -> 'a t -> 'a
@@ -51,12 +51,6 @@ sig
   (** [bind f s] transform the set [x1; ...; xn] into [x1 := f x1; ...;
       xn := f xn]. *)
 
-  val fold_left : (key -> 'a -> 'b -> 'b) -> 'a t -> 'b -> 'b
-  (** Alias for {!fold}, to easily track where we depend on fold order. *)
-
-  val fold_right : (key -> 'a -> 'b -> 'b) -> 'a t -> 'b -> 'b
-  (** Folding keys in decreasing order. *)
-
   val height : 'a t -> int
   (** An indication of the logarithmic size of a map *)
 
@@ -66,8 +60,20 @@ sig
       [filter_range] returns the submap of [m] whose keys are in
       range. Note that [in_range] has to define a continouous range. *)
 
+  val filter_map: (key -> 'a -> 'b option) -> 'a t -> 'b t (* in OCaml 4.11 *)
+  (** Like [map] but keeping only bindings mapped to [Some] *)
+
   val of_list : (key * 'a) list -> 'a t
   (** Turns an association list into a map *)
+
+  val symmetric_diff_fold :
+    (key -> 'a option -> 'a option -> 'b -> 'b) ->
+    'a t -> 'a t -> 'b -> 'b
+  (** [symmetric_diff f ml mr acc] will efficiently fold over the difference
+      between [ml] and [mr], assumed that they share most of their internal
+      structure. A call to [f k vl vr] means that if [vl] is [Some], then [k] exists
+      in [ml]. Similarly, if [vr] is [Some], then [k] exists in [mr]. If both [vl]
+      and [vr] are [Some], then [vl != vr]. *)
 
   module Smart :
   sig
@@ -81,12 +87,36 @@ sig
   module Monad(M : MonadS) :
   sig
     val fold : (key -> 'a -> 'b -> 'b M.t) -> 'a t -> 'b -> 'b M.t
-    val fold_left : (key -> 'a -> 'b -> 'b M.t) -> 'a t -> 'b -> 'b M.t
-    val fold_right : (key -> 'a -> 'b -> 'b M.t) -> 'a t -> 'b -> 'b M.t
     val mapi : (key -> 'a -> 'b M.t) -> 'a t -> 'b t M.t
   end
   (** Fold operators parameterized by any monad. *)
 
+end
+
+module type ExtS = sig
+  include CSig.MapS
+
+  module Set : CSig.SetS with type elt = key
+
+  include UExtS with type key := key and type 'a t := 'a t and module Set := Set
+
+  module Monad(M:MonadS) : sig
+    include module type of Monad(M)
+    val fold_left : (key -> 'a -> 'b -> 'b M.t) -> 'a t -> 'b -> 'b M.t
+    val fold_right : (key -> 'a -> 'b -> 'b M.t) -> 'a t -> 'b -> 'b M.t
+  end
+
+  val fold_left : (key -> 'a -> 'b -> 'b) -> 'a t -> 'b -> 'b
+  (** Alias for {!fold}, to easily track where we depend on fold order. *)
+
+  val fold_right : (key -> 'a -> 'b -> 'b) -> 'a t -> 'b -> 'b
+  (** Folding keys in decreasing order. *)
+
+  val fold_left_map : (key -> 'a -> 'b -> 'b * 'c) -> 'a t -> 'b -> 'b * 'c t
+  (** Combination of fold_left and map *)
+
+  val fold_right_map : (key -> 'a -> 'b -> 'b * 'c) -> 'a t -> 'b -> 'b * 'c t
+  (** Combination of fold_right and map *)
 end
 
 module Make(M : Map.OrderedType) : ExtS with

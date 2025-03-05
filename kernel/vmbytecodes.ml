@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -34,6 +34,12 @@ type caml_prim =
 | CAML_Arrayset
 | CAML_Arraycopy
 | CAML_Arraylength
+| CAML_Stringmake
+| CAML_Stringlength
+| CAML_Stringget
+| CAML_Stringsub
+| CAML_Stringcat
+| CAML_Stringcompare
 
 type instruction =
   | Klabel of Label.t
@@ -56,6 +62,7 @@ type instruction =
   | Kclosurecofix of int * int * Label.t array * Label.t array
                    (* nb fv, init, lbl types, lbl bodies *)
   | Kgetglobal of Constant.t
+  | Ksubstinstance of UVars.Instance.t
   | Kconst of structured_constant
   | Kmakeblock of int * tag
   | Kmakeswitchblock of Label.t * Label.t * annot_switch * int
@@ -76,8 +83,6 @@ and bytecodes = instruction list
 type fv_elem =
   | FVnamed of Id.t
   | FVrel of int
-  | FVuniv_var of int
-  | FVevar of Evar.t
 
 type fv = fv_elem array
 
@@ -92,14 +97,18 @@ let caml_prim_to_prim = function
 | CAML_Arrayset -> CPrimitives.Arrayset
 | CAML_Arraycopy -> CPrimitives.Arraycopy
 | CAML_Arraylength -> CPrimitives.Arraylength
+| CAML_Stringmake -> CPrimitives.Stringmake
+| CAML_Stringlength -> CPrimitives.Stringlength
+| CAML_Stringget -> CPrimitives.Stringget
+| CAML_Stringsub -> CPrimitives.Stringsub
+| CAML_Stringcat -> CPrimitives.Stringcat
+| CAML_Stringcompare -> CPrimitives.Stringcompare
 
 let pp_lbl lbl = str "L" ++ int lbl
 
 let pp_fv_elem = function
   | FVnamed id -> str "FVnamed(" ++ Id.print id ++ str ")"
   | FVrel i -> str "Rel(" ++ int i ++ str ")"
-  | FVuniv_var v -> str "FVuniv(" ++ int v ++ str ")"
-  | FVevar e -> str "FVevar(" ++ int (Evar.repr e) ++ str ")"
 
 let rec pp_instr i =
   match i with
@@ -136,6 +145,9 @@ let rec pp_instr i =
              str " bodies = " ++
              prlist_with_sep spc pp_lbl (Array.to_list lblb))
   | Kgetglobal idu -> str "getglobal " ++ Constant.print idu
+  | Ksubstinstance u ->
+    str "subst_instance " ++
+    UVars.Instance.pr Sorts.QVar.raw_pr Univ.Level.raw_pr u
   | Kconst sc ->
       str "const " ++ pp_struct_const sc
   | Kmakeblock(n, m) ->

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -23,7 +23,7 @@ type warning
 type 'a msg
 (** A [msg] belongs to a [warning]. *)
 
-val warn : 'a msg -> ?loc:Loc.t -> 'a -> unit
+val warn : 'a msg -> ?loc:Loc.t -> ?quickfix:Quickfix.t list -> 'a -> unit
 (** Emit a message in some warning. *)
 
 (** Creation functions
@@ -46,7 +46,7 @@ val create_hybrid : ?from:category list -> ?default:status -> name:string -> uni
 val create_msg : warning -> unit -> 'a msg
 (** A message with data ['a] in the given warning. *)
 
-val create_in : warning -> ('a -> Pp.t) -> ?loc:Loc.t -> 'a -> unit
+val create_in : warning -> ('a -> Pp.t) -> ?loc:Loc.t -> ?quickfix:Quickfix.t list -> 'a -> unit
 (** Create a msg with registered printer. *)
 
 val register_printer : 'a msg -> ('a -> Pp.t) -> unit
@@ -55,6 +55,10 @@ val register_printer : 'a msg -> ('a -> Pp.t) -> unit
 val create : name:string -> ?category:category -> ?default:status ->
   ('a -> Pp.t) -> ?loc:Loc.t -> 'a -> unit
 (** Combined creation function. [name] must be a fresh name. *)
+
+val create_with_quickfix : name:string -> ?category:category -> ?default:status ->
+    ('a -> Pp.t) -> ?loc:Loc.t -> ?quickfix:Quickfix.t list -> 'a -> unit
+  (** Combined creation function. [name] must be a fresh name. *)
 
 (** Misc APIs *)
 
@@ -76,7 +80,7 @@ val warning_status : warning -> status
 (** Current status of the warning. *)
 
 val get_status : name:string -> status
-(* [@@ocaml.deprecated "Use [CWarnings.warning_status]"] *)
+(* [@@ocaml.deprecated "(8.18) Use [CWarnings.warning_status]"] *)
 
 val normalize_flags_string : string -> string
 (** Cleans up a user provided warnings status string, e.g. removing unknown
@@ -89,8 +93,17 @@ val with_warn: string -> ('b -> 'a) -> 'b -> 'a
    raises an exception. If both f and restoring the warnings raise
    exceptions, the latter is raised. *)
 
+val check_unknown_warnings : string -> unit
+(** Warn with "unknown-warning" if any unknown warnings are in the
+    string with non-disabled status. *)
+
+val override_unknown_warning : bool ref
+[@@ocaml.deprecated "(8.18) Do not use, internal."]
+(** For command line -w, this avoids using the warning system to avoid breaking
+    "-w -unknown-warning". *)
+
 module CoreCategories : sig
-  (** Categories used in coq-core. Might not be exhaustive. *)
+  (** Categories used in rocq-runtime. Might not be exhaustive. *)
 
   val automation : category
   val bytecode_compiler : category
@@ -109,9 +122,12 @@ module CoreCategories : sig
   val parsing : category
   val pedantic : category
   val records : category
+  val rewrite_rules : category
   val ssr : category
   val syntax : category
   val tactics : category
+  val user_warn : category
   val vernacular : category
+  val internal : category
 
 end

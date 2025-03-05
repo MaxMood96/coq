@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -28,6 +28,7 @@ Primitive float := #float64_type.
 Register float as num.float.type.
 
 Record float_wrapper := wrap_float { float_wrap : float }.
+Register float_wrapper as num.float.float_wrapper.
 Register wrap_float as num.float.wrap_float.
 Definition printer (x : float_wrapper) : float := float_wrap x.
 Definition parser (x : float) : float := x.

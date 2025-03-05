@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -10,7 +10,7 @@
 
 module Dyn = Dyn.Make ()
 
-type substitutivity = Dispose | Substitute | Keep | Anticipate
+type substitutivity = Dispose | Substitute | Keep | Escape | Anticipate
 
 type object_name = Libnames.full_path * Names.KerName.t
 
@@ -50,6 +50,11 @@ let in_filter ~cat f =
 
 let simple_open ?cat f filter i o = if in_filter ~cat filter then f i o
 
+let filter_eq f1 f2 = match f1, f2 with
+  | Unfiltered, Unfiltered -> true
+  | Unfiltered, _ | _, Unfiltered -> false
+  | Filtered f1, Filtered f2 -> CString.Pred.equal f1 f2
+
 let filter_and f1 f2 = match f1, f2 with
   | Unfiltered, f | f, Unfiltered -> Some f
   | Filtered f1, Filtered f2 ->
@@ -61,7 +66,7 @@ let filter_or f1 f2 = match f1, f2 with
   | Unfiltered, f | f, Unfiltered -> Unfiltered
   | Filtered f1, Filtered f2 -> Filtered (CString.Pred.union f1 f2)
 
-type ('a,'b) object_declaration = {
+type ('a,'b,'discharged) object_declaration = {
   object_name : string;
   object_stage : Summary.Stage.t;
   cache_function : 'b -> unit;
@@ -69,20 +74,20 @@ type ('a,'b) object_declaration = {
   open_function : open_filter -> int -> 'b -> unit;
   classify_function : 'a -> substitutivity;
   subst_function :  Mod_subst.substitution * 'a -> 'a;
-  discharge_function : 'a -> 'a option;
-  rebuild_function : 'a -> 'a;
+  discharge_function : 'a -> 'discharged option;
+  rebuild_function : 'discharged -> 'a;
 }
 
-let default_object s = {
+let default_object ?(stage=Summary.Stage.Interp) s = {
   object_name = s;
-  object_stage = Summary.Stage.Interp;
+  object_stage = stage;
   cache_function = (fun _ -> ());
   load_function = (fun _ _ -> ());
   open_function = (fun _ _ _ -> ());
   subst_function = (fun _ ->
     CErrors.anomaly Pp.(str "The object " ++ str s
       ++ str " does not know how to substitute!"));
-  classify_function = (fun _ -> Keep);
+  classify_function = (fun _ -> CErrors.anomaly Pp.(str "no classify function for " ++ str s));
   discharge_function = (fun _ -> None);
   rebuild_function = (fun x -> x);
 }
@@ -114,6 +119,10 @@ type obj = Dyn.t (* persistent dynamic objects *)
       a earlier module + substitution).
 *)
 
+module ExportObj = struct
+  type t = { mpl : (open_filter * Names.ModPath.t) list } [@@unboxed]
+end
+
 type algebraic_objects =
   | Objs of t list
   | Ref of Names.ModPath.t * Mod_subst.substitution
@@ -123,19 +132,22 @@ and t =
   | ModuleTypeObject of Names.Id.t * substitutive_objects
   | IncludeObject of algebraic_objects
   | KeepObject of Names.Id.t * t list
-  | ExportObject of { mpl : (open_filter * Names.ModPath.t) list }
+  | EscapeObject of Names.Id.t * t list
+  | ExportObject of ExportObj.t
   | AtomicObject of obj
 
 and substitutive_objects = Names.MBId.t list * algebraic_objects
 
-module DynMap = Dyn.Map (struct type 'a t = ('a, Nametab.object_prefix * 'a) object_declaration end)
+type 'a stored_decl = O : ('a, Nametab.object_prefix * 'a, 'd) object_declaration -> 'a stored_decl
+
+module DynMap = Dyn.Map (struct type 'a t = 'a stored_decl end)
 
 let cache_tab = ref DynMap.empty
 
-let declare_object_full odecl =
+let declare_object_gen odecl =
   let na = odecl.object_name in
   let tag = Dyn.create na in
-  let () = cache_tab := DynMap.add tag odecl !cache_tab in
+  let () = cache_tab := DynMap.add tag (O odecl) !cache_tab in
   tag
 
 let make_oname Nametab.{ obj_dir; obj_mp } id =
@@ -155,7 +167,7 @@ let declare_named_object_full odecl =
       rebuild_function = Util.on_snd odecl.rebuild_function;
     }
   in
-  declare_object_full odecl
+  declare_object_gen odecl
 
 let declare_named_object odecl =
   let tag = declare_named_object_full odecl in
@@ -163,11 +175,11 @@ let declare_named_object odecl =
   infun
 
 let declare_named_object_gen odecl =
-  let tag = declare_object_full odecl in
+  let tag = declare_object_gen odecl in
   let infun v = Dyn.Dyn (tag, v) in
   infun
 
-let declare_object odecl =
+let declare_object_full odecl =
   let odecl =
     { odecl with
       cache_function = (fun (_,o) -> odecl.cache_function o);
@@ -175,64 +187,64 @@ let declare_object odecl =
       open_function = (fun f i (_,o) -> odecl.open_function f i o);
     }
   in
+  declare_object_gen odecl
+
+let declare_object odecl =
   let tag = declare_object_full odecl in
   let infun v = Dyn.Dyn (tag, v) in
   infun
 
 let cache_object (sp, Dyn.Dyn (tag, v)) =
-  let decl = DynMap.find tag !cache_tab in
+  let O decl = DynMap.find tag !cache_tab in
   decl.cache_function (sp, v)
 
 let load_object i (sp, Dyn.Dyn (tag, v)) =
-  let decl = DynMap.find tag !cache_tab in
+  let O decl = DynMap.find tag !cache_tab in
   decl.load_function i (sp, v)
 
 let open_object f i (sp, Dyn.Dyn (tag, v)) =
-  let decl = DynMap.find tag !cache_tab in
+  let O decl = DynMap.find tag !cache_tab in
   decl.open_function f i (sp, v)
 
 let subst_object (subs, Dyn.Dyn (tag, v)) =
-  let decl = DynMap.find tag !cache_tab in
+  let O decl = DynMap.find tag !cache_tab in
   Dyn.Dyn (tag, decl.subst_function (subs, v))
 
 let classify_object (Dyn.Dyn (tag, v)) =
-  let decl = DynMap.find tag !cache_tab in
-  match decl.classify_function v with
-  | Dispose -> Dispose
-  | Substitute -> Substitute
-  | Keep -> Keep
-  | Anticipate -> Anticipate
+  let O decl = DynMap.find tag !cache_tab in
+  decl.classify_function v
+
+type discharged_obj = Discharged : 'a Dyn.tag * 'd * ('d -> 'a) -> discharged_obj
 
 let discharge_object (Dyn.Dyn (tag, v)) =
-  let decl = DynMap.find tag !cache_tab in
+  let O decl = DynMap.find tag !cache_tab in
   match decl.discharge_function v with
   | None -> None
-  | Some v -> Some (Dyn.Dyn (tag, v))
+  | Some v -> Some (Discharged (tag, v, decl.rebuild_function))
 
-let rebuild_object (Dyn.Dyn (tag, v)) =
-  let decl = DynMap.find tag !cache_tab in
-  Dyn.Dyn (tag, decl.rebuild_function v)
+let rebuild_object (Discharged (tag, v, rebuild)) =
+  Dyn.Dyn (tag, rebuild v)
 
 let object_stage (Dyn.Dyn (tag, v)) =
-  let decl = DynMap.find tag !cache_tab in
+  let O decl = DynMap.find tag !cache_tab in
   decl.object_stage
 
 let dump = Dyn.dump
 
-let local_object_nodischarge s ~cache =
-  { (default_object s) with
+let local_object_nodischarge ?stage s ~cache =
+  { (default_object ?stage s) with
     cache_function = cache;
     classify_function = (fun _ -> Dispose);
   }
 
-let local_object s ~cache ~discharge =
-  { (local_object_nodischarge s ~cache) with
+let local_object ?stage s ~cache ~discharge =
+  { (local_object_nodischarge ?stage s ~cache) with
     discharge_function = discharge;
   }
 
-let global_object_nodischarge ?cat s ~cache ~subst =
+let global_object_nodischarge ?cat ?stage s ~cache ~subst =
   let import i o = if Int.equal i 1 then cache o in
-  { (default_object s) with
+  { (default_object ?stage s) with
     cache_function = cache;
     open_function = simple_open ?cat import;
     subst_function = (match subst with
@@ -245,12 +257,12 @@ let global_object_nodischarge ?cat s ~cache ~subst =
       if Option.has_some subst then (fun _ -> Substitute) else (fun _ -> Keep);
   }
 
-let global_object ?cat s ~cache ~subst ~discharge =
+let global_object ?cat ?stage s ~cache ~subst ~discharge =
   { (global_object_nodischarge ?cat s ~cache ~subst) with
     discharge_function = discharge }
 
-let superglobal_object_nodischarge s ~cache ~subst =
-  { (default_object s) with
+let superglobal_object_nodischarge ?stage s ~cache ~subst =
+  { (default_object ?stage s) with
     load_function = (fun _ x -> cache x);
     cache_function = cache;
     subst_function = (match subst with
@@ -263,6 +275,34 @@ let superglobal_object_nodischarge s ~cache ~subst =
       if Option.has_some subst then (fun _ -> Substitute) else (fun _ -> Keep);
   }
 
-let superglobal_object s ~cache ~subst ~discharge =
-  { (superglobal_object_nodischarge s ~cache ~subst) with
+let superglobal_object ?stage s ~cache ~subst ~discharge =
+  { (superglobal_object_nodischarge ?stage s ~cache ~subst) with
     discharge_function = discharge }
+
+type locality = Local | Export | SuperGlobal
+
+let object_with_locality ?stage ?cat s ~cache ~subst ~discharge =
+  { (default_object ?stage s) with
+    cache_function = (fun (_,v) -> cache v);
+    load_function = (fun _ (locality,v) -> match locality with
+        | Local -> assert false
+        | Export -> ()
+        | SuperGlobal -> cache v);
+    open_function = simple_open ?cat (fun i (locality,v) -> match locality with
+        | Local -> assert false
+        | Export -> begin if Int.equal i 1 then cache v else () end
+        | SuperGlobal -> ());
+    subst_function = (match subst with
+        | None -> fun _ -> assert false (* Keep *)
+        | Some subst -> fun (s,(locality,v)) -> locality, subst (s,v);
+      );
+    classify_function = (fun (locality, _) -> match locality with
+        | Local -> Dispose
+        | Export | SuperGlobal -> if Option.has_some subst then Substitute else Keep);
+    discharge_function =
+      (fun (locality,v) -> match locality with
+         | Local -> None
+         | Export | SuperGlobal ->
+           let v = discharge v in
+           Some (locality, v));
+  }

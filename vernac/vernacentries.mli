@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -20,11 +20,12 @@ val translate_vernac
   : ?loc:Loc.t
   -> atts:Attributes.vernac_flags
   -> Synterp.vernac_entry
-  -> Vernacextend.typed_vernac
+  -> Vernactypes.typed_vernac
 
 (** Vernacular require command, used by the command line *)
 val vernac_require
-  : Libnames.qualid option
+  : intern:Library.Intern.t
+  -> Libnames.qualid option
   -> Vernacexpr.export_with_cats option
   -> (Libnames.qualid * Vernacexpr.import_filter_expr) list
   -> unit
@@ -37,10 +38,6 @@ val vernac_require_interp
   -> (Libnames.qualid * Vernacexpr.import_filter_expr) list
   -> unit
 
-(** Hook to dissappear when #8240 is fixed *)
-val interp_redexp_hook : (Environ.env -> Evd.evar_map -> Genredexpr.raw_red_expr ->
-  Evd.evar_map * Redexpr.red_expr) Hook.t
-
 (** Miscellaneous stuff *)
 val command_focus : unit Proof.focus_kind
 
@@ -48,21 +45,17 @@ val allow_sprop_opt_name : string list
 
 (** pre-processing and validation of VernacInductive *)
 module Preprocessed_Mind_decl : sig
-  type flags = {
-    template : bool option;
-    udecl : Constrexpr.cumul_univ_decl_expr option;
-    cumulative : bool;
-    poly : bool;
-    finite : Declarations.recursivity_kind;
-  }
+  type flags = ComInductive.flags
   type record = {
     flags : flags;
+    udecl : Constrexpr.cumul_univ_decl_expr option;
     primitive_proj : bool;
     kind : Vernacexpr.inductive_kind;
     records : Record.Ast.t list;
   }
   type inductive = {
     flags : flags;
+    udecl : Constrexpr.cumul_univ_decl_expr option;
     typing_flags : Declarations.typing_flags option;
     private_ind : bool;
     uniform : ComInductive.uniform_inductive_flag;
@@ -78,3 +71,22 @@ val preprocess_inductive_decl
   -> Vernacexpr.inductive_kind
   -> (Vernacexpr.inductive_expr * Vernacexpr.notation_declaration list) list
   -> Preprocessed_Mind_decl.t
+
+module DefAttributes : sig
+
+type t = {
+  scope : Locality.definition_scope;
+  locality : bool option;
+  polymorphic : bool;
+  program : bool;
+  user_warns : Globnames.extended_global_reference UserWarn.with_qf option;
+  canonical_instance : bool;
+  typing_flags : Declarations.typing_flags option;
+  using : Vernacexpr.section_subset_expr option;
+  reversible : bool;
+  clearbody: bool option;
+}
+
+val def_attributes : t Attributes.attribute
+
+end

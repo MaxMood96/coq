@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -15,7 +15,7 @@
 (************************************************************************)
 
 (** Last PR that requires the regeneration of caches.
-    It is stored and checked after the Coq magic number.
+    It is stored and checked after the Rocq magic number.
     Incompatible caches are thrown away.
 *)
 let pcache_version = 15584l
@@ -198,7 +198,7 @@ module PHashtable (Key : HashedType) : PHashtable with type key = Key.t = struct
               let () = data.obj <- Some (k, v) in
               Some v
             else None
-          | exception _ -> None
+          | exception End_of_file | exception Failure _ -> None
       in
       let lookup () = CList.find_map find lpos in
       let res = do_under_lock Read (descr_of_in_channel ch) lookup in
@@ -208,7 +208,7 @@ module PHashtable (Key : HashedType) : PHashtable with type key = Key.t = struct
       | None | Some None -> raise Not_found
 
   let memo cache f =
-    let tbl = lazy (try Some (open_in cache) with _ -> None) in
+    let tbl = lazy (try Some (open_in cache) with e when CErrors.noncritical e -> None) in
     fun x ->
       match Lazy.force tbl with
       | None -> f x
@@ -219,7 +219,7 @@ module PHashtable (Key : HashedType) : PHashtable with type key = Key.t = struct
           add tbl x res; res )
 
   let memo_cond cache cond f =
-    let tbl = lazy (try Some (open_in cache) with _ -> None) in
+    let tbl = lazy (try Some (open_in cache) with e when CErrors.noncritical e -> None) in
     fun x ->
       match Lazy.force tbl with
       | None -> f x

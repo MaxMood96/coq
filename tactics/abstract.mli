@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -24,7 +24,6 @@ val tclABSTRACT : ?opaque:bool -> Id.t option -> unit Proofview.tactic -> unit P
 val declare_abstract :
   (  name:Names.Id.t
   -> poly:bool
-  -> kind:Decls.logical_kind
   -> sign:EConstr.named_context
   -> secsign:Environ.named_context_val
   -> opaque:bool

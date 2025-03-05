@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -97,38 +97,36 @@ let push_rec_types ~hypnaming sigma (lna,typarray) env =
   let env,ctx = Array.fold_left_map (fun e assum -> let (d,e) = push_rel sigma assum e ~hypnaming in (e,d)) env ctxt in
   Array.map get_annot ctx, env
 
-let new_evar env sigma ?src ?(naming = Namegen.IntroAnonymous) typ =
+let new_evar env sigma ?src ?(naming = Namegen.IntroAnonymous) ?relevance typ =
   let (subst, _, sign) as ext = Lazy.force env.extra in
   let instance = Evarutil.default_ext_instance ext in
   let typ' = csubst_subst sigma subst typ in
   let name = Evarutil.next_evar_name sigma naming in
-  let (sigma, evk) = new_pure_evar sign sigma typ' ?src ?name in
+  let relevance = match relevance with
+    | Some r -> r
+    | None -> Retyping.relevance_of_type env.static_env sigma typ
+  in
+  let typeclass_candidate = Typeclasses.is_maybe_class_type sigma typ' in
+  let (sigma, evk) = new_pure_evar ~typeclass_candidate sign sigma typ' ?src ~relevance ?name in
   (sigma, mkEvar (evk, instance))
 
 let new_type_evar env sigma ~src =
   let sigma, s = Evd.new_sort_variable Evd.univ_flexible_alg sigma in
-  new_evar env sigma ~src (EConstr.mkSort s)
+  new_evar env sigma ~src (EConstr.mkSort s) ~relevance:ERelevance.relevant
 
-let hide_variable env expansion id =
+let hide_variable env id =
   let lvar = env.lvar in
   if Id.Map.mem id lvar.ltac_genargs then
-    let lvar = match expansion with
-    | Name id' ->
-       (* We are typically in a situation [match id return P with ... end]
-          which we interpret as [match id' as id' return P with ... end],
-          with [P] interpreted in an environment where [id] is bound to [id'].
-          The variable is already bound to [id'], so nothing to do *)
-       lvar
-    | _ ->
-       (* We are typically in a situation [match id return P with ... end]
-          with [id] bound to a non-variable term [c]. We interpret as
+    let lvar =
+      (* We are typically in a situation [match id return P with ... end]
+         with [id] bound to a non-variable term [c]. We interpret as
          [match c as id return P with ... end], and hides [id] while
          interpreting [P], since it has become a binder and cannot be anymore be
          substituted by a variable coming from the Ltac substitution. *)
-       { lvar with
-         ltac_uconstrs = Id.Map.remove id lvar.ltac_uconstrs;
-         ltac_constrs = Id.Map.remove id lvar.ltac_constrs;
-         ltac_genargs = Id.Map.remove id lvar.ltac_genargs } in
+      { lvar with
+        ltac_uconstrs = Id.Map.remove id lvar.ltac_uconstrs;
+        ltac_constrs = Id.Map.remove id lvar.ltac_constrs;
+        ltac_genargs = Id.Map.remove id lvar.ltac_genargs } in
     { env with lvar }
   else
     env
@@ -142,14 +140,14 @@ let invert_ltac_bound_name env id0 id =
 
 let interp_ltac_variable ?loc typing_fun env sigma id : Evd.evar_map * unsafe_judgment =
   (* Check if [id] is an ltac variable *)
-  try
-    let (ids,c) = Id.Map.find id env.lvar.ltac_constrs in
+  match Id.Map.find_opt id env.lvar.ltac_constrs with
+  | Some (ids, c) ->
     let subst = List.map (invert_ltac_bound_name env id) ids in
     let c = substl subst c in
     sigma, { uj_val = c; uj_type = Retyping.reinterpret_get_type_of ~src:id env.renamed_env sigma c }
-  with Not_found ->
-  try
-    let {closure;term} = Id.Map.find id env.lvar.ltac_uconstrs in
+  | None ->
+  match Id.Map.find_opt id env.lvar.ltac_uconstrs with
+  | Some {closure;term} ->
     let lvar = {
       ltac_constrs = closure.typed;
       ltac_uconstrs = closure.untyped;
@@ -161,20 +159,20 @@ let interp_ltac_variable ?loc typing_fun env sigma id : Evd.evar_map * unsafe_ju
        inside the try but I want to avoid refactoring this function
        too much for now. *)
     typing_fun {env with lvar; static_env = env.renamed_env} term
-  with Not_found ->
+  | None ->
   (* Check if [id] is a ltac variable not bound to a term *)
   (* and build a nice error message *)
-  if Id.Map.mem id env.lvar.ltac_genargs then begin
-    let Geninterp.Val.Dyn (typ, _) = Id.Map.find id env.lvar.ltac_genargs in
-    user_err ?loc
-     (str "Variable " ++ Id.print id ++ str " should be bound to a term but is \
-      bound to a " ++ Geninterp.Val.pr typ ++ str ".")
-  end;
   if Id.Map.mem id env.lvar.ltac_idents then begin
     let bnd = Id.Map.find id env.lvar.ltac_idents in
     user_err ?loc
      (str "Variable " ++ Id.print id ++ str " should be bound to a term but is \
       bound to the identifier " ++ quote (Id.print bnd) ++ str ".")
+  end;
+  if Id.Map.mem id env.lvar.ltac_genargs then begin
+    let Geninterp.Val.Dyn (typ, _) = Id.Map.find id env.lvar.ltac_genargs in
+    user_err ?loc
+     (str "Variable " ++ Id.print id ++ str " should be bound to a term but is \
+      bound to a " ++ Geninterp.Val.pr typ ++ str ".")
   end;
   raise Not_found
 

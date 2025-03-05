@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -54,13 +54,19 @@ module Make(T : Task) () = struct
 
   exception Die
   type response =
-    | Response of T.response
+    | Response of T.response * (NewProfile.MiniJson.t list * NewProfile.sums) option
     | RespFeedback of Feedback.feedback
-  type request = Request of T.request
+  type request = { request : T.request; profiling : bool }
 
-  let slave_respond (Request r) =
-    let res = T.perform r in
-    Response res
+  let slave_respond { request = r; profiling } =
+    if profiling then
+      let events, sums, res =
+        NewProfile.with_profiling (fun () -> T.perform r)
+      in
+      Response (res, Some (events, sums))
+    else
+      let res = T.perform r in
+      Response (res, None)
 
   exception MarshalError of string
 
@@ -103,56 +109,27 @@ module Make(T : Task) () = struct
 
   let uid = ref 0
 
-  let spawn id priority =
+  let get_toplevel_path top =
+    let dir = Findlib.package_directory "rocq-runtime" in
+    let exe = if Sys.(os_type = "Win32" || os_type = "Cygwin") then ".exe" else "" in
+    Filename.concat dir (top^exe)
+
+  let spawn ~spawn_args id priority =
     let name = Printf.sprintf "%s:%d:%d" T.name id !uid in
     incr uid;
     let proc, ic, oc =
       (* Filter arguments for slaves. *)
-      let rec set_slave_opt = function
-        | [] -> !async_proofs_flags_for_workers @
-                ["-worker-id"; name;
-                 "-async-proofs-worker-priority";
-                 CoqworkmgrApi.(string_of_priority priority)]
-        (* Options to discard: 0 arguments *)
-        | ("-emacs" | "--xml_format=Ppcmds" | "-batch" | "-vok" | "-vos") :: tl  ->
-          set_slave_opt tl
-        (* Options to discard: 1 argument *)
-        | ( "-async-proofs" | "-vio2vo" | "-o"
-          | "-load-vernac-source" | "-l" | "-load-vernac-source-verbose" | "-lv"
-          | "-require-import" | "-require-export" | "-ri" | "-re"
-          | "-load-vernac-object"
-          | "-set" | "-unset" | "-compat" | "-mangle-names" | "-diffs"
-          | "-async-proofs-cache" | "-async-proofs-j" | "-async-proofs-tac-j"
-          | "-async-proofs-private-flags" | "-async-proofs-tactic-error-resilience"
-          | "-async-proofs-command-error-resilience" | "-async-proofs-delegation-threshold"
-          | "-async-proofs-worker-priority" | "-worker-id") :: _ :: tl ->
-          set_slave_opt tl
-        (* Options to discard: 2 arguments *)
-        | ( "-rifrom" | "-refrom" | "-rfrom"
-          | "-require-import-from" | "-require-export-from") :: _ :: _ :: tl ->
-           set_slave_opt tl
-        (* We need to pass some options with one argument *)
-        | ( "-I" | "-nI" | "-include" | "-top" | "-topfile" | "-coqlib" | "-exclude-dir"
-          | "-color" | "-init-file"
-          | "-profile-ltac-cutoff" | "-main-channel" | "-control-channel"
-          | "-native-output-dir" | "-w"
-          | "-dump-glob" | "-bytecode-compiler" | "-native-compiler" as x) :: a :: tl ->
-          x :: a :: set_slave_opt tl
-        (* We need to pass some options with two arguments *)
-        | ( "-R" | "-Q" as x) :: a1 :: a2 :: tl ->
-          x :: a1 :: a2 :: set_slave_opt tl
-        (* Finally we pass all options starting in '-'; check this is safe w.r.t the weird vio* option set *)
-        | x :: tl when x.[0] = '-' ->
-          x :: set_slave_opt tl
-        (* We assume this is a file, filter out *)
-        | _ :: tl ->
-          set_slave_opt tl
-      in
       let args =
         let wselect = "--kind=" ^ T.name in
-        Array.of_list (wselect :: set_slave_opt (List.tl (Array.to_list Sys.argv))) in
+        let worker_opts =
+          !async_proofs_flags_for_workers @
+          ["-worker-id"; name;
+           "-async-proofs-worker-priority";
+           CoqworkmgrApi.(string_of_priority priority)]
+        in
+        Array.of_list (wselect :: spawn_args @ worker_opts) in
       let env = Array.append (T.extra_env ()) (Unix.environment ()) in
-      let worker_name = System.get_toplevel_path ("coqworker") in
+      let worker_name = get_toplevel_path "rocqworker" in
       Worker.spawn ~env worker_name args in
     name, proc, CThread.prepare_in_channel_for_thread_friendly_io ic, oc
 
@@ -217,18 +194,19 @@ module Make(T : Task) () = struct
       | Some req ->
       try
         get_exec_token ();
-        marshal_request oc (Request req);
+        marshal_request oc {request = req; profiling = NewProfile.is_profiling()};
         let rec continue () =
           match unmarshal_response ic with
           | RespFeedback fbk -> T.forward_feedback fbk; continue ()
-          | Response resp ->
-              match T.use_response !worker_age task resp with
-              | `End -> raise Die
-              | `Stay(competence, new_tasks) ->
-                   last_task := None;
-                   giveback_exec_token ();
-                   worker_age := T.Old competence;
-                   add_tasks new_tasks
+          | Response (resp, prof) ->
+            Option.iter (fun (events,sums) -> NewProfile.insert_results events sums) prof;
+            match T.use_response !worker_age task resp with
+            | `End -> raise Die
+            | `Stay(competence, new_tasks) ->
+              last_task := None;
+              giveback_exec_token ();
+              worker_age := T.Old competence;
+              add_tasks new_tasks
         in
           continue ()
       with
@@ -254,7 +232,7 @@ module Make(T : Task) () = struct
     cleaner : Thread.t option;
   }
 
-  let create size priority =
+  let create ~spawn_args size priority =
     let cleaner queue =
       while true do
         try ignore(TQueue.pop ~picky:(fun (_,cancelled) -> !cancelled) queue)
@@ -262,7 +240,7 @@ module Make(T : Task) () = struct
       done in
     let queue = TQueue.create () in
     {
-      active = Pool.create queue ~size priority;
+      active = Pool.create ~spawn_args queue ~size priority;
       queue;
       cleaner = if size > 0 then Some (CThread.create cleaner queue) else None;
     }
@@ -279,7 +257,7 @@ module Make(T : Task) () = struct
 
   let cancel_worker { active } n = Pool.cancel n active
 
-  let name_of_request (Request r) = T.name_of_request r
+  let name_of_request {request = r} = T.name_of_request r
 
   let set_order { queue } cmp =
     TQueue.set_order queue (fun (t1,_) (t2,_) -> cmp t1 t2)
@@ -307,8 +285,8 @@ module Make(T : Task) () = struct
   let pp_pid pp = Pp.(str (Spawned.process_id () ^ " ") ++ pp)
 
   let debug_with_pid = Feedback.(function
-    | { contents = Message(Debug, loc, pp) } as fb ->
-       { fb with contents = Message(Debug,loc, pp_pid pp) }
+    | { contents = Message(Debug, loc, qf, pp) } as fb ->
+       { fb with contents = Message(Debug,loc, qf, pp_pid pp) }
     | x -> x)
 
   let main_loop () =
@@ -349,8 +327,8 @@ module Make(T : Task) () = struct
      (TQueue.wait_until_n_are_waiting_then_snapshot
        (Pool.n_workers active) queue)
 
-  let with_n_workers n priority f =
-    let q = create n priority in
+  let with_n_workers ~spawn_args n priority f =
+    let q = create ~spawn_args n priority in
     try let rc = f q in destroy q; rc
     with e -> let e = Exninfo.capture e in destroy q; Exninfo.iraise e
 

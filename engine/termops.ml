@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -32,9 +32,8 @@ module Internal = struct
   let print_constr_env env sigma t = !term_printer (env:env) sigma (t:Evd.econstr)
   let set_print_constr f = term_printer := f
 
-  let pr_var_decl env decl =
+  let pr_var_decl env sigma decl =
     let open NamedDecl in
-    let sigma = Evd.from_env env in
     let pbody = match decl with
       | LocalAssum _ ->  mt ()
       | LocalDef (_,c,_) ->
@@ -46,9 +45,8 @@ module Internal = struct
     let ptyp = (str" : " ++ pt) in
     (Id.print (get_id decl) ++ hov 0 (pbody ++ ptyp))
 
-  let pr_rel_decl env decl =
+  let pr_rel_decl env sigma decl =
     let open RelDecl in
-    let sigma = Evd.from_env env in
     let pbody = match decl with
       | LocalAssum _ -> mt ()
       | LocalDef (_,c,_) ->
@@ -61,36 +59,39 @@ module Internal = struct
     | Anonymous -> hov 0 (str"<>" ++ spc () ++ pbody ++ str":" ++ spc () ++ ptyp)
     | Name id -> hov 0 (Id.print id ++ spc () ++ pbody ++ str":" ++ spc () ++ ptyp)
 
-  let print_named_context env =
+  let print_named_context env sigma =
     hv 0 (fold_named_context
             (fun env d pps ->
-               pps ++ ws 2 ++ pr_var_decl env d)
+               pps ++ ws 2 ++ pr_var_decl env sigma d)
             env ~init:(mt ()))
 
-  let print_rel_context env =
+  let print_rel_context env sigma =
     hv 0 (fold_rel_context
-            (fun env d pps -> pps ++ ws 2 ++ pr_rel_decl env d)
+            (fun env d pps -> pps ++ ws 2 ++ pr_rel_decl env sigma d)
             env ~init:(mt ()))
 
-  let print_env env =
+  let print_env env sigma =
     let sign_env =
       fold_named_context
         (fun env d pps ->
-           let pidt =  pr_var_decl env d in
+           let pidt =  pr_var_decl env sigma d in
            (pps ++ fnl () ++ pidt))
         env ~init:(mt ())
     in
     let db_env =
       fold_rel_context
         (fun env d pps ->
-           let pnat = pr_rel_decl env d in (pps ++ fnl () ++ pnat))
+           let pnat = pr_rel_decl env sigma d in (pps ++ fnl () ++ pnat))
         env ~init:(mt ())
     in
     (sign_env ++ db_env)
 
   let protect f x =
     try f x
-    with e -> str "EXCEPTION: " ++ str (Printexc.to_string e)
+    with e when
+        (* maybe should be just "not is_interrupted"? *)
+        CErrors.noncritical e || !Flags.in_debugger ->
+      str "EXCEPTION: " ++ str (Printexc.to_string e)
 
   let print_kconstr env sigma a =
     protect (fun c -> print_constr_env env sigma c) a
@@ -137,39 +138,6 @@ match evar_ident evk sigma with
   str "?" ++ Id.print (evar_suggested_name env sigma evk)
 | Some id ->
   str "?" ++ Id.print id
-
-let pr_instance_status (sc,typ) =
-  let open Evd in
-  begin match sc with
-  | IsSubType -> str " [or a subtype of it]"
-  | IsSuperType -> str " [or a supertype of it]"
-  | Conv -> mt ()
-  end ++
-  begin match typ with
-  | CoerceToType -> str " [up to coercion]"
-  | TypeNotProcessed -> mt ()
-  | TypeProcessed -> str " [type is checked]"
-  end
-
-let pr_meta_map env sigma =
-  let open Evd in
-  let print_constr = Internal.print_kconstr in
-  let pr_name = function
-      Name id -> str"[" ++ Id.print id ++ str"]"
-    | _ -> mt() in
-  let pr_meta_binding = function
-    | (mv,Cltyp (na,b)) ->
-        hov 0
-          (pr_meta mv ++ pr_name na ++ str " : " ++
-           print_constr env sigma b.rebus ++ fnl ())
-    | (mv,Clval(na,(b,s),t)) ->
-        hov 0
-          (pr_meta mv ++ pr_name na ++ str " := " ++
-           print_constr env sigma b.rebus ++
-           str " : " ++ print_constr env sigma t.rebus ++
-           spc () ++ pr_instance_status s ++ fnl ())
-  in
-  prlist pr_meta_binding (Evd.Metamap.bindings (meta_list sigma))
 
 let pr_decl env sigma (decl,ok) =
   let open NamedDecl in
@@ -295,24 +263,13 @@ let has_no_evar sigma =
   try let () = Evd.fold (fun _ _ () -> raise_notrace Exit) sigma () in true
   with Exit -> false
 
-let pr_evd_level sigma = UState.pr_uctx_level (Evd.evar_universe_context sigma)
-let reference_of_level sigma l = UState.qualid_of_level (Evd.evar_universe_context sigma) l
+let pr_evd_level sigma = UState.pr_uctx_level (Evd.ustate sigma)
 
-let pr_evar_universe_context ctx =
-  let open UState in
-  let prl = pr_uctx_level ctx in
-  if UState.is_empty ctx then mt ()
-  else
-    v 0 (str"UNIVERSES:"++brk(0,1)++
-       h (Univ.pr_universe_context_set prl (UState.context_set ctx)) ++ fnl () ++
-     str"ALGEBRAIC UNIVERSES:"++brk(0,1)++
-     h (Univ.Level.Set.pr prl (UState.algebraics ctx)) ++ fnl() ++
-     str"UNDEFINED UNIVERSES:"++brk(0,1)++
-     h (UState.pr_universe_opt_subst prl (UState.subst ctx)) ++ fnl() ++
-     str"SORTS:"++brk(0,1)++
-     h (UState.pr_sort_opt_subst ctx) ++ fnl() ++
-     str "WEAK CONSTRAINTS:"++brk(0,1)++
-     h (UState.pr_weak prl ctx) ++ fnl ())
+let pr_evd_qvar sigma = UState.pr_uctx_qvar (Evd.ustate sigma)
+
+let reference_of_level sigma l = UState.qualid_of_level (Evd.ustate sigma) l
+
+let pr_evar_universe_context = UState.pr
 
 let print_env_short env sigma =
   let print_constr = Internal.print_kconstr in
@@ -339,21 +296,20 @@ let pr_evar_constraints sigma pbs =
          naming/renaming. *)
       Namegen.make_all_name_different env sigma
     in
-    print_env_short env sigma ++ spc () ++ str "|-" ++ spc () ++
+    hov 2 (hov 2 (print_env_short env sigma) ++ spc () ++ str "|-" ++ spc () ++
       Internal.print_kconstr env sigma t1 ++ spc () ++
       str (match pbty with
             | Conversion.CONV -> "=="
             | Conversion.CUMUL -> "<=") ++
-      (* Why do we not print using sigma?? *)
-      spc () ++ Internal.print_kconstr env (Evd.from_env env) t2
+      spc () ++ Internal.print_kconstr env sigma t2)
   in
   prlist_with_sep fnl pr_evconstr pbs
 
 let pr_evar_map_gen with_univs pr_evars env sigma =
-  let uvs = Evd.evar_universe_context sigma in
+  let uvs = Evd.ustate sigma in
   let (_, conv_pbs) = Evd.extract_all_conv_pbs sigma in
   let evs = if has_no_evar sigma then mt () else pr_evars sigma ++ fnl ()
-  and svs = if with_univs then pr_evar_universe_context uvs else mt ()
+  and svs = if with_univs then UState.pr uvs else mt ()
   and cstrs =
     if List.is_empty conv_pbs then mt ()
     else
@@ -371,16 +327,12 @@ let pr_evar_map_gen with_univs pr_evars env sigma =
     else
       str "OBLIGATIONS:" ++ brk (0, 1) ++
       prlist_with_sep spc Evar.print (Evar.Set.elements evars) ++ fnl ()
-  and metas =
-    if Evd.Metamap.is_empty (Evd.meta_list sigma) then mt ()
-    else
-      str "METAS:" ++ brk (0, 1) ++ pr_meta_map env sigma
   and shelf =
     str "SHELF:" ++ brk (0, 1) ++ Evd.pr_shelf sigma ++ fnl ()
   and future_goals =
     str "FUTURE GOALS STACK:" ++ brk (0, 1) ++ Evd.pr_future_goals_stack sigma ++ fnl ()
   in
-  evs ++ svs ++ cstrs ++ typeclasses ++ obligations ++ metas ++ shelf ++ future_goals
+  evs ++ svs ++ cstrs ++ typeclasses ++ obligations ++ shelf ++ future_goals
 
 let pr_evar_list env sigma l =
   let open Evd in
@@ -456,9 +408,6 @@ let pr_evar_map ?(with_univs=true) depth env sigma =
 
 let pr_evar_map_filter ?(with_univs=true) filter env sigma =
   pr_evar_map_gen with_univs (fun sigma -> pr_evar_by_filter filter env sigma) env sigma
-
-let pr_metaset metas =
-  str "[" ++ pr_sequence pr_meta (Evd.Metaset.elements metas) ++ str "]"
 
 (* [Rel (n+m);...;Rel(n+1)] *)
 let rel_vect n m = Array.init m (fun i -> mkRel(n+m-i))
@@ -611,7 +560,7 @@ let map_constr_with_binders_left_to_right env sigma g f l c =
   let open EConstr in
   match EConstr.kind sigma c with
   | (Rel _ | Meta _ | Var _   | Sort _ | Const _ | Ind _
-    | Construct _ | Int _ | Float _) -> c
+    | Construct _ | Int _ | Float _ | String _) -> c
   | Cast (b,k,t) ->
     let b' = f l b in
     let t' = f l t in
@@ -642,15 +591,15 @@ let map_constr_with_binders_left_to_right env sigma g f l c =
       let a' = f l a in
         if app' == app && a' == a then c
         else mkApp (app', [| a' |])
-  | Proj (p,b) ->
+  | Proj (p,r,b) ->
     let b' = f l b in
       if b' == b then c
-      else mkProj (p, b')
+      else mkProj (p, r, b')
   | Evar ev ->
     let ev' = EConstr.map_existential sigma (fun c -> f l c) ev in
     if ev' == ev then c else mkEvar ev'
-  | Case (ci,u,pms,p,iv,b,bl) ->
-      let (ci, _, pms, p0, _, b, bl0) = annotate_case env sigma (ci, u, pms, p, iv, b, bl) in
+  | Case (ci,u,pms,(p,r),iv,b,bl) ->
+      let (ci, _, pms, (p0,_), _, b, bl0) = annotate_case env sigma (ci, u, pms, (p,r), iv, b, bl) in
       let f_ctx (nas, _ as r) (ctx, c) =
         let c' = f (List.fold_right g ctx l) c in
         if c' == c then r else (nas, c')
@@ -662,7 +611,7 @@ let map_constr_with_binders_left_to_right env sigma g f l c =
       let iv' = map_invert (f l) iv in
       let bl' = Array.map_left (fun (c, c0) -> f_ctx c c0) (Array.map2 (fun x y -> (x, y)) bl bl0) in
         if b' == b && pms' == pms && p' == p && iv' == iv && bl' == bl then c
-        else mkCase (ci, u, pms', p', iv', b', bl')
+        else mkCase (ci, u, pms', (p',r), iv', b', bl')
   | Fix (ln,(lna,tl,bl as fx)) ->
       let l' = fold_rec_types g fx l in
       let (tl', bl') = map_left2 (f l) tl (f l') bl in
@@ -687,7 +636,7 @@ let map_constr_with_full_binders env sigma g f l cstr =
   let open EConstr in
   match EConstr.kind sigma cstr with
   | (Rel _ | Meta _ | Var _   | Sort _ | Const _ | Ind _
-    | Construct _ | Int _ | Float _) -> cstr
+    | Construct _ | Int _ | Float _ | String _) -> cstr
   | Cast (c,k, t) ->
       let c' = f l c in
       let t' = f l t in
@@ -709,14 +658,14 @@ let map_constr_with_full_binders env sigma g f l cstr =
       let c' = f l c in
       let al' = Array.map (f l) al in
       if c==c' && Array.for_all2 (==) al al' then cstr else mkApp (c', al')
-  | Proj (p,c) ->
+  | Proj (p,r,c) ->
       let c' = f l c in
-        if c' == c then cstr else mkProj (p, c')
+        if c' == c then cstr else mkProj (p, r, c')
   | Evar ev ->
     let ev' = EConstr.map_existential sigma (fun c -> f l c) ev in
     if ev' == ev then cstr else mkEvar ev'
-  | Case (ci, u, pms, p, iv, c, bl) ->
-      let (ci, _, pms, p0, _, c, bl0) = annotate_case env sigma (ci, u, pms, p, iv, c, bl) in
+  | Case (ci, u, pms, (p,r), iv, c, bl) ->
+      let (ci, _, pms, (p0,_), _, c, bl0) = annotate_case env sigma (ci, u, pms, (p,r), iv, c, bl) in
       let f_ctx (nas, _ as r) (ctx, c) =
         let c' = f (List.fold_right g ctx l) c in
         if c' == c then r else (nas, c')
@@ -727,7 +676,7 @@ let map_constr_with_full_binders env sigma g f l cstr =
       let c' = f l c in
       let bl' = Array.map2 f_ctx bl bl0 in
       if pms==pms' && p==p' && iv'==iv && c==c' && Array.for_all2 (==) bl bl' then cstr else
-        mkCase (ci, u, pms', p', iv', c', bl')
+        mkCase (ci, u, pms', (p',r), iv', c', bl')
   | Fix (ln,(lna,tl,bl as fx)) ->
       let tl' = Array.map (f l) tl in
       let l' = fold_rec_types g fx l in
@@ -759,18 +708,18 @@ let fold_constr_with_full_binders env sigma g f n acc c =
   let open EConstr.Vars in
   let open Context.Rel.Declaration in
   match EConstr.kind sigma c with
-  | Rel _ | Meta _ | Var _   | Sort _ | Const _ | Ind _ | Construct _  | Int _ | Float _ -> acc
+  | Rel _ | Meta _ | Var _   | Sort _ | Const _ | Ind _ | Construct _  | Int _ | Float _ | String _ -> acc
   | Cast (c,_, t) -> f n (f n acc c) t
   | Prod (na,t,c) -> f (g (LocalAssum (na,t)) n) (f n acc t) c
   | Lambda (na,t,c) -> f (g (LocalAssum (na,t)) n) (f n acc t) c
   | LetIn (na,b,t,c) -> f (g (LocalDef (na,b,t)) n) (f n (f n acc b) t) c
   | App (c,l) -> Array.fold_left (f n) (f n acc c) l
-  | Proj (_,c) -> f n acc c
+  | Proj (_,_,c) -> f n acc c
   | Evar ev ->
     let args = Evd.expand_existential sigma ev in
     List.fold_left (fun c -> f n c) acc args
   | Case (ci, u, pms, p, iv, c, bl) ->
-    let (ci, _, pms, p, _, c, bl) = EConstr.annotate_case env sigma (ci, u, pms, p, iv, c, bl) in
+    let (ci, _, pms, (p,_), _, c, bl) = EConstr.annotate_case env sigma (ci, u, pms, p, iv, c, bl) in
     let f_ctx acc (ctx, c) = f (List.fold_right g ctx n) acc c in
     Array.fold_left f_ctx (f n (fold_invert (f n) (f_ctx (Array.fold_left (f n) acc pms) p) iv) c) bl
   | Fix (_,(lna,tl,bl)) ->
@@ -790,24 +739,39 @@ let fold_constr_with_full_binders env sigma g f n acc c =
 exception Occur
 
 let occur_meta sigma c =
-  let rec occrec c = match EConstr.kind sigma c with
+  let rec occrec h c =
+    let h, knd = EConstr.Expand.kind sigma h c in
+    match knd with
     | Meta _ -> raise Occur
-    | Evar (_, args) -> SList.Skip.iter occrec args
-    | _ -> EConstr.iter sigma occrec c
-  in try occrec c; false with Occur -> true
+    | Evar (evk, args) ->
+      let evi = Evd.find_undefined sigma evk in
+      let args = EConstr.Expand.expand_instance ~skip:true evi h args in
+      SList.Skip.iter (fun c -> occrec h c) args
+    | _ -> EConstr.Expand.iter sigma occrec h knd
+  in
+  let h, c = EConstr.Expand.make c in
+  try occrec h c; false with Occur -> true
 
 let occur_existential sigma c =
-  let rec occrec c = match EConstr.kind sigma c with
+  let rec occrec h c =
+    let h, knd = EConstr.Expand.kind sigma h c in
+    match knd with
     | Evar _ -> raise Occur
-    | _ -> EConstr.iter sigma occrec c
-  in try occrec c; false with Occur -> true
+    | _ -> EConstr.Expand.iter sigma occrec h knd
+  in
+  let h, c = EConstr.Expand.make c in
+  try occrec h c; false with Occur -> true
 
 let occur_meta_or_existential sigma c =
-  let rec occrec c = match EConstr.kind sigma c with
+  let rec occrec h c =
+    let h, knd = EConstr.Expand.kind sigma h c in
+    match knd with
     | Evar _ -> raise Occur
     | Meta _ -> raise Occur
-    | _ -> EConstr.iter sigma occrec c
-  in try occrec c; false with Occur -> true
+    | _ -> EConstr.Expand.iter sigma occrec h knd
+  in
+  let h, c = EConstr.Expand.make c in
+  try occrec h c; false with Occur -> true
 
 let occur_metavariable sigma m c =
   let rec occrec c = match EConstr.kind sigma c with
@@ -897,7 +861,7 @@ let free_rels_and_unqualified_refs sigma t =
           let dir, id = Libnames.repr_qualid short in
           let ids = if DirPath.is_empty dir then Id.Set.add id ids else ids in
           (gseen, vseen, ids)
-        with Not_found when !Flags.in_debugger || !Flags.in_toplevel ->
+        with Not_found when !Flags.in_debugger || !Flags.in_ml_toplevel ->
           accu
       end else
         accu
@@ -1107,6 +1071,13 @@ let is_global = EConstr.isRefX
 
 let isGlobalRef = EConstr.isRef
 
+let is_template_polymorphic_ref env sigma f =
+  match EConstr.kind sigma f with
+  | Ind (ind, u) | Construct ((ind, _), u) ->
+    if not (EConstr.EInstance.is_empty u) then false
+    else Environ.template_polymorphic_ind ind env
+  | _ -> false
+
 let is_template_polymorphic_ind env sigma f =
   match EConstr.kind sigma f with
   | Ind (ind, u) ->
@@ -1258,13 +1229,9 @@ let fold_named_context_both_sides f l ~init = List.fold_right_and_left f l init
 let mem_named_context_val id ctxt =
   try ignore(Environ.lookup_named_ctxt id ctxt); true with Not_found -> false
 
-let map_rel_decl f = function
-| RelDecl.LocalAssum (id, t) -> RelDecl.LocalAssum (id, f t)
-| RelDecl.LocalDef (id, b, t) -> RelDecl.LocalDef (id, f b, f t)
+let map_rel_decl = RelDecl.map_constr_het
 
-let map_named_decl f = function
-| NamedDecl.LocalAssum (id, t) -> NamedDecl.LocalAssum (id, f t)
-| NamedDecl.LocalDef (id, b, t) -> NamedDecl.LocalDef (id, f b, f t)
+let map_named_decl = NamedDecl.map_constr_het
 
 let compact_named_context sigma sign =
   let compact l decl =
@@ -1330,7 +1297,7 @@ let global_app_of_constr sigma c =
   | Ind (i, u) -> (IndRef i, u), None
   | Construct (c, u) -> (ConstructRef c, u), None
   | Var id -> (VarRef id, EConstr.EInstance.empty), None
-  | Proj (p, c) -> (ConstRef (Projection.constant p), EConstr.EInstance.empty), Some c
+  | Proj (p, _, c) -> (ConstRef (Projection.constant p), EConstr.EInstance.empty), Some c
   | _ -> raise Not_found
 
 let prod_applist sigma c l =

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -29,21 +29,19 @@ exception Find_at of int
 
 (* timing *)
 
-let get_timing_enabled =
+let { Goptions.get = get_timing_enabled } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["NativeCompute"; "Timing"]
     ~value:false
+    ()
 
 (* profiling *)
 
-let get_profiling_enabled =
+let { Goptions.get = get_profiling_enabled } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["NativeCompute"; "Profiling"]
     ~value:false
+    ()
 
 (* for supported platforms, filename for profiler results *)
 
@@ -57,12 +55,11 @@ let profiler_platform () =
   | "Win32" -> "Windows (Win32)"
   | "Cygwin" -> "Windows (Cygwin)"
 
-let get_profile_filename =
+let { Goptions.get = get_profile_filename } =
   Goptions.declare_string_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["NativeCompute"; "Profile"; "Filename"]
     ~value:"native_compute_profile.data"
+    ()
 
 (* find unused profile filename *)
 let get_available_profile_filename () =
@@ -97,7 +94,7 @@ let decompose_prod env t =
   in
   (name,dom,codom)
 
-let e_whd_all = Reductionops.clos_whd_flags CClosure.all
+let e_whd_all = Reductionops.clos_whd_flags RedFlags.all
 
 let app_type env sigma c =
   let t = e_whd_all env sigma c in
@@ -117,17 +114,19 @@ let construct_of_constr_notnative const env tag (ind,u) allargs =
   let params = Array.sub allargs 0 nparams in
   let i = invert_tag const tag mip.mind_reloc_tbl in
   let ctyp = Inductiveops.instantiate_constructor_params ((ind,i),u) (mib,mip) (Array.to_list params) in
-  (mkApp(mkConstructU((ind,i),u), params), ctyp)
+  let u = EConstr.Unsafe.to_instance u in
+  let params = Array.map EConstr.Unsafe.to_constr params in
+  (mkApp(mkConstructU((ind,i),u), params), EConstr.Unsafe.to_constr ctyp)
 
 let construct_of_constr const env sigma tag typ =
-  let typ = Reductionops.clos_whd_flags CClosure.all env sigma (EConstr.of_constr typ) in
-  let t, l = decompose_app (EConstr.Unsafe.to_constr typ) in
-  match Constr.kind t with
+  let typ = Reductionops.clos_whd_flags RedFlags.all env sigma (EConstr.of_constr typ) in
+  let t, l = EConstr.decompose_app sigma typ in
+  match EConstr.kind sigma t with
   | Ind indu ->
-      construct_of_constr_notnative const env tag indu l
+    construct_of_constr_notnative const env tag indu l
   | _ ->
-    assert (Constr.equal t (Typeops.type_of_int env));
-    (mkInt (Uint63.of_int tag), t)
+    assert (EConstr.eq_constr sigma t (EConstr.of_constr @@ Typeops.type_of_int env));
+    (mkInt (Uint63.of_int tag), EConstr.Unsafe.to_constr t)
 
 let construct_of_constr_const env sigma tag typ =
   fst (construct_of_constr true env sigma tag typ)
@@ -139,14 +138,14 @@ let get_case_annot decls =
 
 let build_branches_type env sigma mib mip (ind,u) params (pctx, p) =
   let rtbl = mip.mind_reloc_tbl in
-  let paramsl = Array.to_list params in
+  let paramsl = Array.map_to_list EConstr.of_constr params in
   (* [build_one_branch i cty] construit le type de la ieme branche (commence
      a 0) et les lambda correspondant aux realargs *)
   let p = it_mkLambda_or_LetIn p pctx in (* TODO: prevent useless cut? *)
   let build_one_branch i (ctx, _) =
     let typi = Inductiveops.instantiate_constructor_params ((ind,i+1),u) (mib,mip) paramsl in
-    let decl,indapp = Reductionops.hnf_decompose_prod env sigma (EConstr.of_constr typi) in
-    let decl = List.map (on_snd EConstr.Unsafe.to_constr) decl in
+    let decl,indapp = Reductionops.whd_decompose_prod env sigma typi in
+    let decl = List.map EConstr.Unsafe.(fun (na,c) -> to_binder_annot na, to_constr c) decl in
     let ind,cargs = find_rectype_a env sigma indapp in
     let nparams = Array.length params in
     let carity = snd (rtbl.(i)) in
@@ -188,8 +187,8 @@ let branch_of_switch lvl ans bs =
   Array.init (Array.length tbl) branch
 
 let get_proj env (ind, proj_arg) =
-  let p = Environ.get_projection env ind ~proj_arg in
-  Projection.make p true
+  let p, r = Environ.get_projection env ind ~proj_arg in
+  Projection.make p true, r
 
 let rec nf_val env sigma v typ =
   match kind_of_value v with
@@ -210,6 +209,7 @@ let rec nf_val env sigma v typ =
   | Vconst n -> construct_of_constr_const env sigma n typ
   | Vint64 i -> i |> Uint63.of_int64 |> mkInt
   | Vfloat64 f -> f |> Float64.of_float |> mkFloat
+  | Vstring s -> s |> mkString
   | Varray t -> nf_array env sigma t typ
   | Vblock b ->
       let capp,ctyp = construct_of_constr_block env sigma (block_tag b) typ in
@@ -263,7 +263,7 @@ and nf_args env sigma args t =
     let c = nf_val env sigma arg dom in
     (subst1 c codom, c::l)
   in
-  let t,l = Array.fold_right aux args (t,[]) in
+  let t,l = List.fold_right aux args (t,[]) in
   t, List.rev l
 
 and nf_bargs env sigma b t =
@@ -287,7 +287,7 @@ and nf_prod env sigma (na, dom, codom) =
   let vn = mk_rel_accu (nb_rel env) in
   let env = push_rel (LocalAssum (na, dom)) env in
   let codom, scodom = nf_type_sort env sigma (apply codom vn) in
-  mkProd (na, dom, codom), destSort (Typeops.type_of_product env na sdom scodom)
+  mkProd (na, dom, codom), Typeops.sort_of_product env sdom scodom
 
 and nf_atom env sigma atom =
   match atom with
@@ -297,9 +297,11 @@ and nf_atom env sigma atom =
   | Asort s -> mkSort s
   | Avar id -> mkVar id
   | Aproj (p, c) ->
-      let c = nf_accu env sigma c in
-      let p = get_proj env p in
-      mkProj(p, c)
+      let c, cty = nf_accu_type env sigma c in
+      let p, r = get_proj env p in
+      let (_, u), _ = find_rectype_a env sigma (EConstr.of_constr cty) in
+      let r = UVars.subst_instance_relevance u r in
+      mkProj(p, r, c)
   | _ -> fst (nf_atom_type env sigma atom)
 
 and nf_atom_type env sigma atom =
@@ -310,7 +312,7 @@ and nf_atom_type env sigma atom =
   | Aconstant cst ->
       mkConstU cst, Typeops.type_of_constant_in env cst
   | Aind ind ->
-      mkIndU ind, Inductiveops.type_of_inductive env ind
+      mkIndU ind, EConstr.Unsafe.to_constr @@ Inductiveops.type_of_inductive env (on_snd EConstr.EInstance.make ind)
   | Asort s ->
       mkSort s, Typeops.type_of_sort s
   | Avar id ->
@@ -326,9 +328,9 @@ and nf_atom_type env sigma atom =
         let nas = List.rev_map get_annot realdecls @ [nameR (Id.of_string "c")] in
         expand_arity (mib, mip) (ind, u) params (Array.of_list nas)
       in
-      let p = nf_predicate env sigma ind mip params p pctx in
+      let p, relevance = nf_predicate env sigma ind mip params p pctx in
       (* Calcul du type des branches *)
-      let btypes = build_branches_type env sigma mib mip (ind, u) params (pctx, p) in
+      let btypes = build_branches_type env sigma mib mip (ind, EConstr.EInstance.make u) params (pctx, p) in
       (* calcul des branches *)
       let bsw = branch_of_switch (nb_rel env) ans bs in
       let mkbranch i v =
@@ -339,12 +341,12 @@ and nf_atom_type env sigma atom =
       let branchs = Array.mapi mkbranch bsw in
       let tcase = build_case_type (pctx, p) realargs a in
       let p = (get_case_annot pctx, p) in
-      let ci = ans.asw_ci in
-      let iv = if Typeops.should_invert_case env ans.asw_ci then
+      let ci = Inductiveops.make_case_info env ind RegularStyle in
+      let iv = if Typeops.should_invert_case env relevance ci then
           CaseInvert {indices=realargs}
         else NoInvert
       in
-      mkCase (ci, u, params, p, iv, a, branchs), tcase
+      mkCase (ci, u, params, (p,relevance), iv, a, branchs), tcase
   | Afix(tt,ft,rp,s) ->
       let tt = Array.map (fun t -> nf_type_sort env sigma t) tt in
       let tt = Array.map fst tt and rt = Array.map snd tt in
@@ -375,9 +377,9 @@ and nf_atom_type env sigma atom =
   | Aproj(p,c) ->
       let c,tc = nf_accu_type env sigma c in
       let cj = make_judge c tc in
-      let p = get_proj env p in
-      let uj = Typeops.judge_of_projection env p cj in
-      uj.uj_val, uj.uj_type
+      let p, _ = get_proj env p in
+      let r, ty = Typeops.type_of_projection env p cj.uj_val cj.uj_type in
+      mkProj (p, r, cj.uj_val), ty
 
 
 and nf_predicate env sigma ind mip params v pctx =
@@ -391,7 +393,8 @@ and nf_predicate env sigma ind mip params v pctx =
   let (_, v) = List.fold_right fold pctx (nb_rel env, v) in
   let env = push_rel_context pctx env in
   let body = nf_type env sigma v in
-  body
+  let rel = Retyping.relevance_of_type env sigma (EConstr.of_constr body) in
+  body, EConstr.Unsafe.to_relevance rel
 
 and nf_evar env sigma evk args =
   let evi = try Evd.find_undefined sigma evk with Not_found -> assert false in
@@ -409,7 +412,7 @@ and nf_evar env sigma evk args =
     let fold accu d = EConstr.mkNamedProd_or_LetIn sigma d accu in
     let t = List.fold_left fold ty hyps in
     let t = EConstr.to_constr ~abort_on_undefined_evars:false sigma t in
-    let ty, args = nf_args env sigma args t in
+    let ty, args = nf_args env sigma (Array.to_list args) t in
     (* nf_args takes arguments in the reverse order but produces them
        in the correct one, so we have to reverse them again for the
        evar node *)
@@ -430,7 +433,7 @@ let evars_of_evar_map sigma =
 
 (* fork perf process, return profiler's process id *)
 let start_profiler_linux profile_fn =
-  let coq_pid = Unix.getpid () in (* pass pid of running coqtop *)
+  let rocq_pid = Unix.getpid () in (* pass pid of running coqtop *)
   (* we don't want to see perf's console output *)
   let dev_null = Unix.descr_of_out_channel (open_out_bin "/dev/null") in
   let _ = Feedback.msg_info (Pp.str ("Profiling to file " ^ profile_fn)) in
@@ -438,7 +441,7 @@ let start_profiler_linux profile_fn =
   let profiler_pid =
     Unix.create_process
       perf
-      [|perf; "record"; "-g"; "-o"; profile_fn; "-p"; string_of_int coq_pid |]
+      [|perf; "record"; "-g"; "-o"; profile_fn; "-p"; string_of_int rocq_pid |]
       Unix.stdin dev_null dev_null
   in
   (* doesn't seem to be a way to test whether process creation succeeded

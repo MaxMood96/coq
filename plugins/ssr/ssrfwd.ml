@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -23,6 +23,7 @@ open Ssrcommon
 open Ssrtacticals
 
 module RelDecl = Context.Rel.Declaration
+module ERelevance = EConstr.ERelevance
 
 (** 8. Forward chaining tactics (pose, set, have, suffice, wlog) *)
 (** Defined identifier *)
@@ -47,7 +48,7 @@ let redex_of_pattern_tc env p =
   | Some (sigma, e) -> sigma, e
   in
   let sigma = Typeclasses.resolve_typeclasses ~fail:false env sigma in
-  Evarutil.nf_evar sigma e, Evd.evar_universe_context sigma
+  Evarutil.nf_evar sigma e, Evd.ustate sigma
 
 let ssrsettac id ((_, (pat, pty)), (_, occ)) =
   let open Proofview.Notations in
@@ -69,7 +70,7 @@ let ssrsettac id ((_, (pat, pty)), (_, occ)) =
   let c, (sigma, cty) =  match EConstr.kind sigma c with
   | Cast(t, DEFAULTcast, ty) -> t, (sigma, ty)
   | _ -> c, Typing.type_of env sigma c in
-  let cl' = EConstr.mkLetIn (make_annot (Name id) Sorts.Relevant, c, cty, cl) in
+  let cl' = EConstr.mkLetIn (make_annot (Name id) ERelevance.relevant, c, cty, cl) in
   Proofview.Unsafe.tclEVARS sigma <*>
   convert_concl ~check:true cl' <*>
   introid id
@@ -89,7 +90,7 @@ let () =
     { optstage = Summary.Stage.Interp;
       optkey   = ["SsrHave";"NoTCResolution"];
       optread  = (fun _ -> !ssrhaveNOtcresolution);
-      optdepr  = false;
+      optdepr  = None;
       optwrite = (fun b -> ssrhaveNOtcresolution := b);
     })
 
@@ -103,46 +104,76 @@ let combineCG t1 t2 f g = match t1, t2 with
  | _, (_, (_, None)) -> anomaly "have: mixed C-G constr"
  | _ -> anomaly "have: mixed G-C constr"
 
+type cut_kind = Have | HaveTransp | Suff
 
- type cut_kind = Have | HaveTransp | Suff
- let basecuttac k c =
+let basecuttac k c =
   let open Proofview.Notations in
   let open EConstr in
   Proofview.Goal.enter begin fun gl ->
     let env = Proofview.Goal.env gl in
     let sigma = Tacmach.project gl in
     let concl = Proofview.Goal.concl gl in
-    let state = Proofview.Goal.state gl in
     match Typing.sort_of env sigma c with
     | exception e when CErrors.noncritical e ->
       let _, info = Exninfo.capture e in
       Tacticals.tclZEROMSG ~info (str "Not a proposition or a type.")
-    | sigma, s ->
-      let r = ESorts.relevance_of_sort sigma s in
-      let sigma, f, glf =
+    | sigma, sc ->
+      let r = ESorts.relevance_of_sort sc in
+      let needs_typing, sigma, f, glf =
         match k with
         | HaveTransp ->
-            let name = Context.make_annot Name.Anonymous r in
-            let sigma, p = Evarutil.new_evar env sigma c in
-            let sigma, f = Evarutil.new_evar env sigma (mkLetIn (name,p,c,Vars.lift 1 concl)) in
-            let gp = Proofview_monad.goal_with_state (fst @@ destEvar sigma p) state in
-            let gf = Proofview_monad.goal_with_state (fst @@ destEvar sigma f) state in
-            sigma, f, [gp;gf]
-        | Have | Suff ->
-            let sigma, f = Evarutil.new_evar env sigma (mkArrow c r concl) in
-            let gf = Proofview_monad.goal_with_state (fst @@ destEvar sigma f) state in
-            sigma, f, [gf] in
-      Proofview.Unsafe.tclEVARS sigma <*> Tactics.eapply ~with_classes:false f
+          let name = Context.make_annot Name.Anonymous r in
+          let sigma, p = Evarutil.new_evar env sigma c in
+          let sigma, f = Evarutil.new_evar env sigma (mkLetIn (name,p,c,Vars.lift 1 concl)) in
+          let gp = Proofview_monad.with_empty_state (fst @@ destEvar sigma p) in
+          let gf = Proofview_monad.with_empty_state (fst @@ destEvar sigma f) in
+          false, sigma, f, [gp;gf]
+        | _ ->
+          let sigma, sg = Typing.sort_of env sigma concl in
+          let qc,qg = ESorts.quality sigma sc, ESorts.quality sigma sg in
+          match qc, qg with
+          | Sorts.Quality.(QConstant QProp), Sorts.Quality.(QConstant QProp) ->
+          let f = Rocqlib.lib_ref ("plugins.ssreflect.ssr_have") in
+          let sigma, f = EConstr.fresh_global env sigma f in
+          let sigma, step = Evarutil.new_evar env sigma c in
+          let stepg = Proofview_monad.with_empty_state (fst @@ destEvar sigma step) in
+          let sigma, rest = Evarutil.new_evar env sigma (mkArrow c r concl) in
+          let restg = Proofview_monad.with_empty_state (fst @@ destEvar sigma rest) in
+          let glf = [stepg;restg] in
+          let f = EConstr.mkApp (f, [|c;concl;step;rest|]) in
+          false, sigma, f, glf
+          | _ ->
+          let f = Rocqlib.lib_ref ("plugins.ssreflect.ssr_have_upoly") in
+          let sigma, uc = match qc with
+            | QConstant (QSProp | QProp) -> sigma, Univ.Level.set
+            | _ -> Evd.new_univ_level_variable Evd.univ_flexible sigma in
+          let sigma, ug = match qg with
+            | QConstant (QSProp | QProp) -> sigma, Univ.Level.set
+            | _ -> Evd.new_univ_level_variable Evd.univ_flexible sigma in
+          let names = UVars.Instance.of_array ([|qc;qg|],[|uc;ug|]) in
+          let sigma, f = EConstr.fresh_global env sigma ~names f in
+          let sigma, step = Evarutil.new_evar env sigma c in
+          let stepg = Proofview_monad.with_empty_state (fst @@ destEvar sigma step) in
+          let sigma, rest = Evarutil.new_evar env sigma (mkArrow c r concl) in
+          let restg = Proofview_monad.with_empty_state (fst @@ destEvar sigma rest) in
+          let glf = [stepg;restg] in
+          let f = EConstr.mkApp (f, [|c;concl;step;rest|]) in
+          true, sigma, f, glf in
+      Proofview.Unsafe.tclEVARS sigma <*>
+      (if needs_typing
+        then Ssrcommon.tacTYPEOF f >>= fun _ -> Tacticals.tclIDTAC
+        else Tacticals.tclIDTAC) >>= fun () ->
+      Tactics.eapply ~with_classes:false f
       <*>
       Proofview.Unsafe.tclGETGOALS >>= begin fun gl ->
         match k with
         | Suff ->
-            Proofview.Unsafe.tclSETGOALS (glf @ gl) <*>
-            Proofview.tclFOCUS 1 1 Tactics.reduce_after_refine
+            Proofview.Unsafe.tclSETGOALS (List.rev glf @ gl) <*>
+            Proofview.tclFOCUS 1 (List.length glf) Tactics.reduce_after_refine
         | Have | HaveTransp ->
             let ngoals = List.length gl + 1 in
             Proofview.Unsafe.tclSETGOALS (gl @ glf) <*>
-            Proofview.tclFOCUS ngoals ngoals Tactics.reduce_after_refine
+            Proofview.tclFOCUS ngoals (ngoals + List.length glf - 1) Tactics.reduce_after_refine
       end
     end
 
@@ -182,7 +213,7 @@ let assert_is_conv (ctx, concl) =
   Proofview.Goal.enter begin fun gl ->
     Proofview.tclORELSE (convert_concl ~check:true (EConstr.it_mkProd_or_LetIn concl ctx))
     (fun _ -> Tacticals.tclZEROMSG (str "Given proof term is not of type " ++
-      pr_econstr_env (Tacmach.pf_env gl) (Tacmach.project gl) (EConstr.mkArrow (EConstr.mkVar (Id.of_string "_")) Sorts.Relevant concl)))
+      pr_econstr_env (Tacmach.pf_env gl) (Tacmach.project gl) (EConstr.mkArrow (EConstr.mkVar (Id.of_string "_")) ERelevance.relevant concl)))
   end
 
 let push_goals gs =
@@ -270,10 +301,10 @@ let havetac ist
        itac_c <*> simpltac <*> tacopen_skols <*> unfold [abstract; abstract_key]
    | _,true,true  ->
      let sigma, _, ty, _ = pf_interp_ty ~resolve_typeclasses:fixtc env sigma ist cty in
-     sigma, EConstr.mkArrow ty Sorts.Relevant concl, hint <*> itac, clr
+     sigma, EConstr.mkArrow ty ERelevance.relevant concl, hint <*> itac, clr
    | _,false,true ->
      let sigma, _, ty, _ = pf_interp_ty ~resolve_typeclasses:fixtc env sigma ist cty in
-     sigma, EConstr.mkArrow ty Sorts.Relevant concl, hint, itac_c
+     sigma, EConstr.mkArrow ty ERelevance.relevant concl, hint, itac_c
    | _, false, false ->
      let sigma, n, cty, _  = pf_interp_ty ~resolve_typeclasses:fixtc env sigma ist cty in
      sigma, cty, (binderstac n) <*> hint, Tacticals.tclTHEN itac_c simpltac
@@ -316,7 +347,7 @@ let wlogtac ist (((clr0, pats),_),_) (gens, ((_, ct))) hint suff ghave =
   let c, args, ct, sigma =
     let gens = List.filter (function _, Some _ -> true | _ -> false) gens in
     let c = EConstr.mkProp in
-    let c = if cut_implies_goal then EConstr.mkArrow c Sorts.Relevant concl else c in
+    let c = if cut_implies_goal then EConstr.mkArrow c ERelevance.relevant concl else c in
     let mkabs gen (sigma, args, c) =
       abs_wgen env sigma false (fun x -> x) gen (args, c)
     in
@@ -453,18 +484,18 @@ let intro_lock ipats =
             Array.length args >= 2 && is_app_evar sigma (Array.last args) &&
             Ssrequality.ssr_is_setoid env sigma hd args
             (* if the last condition above [ssr_is_setoid ...] holds
-            then [Coq.Classes.RelationClasses] has been required *)
+            then [Corelib.Classes.RelationClasses] has been required *)
             ||
             (* if this is not the case, the tactic can still succeed
-            when the considered relation is [Coq.Init.Logic.iff] *)
-            Ssrcommon.is_const_ref env sigma hd (Coqlib.lib_ref "core.iff.type") &&
+            when the considered relation is [Corelib.Init.Logic.iff] *)
+            Ssrcommon.is_const_ref env sigma hd (Rocqlib.lib_ref "core.iff.type") &&
             Array.length args = 2 && is_app_evar sigma args.(1) ->
           protect_subgoal env sigma hd args
         | _ ->
         let t = Reductionops.whd_all env sigma c in
         match kind_of_type sigma t with
         | AtomicType(hd, args) when
-            Ssrcommon.is_ind_ref env sigma hd (Coqlib.lib_ref "core.eq.type") &&
+            Ssrcommon.is_ind_ref env sigma hd (Rocqlib.lib_ref "core.eq.type") &&
             Array.length args = 3 && is_app_evar sigma args.(2) ->
           protect_subgoal env sigma hd args
         | _ ->

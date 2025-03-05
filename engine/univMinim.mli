@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -9,7 +9,6 @@
 (************************************************************************)
 
 open Univ
-open UnivSubst
 
 (** Unordered pairs of universe levels (ie (u,v) = (v,u)) *)
 module UPairSet : CSet.S with type elt = (Level.t * Level.t)
@@ -34,8 +33,7 @@ val extra_union : extra -> extra -> extra
     (a global one if there is one) and transitively saturate
     the constraints w.r.t to the equalities. *)
 
-val normalize_context_set : lbound:UGraph.Bound.t -> UGraph.t -> ContextSet.t ->
-  universe_opt_subst (* The defined and undefined variables *) ->
-  Level.Set.t (* univ variables that can be substituted by algebraics *) ->
+val normalize_context_set : UGraph.t -> ContextSet.t ->
+  UnivFlex.t (* The defined and undefined variables *) ->
   extra ->
-  (universe_opt_subst * Level.Set.t) in_universe_context_set
+  UnivFlex.t in_universe_context_set

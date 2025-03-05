@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -22,7 +22,7 @@ type level =
 (** Document unique identifier for serialization *)
 type doc_id = int
 
-(** Coq "semantic" infos obtained during execution *)
+(** Rocq "semantic" infos obtained during execution *)
 type route_id = int
 
 val default_route : route_id
@@ -45,7 +45,7 @@ type feedback_content =
   (* Extra metadata *)
   | Custom of Loc.t option * string * xml
   (* Generic messages *)
-  | Message of level * Loc.t option * Pp.t
+  | Message of level * Loc.t option * Quickfix.t list * Pp.t
 
 type feedback = {
   doc_id   : doc_id;            (* The document being concerned *)
@@ -86,9 +86,9 @@ val msg_info : ?loc:Loc.t -> Pp.t -> unit
 val msg_notice : ?loc:Loc.t -> Pp.t -> unit
 (** Message that should be displayed, such as [Print Foo] or [Show Bar]. *)
 
-val msg_warning : ?loc:Loc.t -> Pp.t -> unit
+val msg_warning : ?loc:Loc.t -> ?quickfix:Quickfix.t list -> Pp.t -> unit
 (** Message indicating that something went wrong, but without serious
-    consequences. *)
+    consequences. A list of quick fixes, in the VSCode sense, can be provided *)
 
 val msg_debug : ?loc:Loc.t -> Pp.t -> unit
 (** For debugging purposes *)
@@ -98,5 +98,5 @@ val console_feedback_listener : Format.formatter -> feedback -> unit
 
 val warn_no_listeners : bool ref
 (** The library will print a warning to the console if no listener is
-    available by default; ML-clients willing to use Coq without a
+    available by default; ML-clients willing to use Rocq without a
     feedback handler should set this to false. *)

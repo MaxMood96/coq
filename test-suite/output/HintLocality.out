@@ -1,71 +1,80 @@
 Non-discriminated database
 Unfoldable variable definitions: all
 Unfoldable constant definitions: all except: id
+Unfoldable projection definitions: all
 Cut: _
 For any goal ->   
-For nat ->   
 For S (modes !) ->   
+For nat ->   
 
 Non-discriminated database
 Unfoldable variable definitions: all
 Unfoldable constant definitions: all except: id
+Unfoldable projection definitions: all
 Cut: _
 For any goal ->   
-For nat ->   
 For S (modes !) ->   
+For nat ->   
 
 Non-discriminated database
 Unfoldable variable definitions: all
 Unfoldable constant definitions: all except: id
+Unfoldable projection definitions: all
 Cut: _
 For any goal ->   
-For nat ->   
 For S (modes !) ->   
+For nat ->   
 
 Non-discriminated database
 Unfoldable variable definitions: all
 Unfoldable constant definitions: all except: id
+Unfoldable projection definitions: all
 Cut: _
 For any goal ->   
-For nat ->   
 For S (modes !) ->   
+For nat ->   
 
 Non-discriminated database
 Unfoldable variable definitions: all
 Unfoldable constant definitions: all
+Unfoldable projection definitions: all
 Cut: emp
 For any goal ->   
-For nat ->   simple apply 0 ; trivial(level 1, pattern nat, id 0) 
+For nat ->   simple apply 0 ; trivial (cost 1, pattern nat, id 0)
 
 Non-discriminated database
 Unfoldable variable definitions: all
 Unfoldable constant definitions: all
+Unfoldable projection definitions: all
 Cut: emp
 For any goal ->   
-For nat ->   simple apply 0 ; trivial(level 1, pattern nat, id 0) 
+For nat ->   simple apply 0 ; trivial (cost 1, pattern nat, id 0)
 
 Non-discriminated database
 Unfoldable variable definitions: all
 Unfoldable constant definitions: all except: id
+Unfoldable projection definitions: all
 Cut: _
 For any goal ->   
-For nat ->   
 For S (modes !) ->   
+For nat ->   
 
 Non-discriminated database
 Unfoldable variable definitions: all
 Unfoldable constant definitions: all
+Unfoldable projection definitions: all
 Cut: emp
 For any goal ->   
-For nat ->   simple apply 0 ; trivial(level 1, pattern nat, id 0) 
+For nat ->   simple apply 0 ; trivial (cost 1, pattern nat, id 0)
 
 Non-discriminated database
 Unfoldable variable definitions: all
 Unfoldable constant definitions: all except: id
+Unfoldable projection definitions: all
 Cut: _
 For any goal ->   
-For nat ->   
 For S (modes !) ->   
+For nat ->   
 
 File "./output/HintLocality.v", line 61, characters 0-38:
 The command has indeed failed with message:
@@ -73,18 +82,20 @@ This command does not support the global attribute in sections.
 Non-discriminated database
 Unfoldable variable definitions: all
 Unfoldable constant definitions: all except: id
-Cut: (_ | _)
+Unfoldable projection definitions: all
+Cut: _
 For any goal ->   
+For S (modes !) ->   
 For nat ->   
-For S (modes !, !) ->   
 
 Non-discriminated database
 Unfoldable variable definitions: all
 Unfoldable constant definitions: all except: id
+Unfoldable projection definitions: all
 Cut: _
 For any goal ->   
-For nat ->   simple apply 0 ; trivial(level 1, pattern nat, id 0) 
 For S (modes !) ->   
+For nat ->   simple apply 0 ; trivial (cost 1, pattern nat, id 0)
 
 File "./output/HintLocality.v", line 92, characters 0-39:
 Warning: This hint is not local but depends on a section variable. It will
@@ -101,6 +112,7 @@ disappear when the section is closed.
 Non-discriminated database
 Unfoldable variable definitions: all
 Unfoldable constant definitions: all
+Unfoldable projection definitions: all
 Cut: emp
 For any goal ->   
 For refl (modes - !) ->   

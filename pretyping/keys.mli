@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -16,7 +16,7 @@ val declare_equiv_keys : key -> key -> unit
 val equiv_keys : key -> key -> bool
 (** Check equivalence of keys. *)
 
-val constr_key : ('a -> ('a, 't, 'u, 'i) Constr.kind_of_term) -> 'a -> key option
+val constr_key : Environ.env -> ('a -> ('a, 't, 'u, 'i, 'r) Constr.kind_of_term) -> 'a -> key option
 (** Compute the head key of a term. *)
 
 val pr_keys : (Names.GlobRef.t -> Pp.t) -> Pp.t

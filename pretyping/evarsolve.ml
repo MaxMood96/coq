@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -108,7 +108,7 @@ let get_polymorphic_positions env sigma f =
     let mib,oib = Inductive.lookup_mind_specif env ind in
       (match mib.mind_template with
       | None -> assert false
-      | Some templ -> templ.template_param_levels)
+      | Some templ -> templ.template_param_arguments)
   | _ -> assert false
 
 let refresh_universes ?(status=univ_rigid) ?(onlyalg=false) ?(refreshset=false)
@@ -117,12 +117,15 @@ let refresh_universes ?(status=univ_rigid) ?(onlyalg=false) ?(refreshset=false)
   (* direction: true for fresh universes lower than the existing ones *)
   let refresh_sort status ~direction s =
     let sigma, l = new_univ_level_variable status !evdref in
-    let s' = Sorts.sort_of_univ @@ Univ.Universe.make l in (* FIXME *)
+    let s' = match ESorts.kind sigma s with
+      | QSort (q, _) -> Sorts.qsort q (Univ.Universe.make l)
+      | _ -> Sorts.sort_of_univ @@ Univ.Universe.make l
+    in
     let s' = ESorts.make s' in
     evdref := sigma;
     let evd =
-      if direction then set_leq_sort env !evdref s' s
-      else set_leq_sort env !evdref s s'
+      if direction then set_leq_sort !evdref s' s
+      else set_leq_sort !evdref s s'
     in evdref := evd; mkSort s'
   in
   let rec refresh ~onlyalg status ~direction t =
@@ -136,7 +139,8 @@ let refresh_universes ?(status=univ_rigid) ?(onlyalg=false) ?(refreshset=false)
         | Some l ->
            (match Evd.universe_rigidity !evdref l with
             | UnivRigid ->
-               if not onlyalg then refresh_sort status ~direction s
+              if not onlyalg && (not (Univ.Level.is_set l) || (refreshset && not direction))
+              then refresh_sort status ~direction s
                else t
             | UnivFlexible alg ->
                (if alg then
@@ -156,7 +160,7 @@ let refresh_universes ?(status=univ_rigid) ?(onlyalg=false) ?(refreshset=false)
   (* Refresh the types of evars under template polymorphic references *)
   let rec refresh_term_evars ~onevars ~top t =
     match EConstr.kind !evdref t with
-    | App (f, args) when Termops.is_template_polymorphic_ind env !evdref f ->
+    | App (f, args) when Termops.is_template_polymorphic_ref env !evdref f ->
       let pos = get_polymorphic_positions env !evdref f in
         refresh_polymorphic_positions args pos; t
     | App (f, args) when top && isEvar !evdref f ->
@@ -178,7 +182,7 @@ let refresh_universes ?(status=univ_rigid) ?(onlyalg=false) ?(refreshset=false)
     | _ -> EConstr.map !evdref (refresh_term_evars ~onevars ~top:false) t
   and refresh_polymorphic_positions args pos =
     let rec aux i = function
-      | Some l :: ls ->
+      | Some _ :: ls ->
         if i < Array.length args then
           ignore(refresh_term_evars ~onevars:true ~top:false args.(i));
         aux (succ i) ls
@@ -199,7 +203,7 @@ let refresh_universes ?(status=univ_rigid) ?(onlyalg=false) ?(refreshset=false)
     else refresh_term_evars ~onevars:false ~top:true t
   in !evdref, t'
 
-let get_type_of_refresh  ?(polyprop=true) ?(lax=false) env evars t =
+let get_type_of_refresh ?(lax=false) env evars t =
   let tty = Retyping.get_type_of env evars t in
   let evars', tty = refresh_universes ~onlyalg:true
     ~status:(Evd.UnivFlexible false) (Some false) env evars tty in
@@ -212,31 +216,29 @@ let add_conv_oriented_pb ?(tail=true) (pbty,env,t1,t2) evd =
   | None -> add_conv_pb ~tail (Conversion.CONV,env,t1,t2) evd
 
 (* We retype applications to ensure the universe constraints are collected *)
-
-exception IllTypedInstance of env * evar_map * EConstr.types * EConstr.types
+exception IllTypedInstance of env * evar_map * EConstr.types option * EConstr.types
 exception IllTypedInstanceFun of env * evar_map * EConstr.constr * EConstr.types
+
+let checked_appvect, checked_appvect_hook = Hook.make ()
 
 let recheck_applications unify flags env evdref t =
   let rec aux env t =
+    (* the order matters: if the sub-applications are incorrect, checked_appvect may fail badly *)
+    iter_with_full_binders env !evdref (fun d env -> push_rel d env) aux env t;
     match EConstr.kind !evdref t with
     | App (f, args) ->
-       let () = aux env f in
-       let fty = Retyping.get_type_of env !evdref f in
-       let argsty = Array.map (fun x -> aux env x; Retyping.get_type_of env !evdref x) args in
-       let rec aux i ty =
-         if i < Array.length argsty then
-         match EConstr.kind !evdref (whd_all env !evdref ty) with
-         | Prod (na, dom, codom) ->
-            (match unify flags TypeUnification env !evdref Conversion.CUMUL argsty.(i) dom with
-             | Success evd -> evdref := evd;
-                             aux (succ i) (subst1 args.(i) codom)
-             | UnifFailure (evd, reason) -> raise (IllTypedInstance (env, evd, argsty.(i), dom)))
-         | _ -> raise (IllTypedInstanceFun (env, !evdref, f, ty))
-       else ()
-     in aux 0 fty
-    | _ ->
-       iter_with_full_binders env !evdref (fun d env -> push_rel d env) aux env t
-  in aux env t
+      let evd, _ = Hook.get checked_appvect env !evdref f args in
+      evdref := evd
+    | _ -> ()
+  in
+  try aux env t
+  with PretypeError (env,sigma,e) ->
+  match e with
+  | CantApplyBadTypeExplained (((_,expected,argty),_,_),_) ->
+    raise (IllTypedInstance (env,sigma,Some argty, expected))
+  | TypingError (CantApplyNonFunctional (fj,_)) ->
+    raise (IllTypedInstanceFun (env,sigma,fj.uj_val,fj.uj_type))
+  | _ -> assert false
 
 
 (*------------------------------------*
@@ -306,7 +308,7 @@ let noccur_evar env evd evk c =
        (match decl with
         | LocalAssum _ -> ()
         | LocalDef (_,b,_) -> cache := Int.Set.add (i-k) !cache; occur_rec false acc (lift i (EConstr.of_constr b)))
-  | Proj (p,c) -> occur_rec true acc c
+  | Proj (p,_,c) -> occur_rec true acc c
   | _ -> iter_with_full_binders env evd (fun rd (k,env) -> (succ k, push_rel rd env))
     (occur_rec check_types) acc c
   in
@@ -814,7 +816,8 @@ let make_projectable_subst aliases sigma sign args =
  *)
 
 let define_evar_from_virtual_equation define_fun env evd src t_in_env ty_t_in_sign sign filter inst_in_env =
-  let (evd, evk) = new_pure_evar sign evd ty_t_in_sign ~filter ~src in
+  assert (EConstr.isSort evd ty_t_in_sign);
+  let (evd, evk) = new_pure_evar sign evd ~relevance:ERelevance.relevant ty_t_in_sign ~filter ~src in
   let t_in_env = whd_evar evd t_in_env in
   let evd = define_fun env evd None (evk, inst_in_env) t_in_env in
   let EvarInfo evi = Evd.find evd evk in
@@ -877,14 +880,16 @@ let materialize_evar define_fun env evd k (evk1,args1) ty_in_env =
       rel_sign
       (sign1,filter1,args1,inst_in_sign,env1,evd,avoid)
   in
+  let s = Retyping.get_sort_of env evd ty_in_env in
   let evd,ev2ty_in_sign =
-    let s = Retyping.get_sort_of env evd ty_in_env in
     let evd,ty_t_in_sign = refresh_universes
      ~status:univ_flexible (Some false) env evd (mkSort s) in
     define_evar_from_virtual_equation define_fun env evd src ty_in_env
       ty_t_in_sign sign2 filter2 inst2_in_env in
   let (evd, ev2_in_sign) =
-    new_pure_evar sign2 evd ev2ty_in_sign ~filter:filter2 ~src in
+  let typeclass_candidate = Typeclasses.is_maybe_class_type evd ev2ty_in_sign in
+    (* XXX is this relevance correct? I don't really understand this code *)
+    new_pure_evar sign2 ~typeclass_candidate evd ~relevance:(ESorts.relevance_of_sort s) ev2ty_in_sign ~filter:filter2 ~src in
   let ev2_in_env = (ev2_in_sign, inst2_in_env) in
   (evd, mkEvar (ev2_in_sign, inst2_in_sign), ev2_in_env)
 
@@ -898,14 +903,15 @@ let check_evar_instance_evi unify flags env evd evi body =
   let evenv = evar_env env evi in
   (* FIXME: The body might be ill-typed when this is called from w_merge *)
   (* This happens in practice, cf MathClasses build failure on 2013-3-15 *)
-  let ty =
-    try Retyping.get_type_of ~lax:true evenv evd body
-    with Retyping.RetypeError _ ->
-      let loc, _ = Evd.evar_source evi in user_err ?loc (Pp.(str "Ill-typed evar instance"))
-  in
-  match unify flags TypeUnification evenv evd Conversion.CUMUL ty (Evd.evar_concl evi) with
-  | Success evd -> evd
-  | UnifFailure _ -> raise (IllTypedInstance (evenv,evd,ty, Evd.evar_concl evi))
+  match Retyping.get_type_of ~lax:true evenv evd body
+  with
+  | exception Retyping.RetypeError _ ->
+    let loc, _ = Evd.evar_source evi in
+    Loc.raise ?loc (IllTypedInstance (evenv,evd,None, Evd.evar_concl evi))
+  | ty ->
+    match unify flags TypeUnification evenv evd Conversion.CUMUL ty (Evd.evar_concl evi) with
+    | Success evd -> evd
+    | UnifFailure _ -> raise (IllTypedInstance (evenv,evd,Some ty, Evd.evar_concl evi))
 
 let check_evar_instance unify flags env evd evk body =
   let evi = try Evd.find_undefined evd evk with Not_found -> assert false in
@@ -1477,7 +1483,7 @@ let solve_evar_evar ?(force=false) f unify flags env evd pbty (evk1,args1 as ev1
           let evd, k = Evd.new_sort_variable univ_flexible_alg evd in
           let t1 = it_mkProd_or_LetIn (mkSort k) ctx1 in
           let t2 = it_mkProd_or_LetIn (mkSort k) ctx2 in
-          let evd = Evd.set_leq_sort env (Evd.set_leq_sort env evd k i) k j in
+          let evd = Evd.set_leq_sort (Evd.set_leq_sort evd k i) k j in
           downcast evk2 t2 (downcast evk1 t1 evd)
     with Reduction.NotArity ->
       evd in
@@ -1731,6 +1737,8 @@ let rec invert_definition unify flags choose imitate_defs
           let evd =
              (* Try now to invert args in terms of args' *)
             try
+              if not @@ is_evar_allowed flags evk' then
+                raise (CannotProject (evd, ev''));
               let evd,body = project_evar_on_evar false unify flags env' evd aliases 0 None ev'' ev' in
               let evi = Evd.find_undefined evd evk' in
               let evd = Evd.define evk' body evd in
@@ -1742,6 +1750,13 @@ let rec invert_definition unify flags choose imitate_defs
               add_conv_oriented_pb (None,env',mkEvar ev'',mkEvar ev') evd in
           evdref := evd;
           evar'')
+    | App (f, args) when EConstr.isLambda !evdref f ->
+        let p = !progress in
+        progress := true;
+        (try
+          map_constr_with_full_binders env' !evdref (fun d (env,k) -> push_rel d env, k+1)
+                                        imitate envk t
+        with _ -> progress := p; imitate envk (whd_beta env' !evdref t))
     | _ ->
         progress := true;
         match
@@ -1794,7 +1809,7 @@ let rec invert_definition unify flags choose imitate_defs
 
 and evar_define unify flags ?(choose=false) ?(imitate_defs=true) env evd pbty (evk,argsv as ev) rhs =
   match EConstr.kind evd rhs with
-  | Evar (evk2,argsv2 as ev2) ->
+  | Evar (evk2,argsv2 as ev2) when is_evar_allowed flags evk2 ->
       if Evar.equal evk evk2 then
         solve_refl ~can_drop:choose
           (test_success unify) flags env evd pbty evk argsv argsv2
@@ -1858,12 +1873,8 @@ and evar_define unify flags ?(choose=false) ?(imitate_defs=true) env evd pbty (e
  * ass.
  *)
 
-let status_changed evd lev (pbty,_,t1,t2) =
-  (try Evar.Set.mem (head_evar evd t1) lev with NoHeadEvar -> false) ||
-  (try Evar.Set.mem (head_evar evd t2) lev with NoHeadEvar -> false)
-
 let reconsider_unif_constraints unify flags evd =
-  let (evd,pbs) = extract_changed_conv_pbs evd (status_changed evd) in
+  let (evd,pbs) = extract_changed_conv_pbs evd in
   List.fold_left
     (fun p (pbty,env,t1,t2 as x) ->
        match p with

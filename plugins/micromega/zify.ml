@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -14,6 +14,8 @@ open Pp
 open Lazy
 module NamedDecl = Context.Named.Declaration
 
+module ERelevance = EConstr.ERelevance
+
 let debug_zify = CDebug.create ~name:"zify" ()
 
 (* The following [constr] are necessary for constructing the proof terms *)
@@ -21,20 +23,20 @@ let debug_zify = CDebug.create ~name:"zify" ()
 let zify str =
   EConstr.of_constr
     (UnivGen.constr_of_monomorphic_global (Global.env ())
-       (Coqlib.lib_ref ("ZifyClasses." ^ str)))
+       (Rocqlib.lib_ref ("ZifyClasses." ^ str)))
 
 (** classes *)
-let coq_InjTyp = lazy (Coqlib.lib_ref "ZifyClasses.InjTyp")
+let rocq_InjTyp = lazy (Rocqlib.lib_ref "ZifyClasses.InjTyp")
 
-let coq_BinOp = lazy (Coqlib.lib_ref "ZifyClasses.BinOp")
-let coq_UnOp = lazy (Coqlib.lib_ref "ZifyClasses.UnOp")
-let coq_CstOp = lazy (Coqlib.lib_ref "ZifyClasses.CstOp")
-let coq_BinRel = lazy (Coqlib.lib_ref "ZifyClasses.BinRel")
-let coq_PropBinOp = lazy (Coqlib.lib_ref "ZifyClasses.PropBinOp")
-let coq_PropUOp = lazy (Coqlib.lib_ref "ZifyClasses.PropUOp")
-let coq_BinOpSpec = lazy (Coqlib.lib_ref "ZifyClasses.BinOpSpec")
-let coq_UnOpSpec = lazy (Coqlib.lib_ref "ZifyClasses.UnOpSpec")
-let coq_Saturate = lazy (Coqlib.lib_ref "ZifyClasses.Saturate")
+let rocq_BinOp = lazy (Rocqlib.lib_ref "ZifyClasses.BinOp")
+let rocq_UnOp = lazy (Rocqlib.lib_ref "ZifyClasses.UnOp")
+let rocq_CstOp = lazy (Rocqlib.lib_ref "ZifyClasses.CstOp")
+let rocq_BinRel = lazy (Rocqlib.lib_ref "ZifyClasses.BinRel")
+let rocq_PropBinOp = lazy (Rocqlib.lib_ref "ZifyClasses.PropBinOp")
+let rocq_PropUOp = lazy (Rocqlib.lib_ref "ZifyClasses.PropUOp")
+let rocq_BinOpSpec = lazy (Rocqlib.lib_ref "ZifyClasses.BinOpSpec")
+let rocq_UnOpSpec = lazy (Rocqlib.lib_ref "ZifyClasses.UnOpSpec")
+let rocq_Saturate = lazy (Rocqlib.lib_ref "ZifyClasses.Saturate")
 
 (* morphism like lemma *)
 
@@ -73,7 +75,7 @@ let gl_pr_constr e =
   let evd = Evd.from_env genv in
   pr_constr genv evd e
 
-let whd = Reductionops.clos_whd_flags CClosure.all
+let whd = Reductionops.clos_whd_flags RedFlags.all
 let is_convertible env evd t1 t2 = Reductionops.(is_conv env evd t1 t2)
 
 (** [get_type_of] performs beta reduction ;
@@ -133,7 +135,7 @@ end
 
 let get_projections_from_constant (evd, i) =
   match EConstr.kind evd (whd (Global.env ()) evd i) with
-  | App (c, a) -> Some a
+  | App (c, a) -> a
   | _ ->
     raise
       (CErrors.user_err
@@ -163,6 +165,11 @@ module EInjT = struct
       pred : EConstr.t
     ; (* T -> Prop *)
       cstr : EConstr.t option (* forall x, pred (inj x) *) }
+
+  let eq_inj evd i1 i2 =
+    i1.isid = i2.isid && EConstr.eq_constr evd i1.inj i2.inj
+
+
 end
 
 (** [classify_op] classify injected operators and detect special cases. *)
@@ -184,7 +191,7 @@ type classify_op =
  *)
 
 let name x =
-  Context.make_annot (Name.mk_name (Names.Id.of_string x)) Sorts.Relevant
+  Context.make_annot (Name.mk_name (Names.Id.of_string x)) ERelevance.relevant
 
 let mkconvert_unop i1 i2 op top =
   (* fun x => inj (op x) *)
@@ -351,6 +358,13 @@ type decl_kind =
   | UnOpSpec of ESpecT.t decl
   | BinOpSpec of ESpecT.t decl
 
+let target_inj d =
+  match d with
+  | BinOp d -> Some d.deriv.EBinOpT.inj3
+  | UnOp d  -> Some d.deriv.EUnOpT.inj2_t
+  | CstOp d -> Some d.deriv.inj
+  |  _      -> None
+
 type term_kind = Application of EConstr.constr | OtherTerm of EConstr.constr
 
 module type Elt = sig
@@ -391,7 +405,7 @@ module EInj = struct
   type elt = EInjT.t
 
   let name = "EInj"
-  let gref = coq_InjTyp
+  let gref = rocq_InjTyp
   let table = table
   let cast x = InjTyp x
   let dest = function InjTyp x -> Some x | _ -> None
@@ -414,12 +428,8 @@ module EInj = struct
 end
 
 let get_inj evd c =
-  match get_projections_from_constant (evd, c) with
-  | None ->
-    let env = Global.env () in
-    let t = string_of_ppcmds (pr_constr env evd c) in
-    failwith ("Cannot register term " ^ t)
-  | Some a -> EInj.mk_elt evd c a
+  let a = get_projections_from_constant (evd, c) in
+  EInj.mk_elt evd c a
 
 let rec decomp_type evd ty =
   match EConstr.kind_of_type evd ty with
@@ -449,7 +459,7 @@ module EBinOp = struct
   open EBinOpT
 
   let name = "BinOp"
-  let gref = coq_BinOp
+  let gref = rocq_BinOp
   let table = table
 
   let mk_elt evd i a =
@@ -491,7 +501,7 @@ module ECstOp = struct
   open ECstOpT
 
   let name = "CstOp"
-  let gref = coq_CstOp
+  let gref = rocq_CstOp
   let table = table
   let cast x = CstOp x
   let dest = function CstOp x -> Some x | _ -> None
@@ -518,7 +528,7 @@ module EUnOp = struct
   open EUnOpT
 
   let name = "UnOp"
-  let gref = coq_UnOp
+  let gref = rocq_UnOp
   let table = table
   let cast x = UnOp x
   let dest = function UnOp x -> Some x | _ -> None
@@ -551,7 +561,7 @@ module EBinRel = struct
   open EBinRelT
 
   let name = "BinRel"
-  let gref = coq_BinRel
+  let gref = rocq_BinRel
   let table = table
   let cast x = BinRel x
   let dest = function BinRel x -> Some x | _ -> None
@@ -578,7 +588,7 @@ module EPropBinOp = struct
   open EPropBinOpT
 
   let name = "PropBinOp"
-  let gref = coq_PropBinOp
+  let gref = rocq_PropBinOp
   let table = table
   let cast x = PropOp x
   let dest = function PropOp x -> Some x | _ -> None
@@ -592,7 +602,7 @@ module EPropUnOp = struct
   open EPropUnOpT
 
   let name = "PropUOp"
-  let gref = coq_PropUOp
+  let gref = rocq_PropUOp
   let table = table
   let cast x = PropUnOp x
   let dest = function PropUnOp x -> Some x | _ -> None
@@ -602,8 +612,16 @@ end
 
 let constr_of_term_kind = function Application c -> c | OtherTerm c -> c
 
+let zify_register_locality =
+  let open Attributes.Notations in
+  Attributes.explicit_hint_locality >>= function
+  | Some v ->
+    let () = Locality.check_locality_nodischarge v in
+    return v
+  | None -> return (if Lib.sections_are_opened () then Hints.Local else Hints.SuperGlobal)
+
 module type S = sig
-  val register : Libnames.qualid -> unit
+  val register : Hints.hint_locality -> Libnames.qualid -> unit
   val print : unit -> unit
 end
 
@@ -615,12 +633,8 @@ module MakeTable (E : Elt) : S = struct
      *)
 
   let make_elt (evd, i) =
-    match get_projections_from_constant (evd, i) with
-    | None ->
-      let env = Global.env () in
-      let t = string_of_ppcmds (pr_constr env evd i) in
-      failwith ("Cannot register term " ^ t)
-    | Some a -> E.mk_elt evd i a
+    let a = get_projections_from_constant (evd, i) in
+    E.mk_elt evd i a
 
   let safe_ref evd c =
     try
@@ -656,7 +670,7 @@ module MakeTable (E : Elt) : S = struct
              ++ Printer.pr_global (Lazy.force E.gref)
              ++ str " X1 ... Xn"))
 
-  let register_obj : Constr.constr -> Libobject.obj =
+  let register_obj : Libobject.locality * Constr.constr -> Libobject.obj =
     let cache_constr c =
       let env = Global.env () in
       let evd = Evd.from_env env in
@@ -664,19 +678,20 @@ module MakeTable (E : Elt) : S = struct
     in
     let subst_constr (subst, c) = Mod_subst.subst_mps subst c in
     Libobject.declare_object
-    @@ Libobject.superglobal_object_nodischarge
+    @@ Libobject.object_with_locality
          ("register-zify-" ^ E.name)
          ~cache:cache_constr ~subst:(Some subst_constr)
+         ~discharge:(fun _ -> assert false)
 
   (** [register c] is called from the VERNACULAR ADD [name] reference(t).
        The term [c] is interpreted and
        registered as a [superglobal_object_nodischarge].
        TODO: pre-compute [get_type_of] - [cache_constr] is using another environment.
      *)
-  let register c =
+  let register local c =
     try
       let c = UnivGen.constr_of_monomorphic_global (Global.env ()) (Nametab.locate c) in
-      let _ = Lib.add_leaf (register_obj c) in
+      let _ = Lib.add_leaf (register_obj (local,c)) in
       ()
     with Not_found ->
       raise
@@ -704,7 +719,7 @@ module ESat = struct
   open ESatT
 
   let name = "Saturate"
-  let gref = coq_Saturate
+  let gref = rocq_Saturate
   let table = saturate
   let cast x = Saturate x
   let dest = function Saturate x -> Some x | _ -> None
@@ -718,7 +733,7 @@ module EUnopSpec = struct
   type elt = ESpecT.t
 
   let name = "UnopSpec"
-  let gref = coq_UnOpSpec
+  let gref = rocq_UnOpSpec
   let table = specs
   let cast x = UnOpSpec x
   let dest = function UnOpSpec x -> Some x | _ -> None
@@ -732,7 +747,7 @@ module EBinOpSpec = struct
   type elt = ESpecT.t
 
   let name = "BinOpSpec"
-  let gref = coq_BinOpSpec
+  let gref = rocq_BinOpSpec
   let table = specs
   let cast x = BinOpSpec x
   let dest = function BinOpSpec x -> Some x | _ -> None
@@ -1003,17 +1018,11 @@ let app_binop env evd src binop arg1 prf1 arg2 prf2 =
 
 type typed_constr = {constr : EConstr.t; typ : EConstr.t; inj : EInjT.t}
 
-let get_injection env evd t =
-  try
-    match snd (ConstrMap.find evd t !table_cache) with
-    | InjTyp i -> i
-    | _ -> raise Not_found
-  with DestKO -> raise Not_found
 
 (* [arrow] is the term (fun (x:Prop) (y : Prop) => x -> y) *)
 let arrow =
   let name x =
-    Context.make_annot (Name.mk_name (Names.Id.of_string x)) Sorts.Relevant
+    Context.make_annot (Name.mk_name (Names.Id.of_string x)) ERelevance.relevant
   in
   EConstr.mkLambda
     ( name "x"
@@ -1022,7 +1031,7 @@ let arrow =
         ( name "y"
         , EConstr.mkProp
         , EConstr.mkProd
-            ( Context.make_annot Names.Anonymous Sorts.Relevant
+            ( Context.make_annot Names.Anonymous ERelevance.relevant
             , EConstr.mkRel 2
             , EConstr.mkRel 2 ) ) )
 
@@ -1097,18 +1106,29 @@ let classify_prop env evd e =
     | _ -> OTHEROP (c, a) )
   | _ -> OTHEROP (e, [||])
 
-(** [match_operator env evd hd arg (t,d)]
+
+let check_target_inj evd inj d =
+  match inj , target_inj d with
+  | None , _ -> true
+  | Some _ , None -> false
+  | Some i1 , Some i2 -> EInjT.eq_inj evd i1 i2
+
+
+(** [match_operator env evd hd arg inj (t,d)]
      - hd is head operator of t
      - If t = OtherTerm _, then t = hd
      - If t = Application _, then
        we extract the relevant number of arguments from arg
        and check for convertibility *)
-let match_operator env evd hd args (t, d) =
+let match_operator env evd hd args inj (t, d) =
   let decomp t i =
     let n = Array.length args in
     let t' = EConstr.mkApp (hd, Array.sub args 0 (n - i)) in
     if is_convertible env evd t' t then Some (d, t) else None
   in
+
+  if check_target_inj evd inj d
+  then
   match t with
   | OtherTerm t -> Some (d, t)
   | Application t -> (
@@ -1120,10 +1140,10 @@ let match_operator env evd hd args (t, d) =
     | PropOp _ -> decomp t 2
     | PropUnOp _ -> decomp t 1
     | _ -> None )
+  else None
 
 let pp_trans_expr env evd e res =
-  let {deriv = inj} = get_injection env evd e.typ in
-  debug_zify (fun () -> Pp.(str "\ntrans_expr " ++ pp_prf evd inj e.constr res));
+  debug_zify (fun () -> Pp.(str "\ntrans_expr " ++ pp_prf evd e.inj e.constr res));
   res
 
 let rec trans_expr env evd e =
@@ -1135,7 +1155,7 @@ let rec trans_expr env evd e =
     else
       let k, t =
         find_option
-          (match_operator env evd c a)
+          (match_operator env evd c a (Some inj))
           (ConstrMap.find_all evd c !table_cache)
       in
       let n = Array.length a in
@@ -1279,7 +1299,7 @@ let rec trans_prop env evd e =
     try
       let k, t =
         find_option
-          (match_operator env evd c a)
+          (match_operator env evd c a None)
           (ConstrMap.find_all evd c !table_cache)
       in
       let n = Array.length a in
@@ -1371,16 +1391,6 @@ let trans_concl prfp =
 let tclTHENOpt e tac tac' =
   match e with None -> tac' | Some e' -> Tacticals.tclTHEN (tac e') tac'
 
-let assert_inj t =
-  init_cache ();
-  Proofview.Goal.enter (fun gl ->
-      let env = Tacmach.pf_env gl in
-      let evd = Tacmach.project gl in
-      try
-        ignore (get_injection env evd t);
-        Tacticals.tclIDTAC
-      with Not_found ->
-        Tacticals.tclFAIL (Pp.str " InjTyp does not exist"))
 
 let elim_binding x t ty =
   Proofview.Goal.enter (fun gl ->
@@ -1405,7 +1415,7 @@ let do_let tac (h : Constr.named_declaration) =
             (let eq = Lazy.force eq in
              find_option
                (match_operator env evd eq
-                  [|EConstr.of_constr ty; EConstr.mkVar x; EConstr.of_constr t|])
+                  [|EConstr.of_constr ty; EConstr.mkVar x; EConstr.of_constr t|] None)
                (ConstrMap.find_all evd eq !table_cache));
           tac x (EConstr.of_constr t) (EConstr.of_constr ty)
         with Not_found -> Tacticals.tclIDTAC)
@@ -1428,8 +1438,8 @@ let elim_let = iter_let_aux elim_binding
 
 let zify_tac =
   Proofview.Goal.enter (fun gl ->
-      Coqlib.check_required_library ["Coq"; "micromega"; "ZifyClasses"];
-      Coqlib.check_required_library ["Coq"; "micromega"; "ZifyInst"];
+      Rocqlib.check_required_library ["Stdlib"; "micromega"; "ZifyClasses"];
+      Rocqlib.check_required_library ["Stdlib"; "micromega"; "ZifyInst"];
       init_cache ();
       let evd = Tacmach.project gl in
       let env = Tacmach.pf_env gl in
@@ -1514,7 +1524,7 @@ let interp_pscript s =
     Tacticals.tclTHEN
       (Tactics.letin_tac None (Names.Name id) c None
          {Locus.onhyps = None; Locus.concl_occs = Locus.AllOccurrences})
-      (Tactics.clear_body [id])
+      (Tacticals.tclTRY (Tactics.clear_body [id]))
   | Pose (id, c) -> Tactics.pose_proof (Names.Name id) c
 
 let rec interp_pscripts l =
@@ -1557,7 +1567,7 @@ let find_proof evd t l =
     - hyps' is obtained from hyps'
     taclist and hyps are threaded to avoid adding duplicates
  *)
-let sat_constr env evd (sub,taclist, hyps) c d =
+let sat_constr env evd hyps (sub, taclist, prfs) c d =
   match EConstr.kind evd c with
   | App (c, args) ->
      if Array.length args = 2 then
@@ -1580,11 +1590,11 @@ let sat_constr env evd (sub,taclist, hyps) c d =
        in
        let rtrm = Tacred.cbv_beta env evd trm in
        let typ  = Retyping.get_type_of env evd rtrm in
-       match find_hyp evd typ hyps with
-       | None -> (Nameops.Subscript.succ sub, (Tactics.pose_proof (Names.Name n) rtrm :: taclist) , (n,typ)::hyps)
-       | Some _ -> (sub, taclist, hyps)
-     else (sub,taclist,hyps)
-  | _ -> (sub,taclist,hyps)
+       match find_hyp evd typ prfs with
+       | None -> (Nameops.Subscript.succ sub, (Tactics.pose_proof (Names.Name n) rtrm :: taclist) , (n,typ)::prfs)
+       | Some _ -> (sub, taclist, prfs)
+     else (sub,taclist,prfs)
+  | _ -> (sub,taclist,prfs)
 
 
 let get_all_sat env evd c =
@@ -1622,5 +1632,5 @@ let saturate =
       sat concl;
       List.iter (fun (_, t) -> sat t) hyps;
       let s0 = fresh_subscript env in
-      let (_,tacs,_) = CstrTable.HConstr.fold (fun c d acc -> sat_constr env evd acc c d) table (s0,[],hyps) in
+      let (_,tacs,_) = CstrTable.HConstr.fold (fun c d acc -> sat_constr env evd hyps acc c d) table (s0,[],[]) in
       Tacticals.tclTHENLIST tacs)

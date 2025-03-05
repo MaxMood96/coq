@@ -1,9 +1,7 @@
-Require Export Coq.Program.Utils.
-Require Export Coq.Program.Basics.
-Require Export Coq.Program.Syntax.
+Require Export Corelib.Program.Basics.
 Require Setoid.
 
-Require Export Coq.Classes.CMorphisms.
+Require Export Corelib.Classes.CMorphisms.
 
 Declare Scope category_theory_scope.
 Open Scope category_theory_scope.

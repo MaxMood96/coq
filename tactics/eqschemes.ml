@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -21,7 +21,7 @@
      existing non-dependent schemes eq_rect and eq_rect_r. There is in
      particular a problem with the dependent rewriting schemes in
      hypotheses for which the inductive types cannot be in last
-     position of the scheme as it is the general rule in Coq. This has
+     position of the scheme as it is the general rule in Rocq. This has
      an effect on the order of generated goals (side-conditions of the
      lemma after or before the main goal). The non-dependent case can be
      fixed but to the price of a lost of uniformity wrt side-conditions
@@ -72,7 +72,7 @@ let fresh env id avoid =
   let freshid = next_global_ident_away id avoid in
   freshid, Id.Set.add freshid avoid
 let with_context_set ctx (b, ctx') =
-  (b, Univ.ContextSet.union ctx ctx')
+  (b, UnivGen.sort_context_union ctx ctx')
 
 let build_dependent_inductive ind (mib,mip) =
   let realargs,_ = List.chop mip.mind_nrealdecls mip.mind_arity_ctxt in
@@ -99,15 +99,11 @@ let my_it_mkLambda_or_LetIn_name env s c =
   let mkLambda_or_LetIn_name d b = mkLambda_or_LetIn (name_assumption env d) b in
   List.fold_left (fun c d -> mkLambda_or_LetIn_name d c) c s
 
-let get_coq_eq env ctx =
-  try
-    let eq = Globnames.destIndRef (Coqlib.lib_ref "core.eq.type") in
-    (* Do not force the lazy if they are not defined *)
-    let eq, ctx = with_context_set ctx
+let get_rocq_eq env ctx =
+  let eq = Globnames.destIndRef (Rocqlib.lib_ref "core.eq.type") in
+  let eq, ctx = with_context_set ctx
       (UnivGen.fresh_inductive_instance env eq) in
-      mkIndU eq, mkConstructUi (eq,1), ctx
-  with Not_found ->
-    user_err Pp.(str "eq not found.")
+  mkIndU eq, mkConstructUi (eq,1), ctx
 
 let univ_of_eq env eq =
   let open EConstr in
@@ -204,31 +200,38 @@ let build_sym_scheme env _handle ind =
     get_sym_eq_data env indu in
   let cstr n =
     mkApp (mkConstructUi(indu,1),Context.Rel.instance mkRel n mib.mind_params_ctxt) in
-  let inds = snd (mind_arity mip) in
+  let inds = Indrec.pseudo_sort_family_for_elim ind mip in
   let varH,_ = fresh env (default_id_of_sort inds) Id.Set.empty in
   let applied_ind = build_dependent_inductive indu specif in
-  let indr = Sorts.relevance_of_sort_family inds in
+  let indr = UVars.subst_instance_relevance u mip.mind_relevance in
   let realsign_ind =
     name_context env ((LocalAssum (make_annot (Name varH) indr,applied_ind))::realsign) in
   let rci = Sorts.Relevant in (* TODO relevance *)
-  let ci = make_case_info env ind rci RegularStyle in
+  let ci = make_case_info env ind RegularStyle in
+  let p =
+    my_it_mkLambda_or_LetIn_name env
+      (lift_rel_context (nrealargs+1) realsign_ind)
+      (mkApp (mkIndU indu,
+              Array.concat
+                [Context.Rel.instance mkRel (3*nrealargs+2) paramsctxt1;
+                 rel_vect 1 nrealargs;
+                 rel_vect (2*nrealargs+2) nrealargs]))
+  in
   let c =
   (my_it_mkLambda_or_LetIn paramsctxt
   (my_it_mkLambda_or_LetIn_name env realsign_ind
-  (mkCase (Inductive.contract_case env (ci,
-     my_it_mkLambda_or_LetIn_name env
-       (lift_rel_context (nrealargs+1) realsign_ind)
-       (mkApp (mkIndU indu,Array.concat
-          [Context.Rel.instance mkRel (3*nrealargs+2) paramsctxt1;
-           rel_vect 1 nrealargs;
-           rel_vect (2*nrealargs+2) nrealargs])),
-           NoInvert,
-     mkRel 1 (* varH *),
-       [|cstr (nrealargs+1)|])))))
-  in c, UState.of_context_set ctx
+     (mkCase
+        (Inductive.contract_case env
+           (ci,
+            (p,rci),
+            NoInvert,
+            mkRel 1 (* varH *),
+            [|cstr (nrealargs+1)|])))))
+  in
+  c, UState.of_context_set ctx
 
 let sym_scheme_kind =
-  declare_individual_scheme_object "_sym_internal"
+  declare_individual_scheme_object "sym_internal"
   build_sym_scheme
 
 (**********************************************************************)
@@ -257,11 +260,11 @@ let build_sym_involutive_scheme env handle ind =
   let (ind,u as indu), ctx = UnivGen.fresh_inductive_instance env ind in
   let (mib,mip as specif),nrealargs,realsign,paramsctxt,paramsctxt1 =
     get_sym_eq_data env indu in
-  let eq,eqrefl,ctx = get_coq_eq env ctx in
+  let eq,eqrefl,ctx = get_rocq_eq env ctx in
   let sym, ctx = const_of_scheme sym_scheme_kind env handle ind ctx in
   let cstr n = mkApp (mkConstructUi (indu,1),Context.Rel.instance mkRel n paramsctxt) in
-  let inds = snd (mind_arity mip) in
-  let indr = Sorts.relevance_of_sort_family inds in
+  let inds = Indrec.pseudo_sort_family_for_elim ind mip in
+  let indr = UVars.subst_instance_relevance u mip.mind_relevance in
   let varH,_ = fresh env (default_id_of_sort inds) Id.Set.empty in
   let applied_ind = build_dependent_inductive indu specif in
   let applied_ind_C =
@@ -272,12 +275,12 @@ let build_sym_involutive_scheme env handle ind =
   let realsign_ind =
     name_context env ((LocalAssum (make_annot (Name varH) indr,applied_ind))::realsign) in
   let rci = Sorts.Relevant in (* TODO relevance *)
-  let ci = make_case_info env ind rci RegularStyle in
+  let ci = make_case_info env ind RegularStyle in
   let c =
     (my_it_mkLambda_or_LetIn paramsctxt
      (my_it_mkLambda_or_LetIn_name env realsign_ind
       (mkCase (Inductive.contract_case env (ci,
-                my_it_mkLambda_or_LetIn_name env
+                (my_it_mkLambda_or_LetIn_name env
                 (lift_rel_context (nrealargs+1) realsign_ind)
                 (mkApp (eq,[|
                 mkApp
@@ -294,14 +297,14 @@ let build_sym_involutive_scheme env handle ind =
                  rel_vect (2*nrealargs+2) nrealargs;
                  rel_vect 1 nrealargs;
                  [|mkRel 1|]])|]]);
-               mkRel 1|])),
+               mkRel 1|])), rci),
                NoInvert,
                mkRel 1 (* varH *),
                [|mkApp(eqrefl,[|applied_ind_C;cstr (nrealargs+1)|])|])))))
   in (c, UState.of_context_set ctx)
 
 let sym_involutive_scheme_kind =
-  declare_individual_scheme_object "_sym_involutive"
+  declare_individual_scheme_object "sym_involutive"
   ~deps:(fun _ ind -> [SchemeIndividualDep (ind, sym_scheme_kind)])
   build_sym_involutive_scheme
 
@@ -371,13 +374,13 @@ let build_l2r_rew_scheme dep env handle ind kind =
     get_sym_eq_data env indu in
   let sym, ctx = const_of_scheme sym_scheme_kind env handle ind ctx in
   let sym_involutive, ctx = const_of_scheme sym_involutive_scheme_kind env handle ind ctx in
-  let eq,eqrefl,ctx = get_coq_eq env ctx in
+  let eq,eqrefl,ctx = get_rocq_eq env ctx in
   let cstr n p =
     mkApp (mkConstructUi(indu,1),
       Array.concat [Context.Rel.instance mkRel n paramsctxt1;
                     rel_vect p nrealargs]) in
-  let inds = snd (mind_arity mip) in
-  let indr = Sorts.relevance_of_sort_family inds in
+  let inds = Indrec.pseudo_sort_family_for_elim ind mip in
+  let indr = UVars.subst_instance_relevance u mip.mind_relevance in
   let varH,avoid = fresh env (default_id_of_sort inds) Id.Set.empty in
   let varHC,avoid = fresh env (Id.of_string "HC") avoid in
   let varP,_ = fresh env (Id.of_string "P") avoid in
@@ -408,11 +411,11 @@ let build_l2r_rew_scheme dep env handle ind kind =
                      rel_vect 1 nrealargs;
                      [|mkRel 1|]]) in
   let s, ctx' = UnivGen.fresh_sort_in_family kind in
-  let ctx = Univ.ContextSet.union ctx ctx' in
+  let ctx = UnivGen.sort_context_union ctx ctx' in
   let s = mkSort s in
   let rci = Sorts.Relevant in (* TODO relevance *)
-  let ci = make_case_info env ind rci RegularStyle in
-  let cieq = make_case_info env (fst (destInd eq)) rci RegularStyle in
+  let ci = make_case_info env ind RegularStyle in
+  let cieq = make_case_info env (fst (destInd eq)) RegularStyle in
   let applied_PC =
     mkApp (mkVar varP,Array.append (Context.Rel.instance mkRel 1 realsign)
            (if dep then [|cstr (2*nrealargs+1) 1|] else [||])) in
@@ -434,7 +437,7 @@ let build_l2r_rew_scheme dep env handle ind kind =
                [|mkRel 2|]])|]]) in
   let main_body =
     mkCase (Inductive.contract_case env (ci,
-            my_it_mkLambda_or_LetIn_name env realsign_ind_G applied_PG,
+            (my_it_mkLambda_or_LetIn_name env realsign_ind_G applied_PG, rci),
             NoInvert,
             applied_sym_C 3,
             [|mkVar varHC|]))
@@ -448,10 +451,10 @@ let build_l2r_rew_scheme dep env handle ind kind =
   (mkNamedLambda (make_annot varH indr) (lift 2 applied_ind)
      (if dep then (* we need a coercion *)
      mkCase (Inductive.contract_case env (cieq,
-       mkLambda (make_annot (Name varH) indr,lift 3 applied_ind,
+       (mkLambda (make_annot (Name varH) indr,lift 3 applied_ind,
          mkLambda (make_annot Anonymous indr,
                    mkApp (eq,[|lift 4 applied_ind;applied_sym_sym;mkRel 1|]),
-                   applied_PR)),
+                   applied_PR)), rci),
        NoInvert,
        mkApp (sym_involutive,
          Array.append (Context.Rel.instance mkRel 3 mip.mind_arity_ctxt) [|mkVar varH|]),
@@ -494,8 +497,8 @@ let build_l2r_forward_rew_scheme dep env ind kind =
     mkApp (mkConstructUi(indu,1),
       Array.concat [Context.Rel.instance mkRel n paramsctxt1;
                     rel_vect p nrealargs]) in
-  let inds = snd (mind_arity mip) in
-  let indr = Sorts.relevance_of_sort_family inds in
+  let inds = Indrec.pseudo_sort_family_for_elim ind mip in
+  let indr = UVars.subst_instance_relevance u mip.mind_relevance in
   let varH,avoid = fresh env (default_id_of_sort inds) Id.Set.empty in
   let varHC,avoid = fresh env (Id.of_string "HC") avoid in
   let varP,_ = fresh env (Id.of_string "P") avoid in
@@ -516,10 +519,10 @@ let build_l2r_forward_rew_scheme dep env ind kind =
   let realsign_ind_P n aP =
     name_context env ((LocalAssum (make_annot (Name varH) indr,aP))::realsign_P n) in
   let s, ctx' = UnivGen.fresh_sort_in_family kind in
-  let ctx = Univ.ContextSet.union ctx ctx' in
+  let ctx = UnivGen.sort_context_union ctx ctx' in
   let s = mkSort s in
   let rci = Sorts.Relevant in
-  let ci = make_case_info env ind rci RegularStyle in
+  let ci = make_case_info env ind RegularStyle in
   let applied_PC =
     mkApp (mkVar varP,Array.append
            (rel_vect (nrealargs*2+3) nrealargs)
@@ -537,12 +540,12 @@ let build_l2r_forward_rew_scheme dep env ind kind =
   (my_it_mkLambda_or_LetIn_name env realsign
   (mkNamedLambda (make_annot varH indr) applied_ind
   (mkCase (Inductive.contract_case env (ci,
-     my_it_mkLambda_or_LetIn_name env
+     (my_it_mkLambda_or_LetIn_name env
        (lift_rel_context (nrealargs+1) realsign_ind)
        (mkNamedProd (make_annot varP indr)
          (my_it_mkProd_or_LetIn
            (if dep then realsign_ind_P 2 applied_ind_P else realsign_P 2) s)
-       (mkNamedProd (make_annot varHC indr) applied_PC applied_PG)),
+       (mkNamedProd (make_annot varHC indr) applied_PC applied_PG)), rci),
      NoInvert,
      (mkVar varH),
      [|mkNamedLambda (make_annot varP indr)
@@ -572,7 +575,7 @@ let build_l2r_forward_rew_scheme dep env ind kind =
 (* Note that the dependent elimination here is not a dependency       *)
 (* in the conclusion of the scheme but a dependency in the premise of *)
 (* the scheme. This is unfortunately incompatible with the standard   *)
-(* pattern for schemes in Coq which expects that the eliminated       *)
+(* pattern for schemes in Rocq which expects that the eliminated      *)
 (* object is the last premise of the scheme. We then have no choice   *)
 (* than following the more liberal pattern of having the eliminated   *)
 (* object coming before the premises.                                 *)
@@ -589,8 +592,8 @@ let build_r2l_forward_rew_scheme dep env ind kind =
   let cstr n =
     mkApp (mkConstructUi(indu,1),Context.Rel.instance mkRel n mib.mind_params_ctxt) in
   let constrargs_cstr = constrargs@[cstr 0] in
-  let inds = snd (mind_arity mip) in
-  let indr = Sorts.relevance_of_sort_family inds in
+  let inds = Indrec.pseudo_sort_family_for_elim ind mip in
+  let indr = Inductive.relevance_of_ind_body mip u in
   let varH,avoid = fresh env (default_id_of_sort inds) Id.Set.empty in
   let varHC,avoid = fresh env (Id.of_string "HC") avoid in
   let varP,_ = fresh env (Id.of_string "P") avoid in
@@ -598,10 +601,10 @@ let build_r2l_forward_rew_scheme dep env ind kind =
   let realsign_ind =
     name_context env ((LocalAssum (make_annot (Name varH) indr,applied_ind))::realsign) in
   let s, ctx' = UnivGen.fresh_sort_in_family kind in
-  let ctx = Univ.ContextSet.union ctx ctx' in
+  let ctx = UnivGen.sort_context_union ctx ctx' in
   let s = mkSort s in
   let rci = Sorts.Relevant in (* TODO relevance *)
-  let ci = make_case_info env ind rci RegularStyle in
+  let ci = make_case_info env ind RegularStyle in
   let applied_PC =
     applist (mkVar varP,if dep then constrargs_cstr else constrargs) in
   let applied_PG =
@@ -617,9 +620,9 @@ let build_r2l_forward_rew_scheme dep env ind kind =
   (mkNamedLambda (make_annot varHC indr) (lift 1 applied_PG)
   (mkApp
     (mkCase (Inductive.contract_case env (ci,
-       my_it_mkLambda_or_LetIn_name env
+       (my_it_mkLambda_or_LetIn_name env
          (lift_rel_context (nrealargs+3) realsign_ind)
-         (mkArrow applied_PG indr (lift (2*nrealargs+5) applied_PC)),
+         (mkArrow applied_PG indr (lift (2*nrealargs+5) applied_PC)), rci),
        NoInvert,
        mkRel 3 (* varH *),
        [|mkLambda
@@ -632,7 +635,7 @@ let build_r2l_forward_rew_scheme dep env ind kind =
 (**********************************************************************)
 (* This function "repairs" the non-dependent r2l forward rewriting    *)
 (* scheme by making it comply with the standard pattern of schemes    *)
-(* in Coq. Otherwise said, it turns a scheme of type                  *)
+(* in Rocq. Otherwise said, it turns a scheme of type                 *)
 (*                                                                    *)
 (*  forall q1..pm a1..an, I q1..qm a1..an ->                          *)
 (*  forall (P: forall a1..an, kind),                                  *)
@@ -687,9 +690,11 @@ let fix_r2l_forward_rew_scheme env (c, ctx') =
 let build_r2l_rew_scheme dep env ind k =
   let sigma = Evd.from_env env in
   let (sigma, indu) = Evd.fresh_inductive_instance env sigma ind in
+  let indu = on_snd EConstr.EInstance.make indu in
+  let sigma, k = Evd.fresh_sort_in_family ~rigid:UnivRigid sigma k in
   let (sigma, c) = build_case_analysis_scheme env sigma indu dep k in
   let (c, _) = Indrec.eval_case_analysis c in
-  EConstr.Unsafe.to_constr c, Evd.evar_universe_context sigma
+  EConstr.Unsafe.to_constr c, Evd.ustate sigma
 
 (**********************************************************************)
 (* Register the rewriting schemes                                     *)
@@ -702,7 +707,7 @@ let build_r2l_rew_scheme dep env ind k =
 (* with H:I p1..pn a1..an in Gamma                                    *)
 (**********************************************************************)
 let rew_l2r_dep_scheme_kind =
-  declare_individual_scheme_object "_rew_r_dep"
+  declare_individual_scheme_object "rew_r_dep"
   ~deps:(fun _ ind -> [
     SchemeIndividualDep (ind, sym_scheme_kind);
     SchemeIndividualDep (ind, sym_involutive_scheme_kind);
@@ -716,7 +721,7 @@ let rew_l2r_dep_scheme_kind =
 (* or   H:I b1..bn a1..an in Gamma (symmetric case)                   *)
 (**********************************************************************)
 let rew_r2l_dep_scheme_kind =
-  declare_individual_scheme_object "_rew_dep"
+  declare_individual_scheme_object "rew_dep"
   (fun env _ ind -> build_r2l_rew_scheme true env ind InType)
 
 (**********************************************************************)
@@ -726,7 +731,7 @@ let rew_r2l_dep_scheme_kind =
 (* or   H:I b1..bn a1..an in Gamma (symmetric case)                   *)
 (**********************************************************************)
 let rew_r2l_forward_dep_scheme_kind =
-  declare_individual_scheme_object "_rew_fwd_dep"
+  declare_individual_scheme_object "rew_fwd_dep"
   (fun env _ ind -> build_r2l_forward_rew_scheme true env ind InType)
 
 (**********************************************************************)
@@ -736,7 +741,7 @@ let rew_r2l_forward_dep_scheme_kind =
 (* with H:I p1..pn a1..an in Gamma                                    *)
 (**********************************************************************)
 let rew_l2r_forward_dep_scheme_kind =
-  declare_individual_scheme_object "_rew_fwd_r_dep"
+  declare_individual_scheme_object "rew_fwd_r_dep"
   (fun env _ ind -> build_l2r_forward_rew_scheme true env ind InType)
 
 (**********************************************************************)
@@ -746,10 +751,10 @@ let rew_l2r_forward_dep_scheme_kind =
 (* we adopt r2l_forward_rew (this one introduces a blocked beta-      *)
 (* expansion but since the guard condition supports commutative cuts  *)
 (* this is not a problem; we need though a fix to adjust it to the    *)
-(* standard form of schemes in Coq)                                   *)
+(* standard form of schemes in Rocq)                                  *)
 (**********************************************************************)
 let rew_l2r_scheme_kind =
-  declare_individual_scheme_object "_rew_r"
+  declare_individual_scheme_object "rew_r"
   (fun env _ ind -> fix_r2l_forward_rew_scheme env
      (build_r2l_forward_rew_scheme false env ind InType))
 
@@ -760,7 +765,7 @@ let rew_l2r_scheme_kind =
 (* introducing commutative cuts, we adopt it                          *)
 (**********************************************************************)
 let rew_r2l_scheme_kind =
-  declare_individual_scheme_object "_rew"
+  declare_individual_scheme_object "rew"
   (fun env _ ind -> build_r2l_rew_scheme false env ind InType)
 
 (* End of rewriting schemes *)
@@ -808,9 +813,12 @@ let build_congr env (eq,refl,ctx) ind =
   let varH,avoid = fresh env (Id.of_string "H") avoid in
   let varf,avoid = fresh env (Id.of_string "f") avoid in
   let rci = Sorts.Relevant in (* TODO relevance *)
-  let ci = make_case_info env ind rci RegularStyle in
-  let uni, ctx = Univ.extend_in_context_set (UnivGen.new_global_univ ()) ctx in
-  let ctx = (fst ctx, UnivSubst.enforce_leq uni (univ_of_eq env eq) (snd ctx)) in
+  let ci = make_case_info env ind RegularStyle in
+  let uni, ctx' = UnivGen.new_global_univ () in
+  let ctx =
+    let (qs,us),csts = ctx in
+    let us, csts = Univ.ContextSet.union (us,csts) ctx' in
+    ((qs, us), UnivSubst.enforce_leq uni (univ_of_eq env eq) csts) in
   let c =
   my_it_mkLambda_or_LetIn paramsctxt
      (mkNamedLambda (make_annot varB Sorts.Relevant) (mkType uni)
@@ -822,7 +830,7 @@ let build_congr env (eq,refl,ctx) ind =
             Context.Rel.instance_list mkRel (mip.mind_nrealargs+2) paramsctxt @
             Context.Rel.instance_list mkRel 0 realsign))
      (mkCase (Inductive.contract_case env (ci,
-       my_it_mkLambda_or_LetIn_name env
+       (my_it_mkLambda_or_LetIn_name env
          (lift_rel_context (mip.mind_nrealargs+3) realsign)
          (mkLambda
            (make_annot Anonymous Sorts.Relevant,
@@ -834,7 +842,7 @@ let build_congr env (eq,refl,ctx) ind =
             mkApp (eq,
               [|mkVar varB;
                 mkApp (mkVar varf, [|lift (2*mip.mind_nrealdecls+4) b|]);
-                mkApp (mkVar varf, [|mkRel (mip.mind_nrealargs - i + 2)|])|]))),
+                mkApp (mkVar varf, [|mkRel (mip.mind_nrealargs - i + 2)|])|]))), rci),
        NoInvert,
        mkVar varH,
        [|mkApp (refl,
@@ -842,7 +850,7 @@ let build_congr env (eq,refl,ctx) ind =
             mkApp (mkVar varf, [|lift (mip.mind_nrealargs+3) b|])|])|])))))))
   in c, UState.of_context_set ctx
 
-let congr_scheme_kind = declare_individual_scheme_object "_congr"
+let congr_scheme_kind = declare_individual_scheme_object "congr"
   (fun env _ ind ->
      (* May fail if equality is not defined *)
-   build_congr env (get_coq_eq env Univ.ContextSet.empty) ind)
+   build_congr env (get_rocq_eq env UnivGen.empty_sort_context) ind)

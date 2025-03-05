@@ -24,8 +24,8 @@ Record PreCategory := Build_PreCategory' {
                   morphism d d'
                   -> morphism s d
                   -> morphism s d' }.
-Arguments identity {!C%category} / x%object : rename.
-Arguments compose {!C%category} / {s d d'}%object (m1 m2)%morphism : rename.
+Arguments identity {!C%_category} / x%_object : rename.
+Arguments compose {!C%_category} / {s d d'}%_object (m1 m2)%_morphism : rename.
 
 Class IsIsomorphism {C : PreCategory} {s d} (m : morphism C s d) := {
     morphism_inverse : morphism C d s;
@@ -35,12 +35,12 @@ Arguments morphism_inverse {C s d} m {_}.
 Local Notation "m ^-1" := (morphism_inverse m) (at level 3, format "m '^-1'") : morphism_scope.
 
 Class Isomorphic {C : PreCategory} s d := {
-    morphism_isomorphic :> morphism C s d;
-    isisomorphism_isomorphic :> IsIsomorphism morphism_isomorphic }.
+    morphism_isomorphic :: morphism C s d;
+    isisomorphism_isomorphic :: IsIsomorphism morphism_isomorphic }.
 Coercion morphism_isomorphic : Isomorphic >-> morphism.
 
-Variable C : PreCategory.
-Variables s d : C.
+Parameter C : PreCategory.
+Parameters s d : C.
 
 Definition path_isomorphic (i j : Isomorphic s d)
 : @morphism_isomorphic _ _ _ i = @morphism_isomorphic _ _ _ j -> i = j.

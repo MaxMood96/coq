@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -25,7 +25,7 @@ type unification_error =
   | ConversionFailed of env * constr * constr
   | IncompatibleInstances of env * existential * constr * constr
   | MetaOccurInBody of Evar.t
-  | InstanceNotSameType of Evar.t * env * types * types
+  | InstanceNotSameType of Evar.t * env * types option * types
   | InstanceNotFunctionalType of Evar.t * env * constr * types
   | UnifUnivInconsistency of UGraph.univ_inconsistency
   | CannotSolveConstraint of Evd.evar_constraint * unification_error
@@ -35,9 +35,11 @@ type position = (Id.t * Locus.hyp_location_flag) option
 
 type position_reporting = (position * int) * constr
 
-type subterm_unification_error = bool * position_reporting * position_reporting * (constr * constr * unification_error) option
+type subterm_unification_error = bool * position_reporting * position_reporting
 
-type type_error = (constr, types) ptype_error
+type type_error = (constr, types, ERelevance.t) ptype_error
+
+val of_type_error : Type_errors.type_error -> type_error
 
 type pretype_error =
   | CantFindCaseType of constr
@@ -65,6 +67,7 @@ type pretype_error =
   | UnexpectedType of constr * constr * unification_error
   | NotProduct of constr
   | TypingError of type_error
+  | CantApplyBadTypeExplained of (constr,types) pcant_apply_bad_type * unification_error
   | CannotUnifyOccurrences of subterm_unification_error
   | UnsatisfiableConstraints of
     (Evar.t * Evar_kinds.t) option * Evar.Set.t
@@ -76,6 +79,11 @@ exception PretypeError of env * Evd.evar_map * pretype_error
 val precatchable_exception : exn -> bool
 
 (** Raising errors *)
+val raise_type_error
+  : ?loc:Loc.t
+  -> Environ.env * Evd.evar_map * type_error
+  -> 'a
+
 val error_actual_type :
   ?loc:Loc.t -> ?info:Exninfo.info -> env -> Evd.evar_map -> unsafe_judgment -> constr ->
       unification_error -> 'b
@@ -88,8 +96,9 @@ val error_cant_apply_not_functional :
       unsafe_judgment -> unsafe_judgment array -> 'b
 
 val error_cant_apply_bad_type :
-  ?loc:Loc.t -> env -> Evd.evar_map -> int * constr * constr ->
-      unsafe_judgment -> unsafe_judgment array -> 'b
+  ?loc:Loc.t -> env -> Evd.evar_map -> ?error:unification_error ->
+  int * constr * constr ->
+  unsafe_judgment -> unsafe_judgment array -> 'b
 
 val error_case_not_inductive :
   ?loc:Loc.t -> env -> Evd.evar_map -> unsafe_judgment -> 'b
@@ -104,12 +113,11 @@ val error_number_branches :
 
 val error_ill_typed_rec_body :
   ?loc:Loc.t -> env -> Evd.evar_map ->
-      int -> Name.t Context.binder_annot array -> unsafe_judgment array -> types array -> 'b
+      int -> Name.t EConstr.binder_annot array -> unsafe_judgment array -> types array -> 'b
 
 val error_elim_arity :
   ?loc:Loc.t -> env -> Evd.evar_map ->
-      pinductive -> constr ->
-      (unsafe_judgment * Sorts.family * Sorts.family * Sorts.family) option -> 'b
+      inductive puniverses -> constr -> ESorts.t option -> 'b
 
 val error_not_a_type :
   ?loc:Loc.t -> env -> Evd.evar_map -> unsafe_judgment -> 'b
@@ -139,10 +147,10 @@ val error_wrong_abstraction_type :  env -> Evd.evar_map ->
       Name.t -> constr -> types -> types -> 'b
 
 val error_abstraction_over_meta : env -> Evd.evar_map ->
-  metavariable -> metavariable -> 'b
+  Name.t -> Name.t -> 'b
 
 val error_non_linear_unification : env -> Evd.evar_map ->
-  metavariable -> constr -> 'b
+  Name.t -> constr -> 'b
 
 (** {6 Ml Case errors } *)
 

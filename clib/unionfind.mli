@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -78,5 +78,5 @@ end
 
 module Make :
   functor (S:SetS) ->
-    functor (M:MapS with type key = S.elt) ->
+    functor (_:MapS with type key = S.elt) ->
       PartitionSig with type elt = S.elt and type set = S.t
