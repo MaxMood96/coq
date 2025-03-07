@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -114,7 +114,7 @@ val subst_of_rel_context_instance_list : Constr.rel_context -> instance_list -> 
 
 (** Take an index in an instance of a context and returns its index wrt to
     the full context (e.g. 2 in [x:A;y:=b;z:C] is 3, i.e. a reference to z) *)
-val adjust_rel_to_rel_context : ('a, 'b) Context.Rel.pt -> int -> int
+val adjust_rel_to_rel_context : ('a, 'b, 'r) Context.Rel.pt -> int -> int
 
 (** [substnl [a₁;...;an] k c] substitutes in parallel [a₁],...,[an]
     for respectively [Rel(k+1)],...,[Rel(k+n)] in [c]; it relocates
@@ -186,12 +186,12 @@ val smash_rel_context : rel_context -> rel_context
 
 (** {3 Substitution of universes} *)
 
-open Univ
+open UVars
 
 (** Level substitutions for polymorphism. *)
 
-val subst_univs_level_constr : universe_level_subst -> constr -> constr
-val subst_univs_level_context : Univ.universe_level_subst -> Constr.rel_context -> Constr.rel_context
+val subst_univs_level_constr : sort_level_subst -> constr -> constr
+val subst_univs_level_context : sort_level_subst -> Constr.rel_context -> Constr.rel_context
 
 (** Instance substitution for polymorphism. *)
 val subst_instance_constr : Instance.t -> constr -> constr
@@ -200,7 +200,23 @@ val subst_instance_context : Instance.t -> Constr.rel_context -> Constr.rel_cont
 val univ_instantiate_constr : Instance.t -> constr univ_abstracted -> constr
 (** Ignores the constraints carried by [univ_abstracted]. *)
 
-val universes_of_constr : constr -> Univ.Level.Set.t
+val map_constr_relevance : (Sorts.relevance -> Sorts.relevance) -> Constr.t -> Constr.t
+(** Modifies the relevances in the head node (not in subterms) *)
+
+val sort_and_universes_of_constr : ?init:Sorts.QVar.Set.t * Univ.Level.Set.t -> constr -> Sorts.QVar.Set.t * Univ.Level.Set.t
+
+val universes_of_constr : ?init:Univ.Level.Set.t -> constr -> Univ.Level.Set.t
+
+type ('a,'s,'u,'r) univ_visitor = {
+  visit_sort : 'a -> 's -> 'a;
+  visit_instance : 'a -> 'u -> 'a;
+  visit_relevance : 'a -> 'r -> 'a;
+}
+
+val visit_kind_univs : ('acc, 'sort, 'instance, 'relevance) univ_visitor ->
+  'acc ->
+  (_, _, 'sort, 'instance, 'relevance) Constr.kind_of_term ->
+  'acc
 
 (** {3 Low-level cached lift type} *)
 

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -9,6 +9,7 @@
 (************************************************************************)
 
 open Univ
+open UVars
 
 (** {6 Graphs of universes. } *)
 type t
@@ -49,7 +50,8 @@ type explanation =
   | Path of path_explanation
   | Other of Pp.t
 
-type univ_inconsistency = constraint_type * Sorts.t * Sorts.t * explanation option
+type univ_variable_printers = (Sorts.QVar.t -> Pp.t) * (Level.t -> Pp.t)
+type univ_inconsistency = univ_variable_printers option * (constraint_type * Sorts.t * Sorts.t * explanation option)
 
 exception UniverseInconsistency of univ_inconsistency
 
@@ -69,19 +71,10 @@ val enforce_leq_alg : Univ.Universe.t -> Univ.Universe.t -> t -> Univ.Constraint
 
 exception AlreadyDeclared
 
-module Bound :
-sig
-  type t = Prop | Set
-  (** The [Prop] bound is only used for template polymorphic inductive types. *)
-end
+val add_universe : Level.t -> strict:bool -> t -> t
 
-val add_universe : Level.t -> lbound:Bound.t -> strict:bool -> t -> t
-
-(** Check that the universe levels are declared. Otherwise
-    @raise UndeclaredLevel l for the first undeclared level found. *)
-exception UndeclaredLevel of Univ.Level.t
-
-val check_declared_universes : t -> Univ.Level.Set.t -> unit
+(** Check that the universe levels are declared. *)
+val check_declared_universes : t -> Univ.Level.Set.t -> (unit, Univ.Level.Set.t) result
 
 (** The empty graph of universes *)
 val empty_universes : t
@@ -120,8 +113,16 @@ val repr : t -> node Level.Map.t
 
 val pr_universes : (Level.t -> Pp.t) -> node Level.Map.t -> Pp.t
 
-val explain_universe_inconsistency : (Level.t -> Pp.t) ->
+val explain_universe_inconsistency : (Sorts.QVar.t -> Pp.t) -> (Level.t -> Pp.t) ->
   univ_inconsistency -> Pp.t
 
 (** {6 Debugging} *)
 val check_universes_invariants : t -> unit
+
+module Internal : sig
+  (** Makes the qvars treated as above prop.
+      Do not use outside kernel inductive typechecking. *)
+  val add_template_qvars : Sorts.QVar.Set.t -> t -> t
+
+  val is_above_prop : t -> Sorts.QVar.t -> bool
+end

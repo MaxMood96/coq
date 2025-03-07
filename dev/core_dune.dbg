@@ -4,6 +4,7 @@ load_printer zarith.cma
 load_printer config.cma
 load_printer clib.cma
 load_printer boot.cma
+load_printer perf.cma
 load_printer lib.cma
 load_printer gramlib.cma
 load_printer coqrun.cma
@@ -20,6 +21,6 @@ load_printer findlib.cma
 load_printer findlib_dynload.cma
 load_printer vernac.cma
 load_printer sysinit.cma
-load_printer coqworkmgrapi.cma
+load_printer coqworkmgrlib.cma
 load_printer stm.cma
 load_printer toplevel.cma

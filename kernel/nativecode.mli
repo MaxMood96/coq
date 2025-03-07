@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -17,7 +17,6 @@ open Nativevalues
 compiler. mllambda represents a fragment of ML, and can easily be printed
 to OCaml code. *)
 
-type mllambda
 type global
 
 val debug_native_compiler : CDebug.t
@@ -45,7 +44,7 @@ val get_ind : symbols -> int -> inductive
 
 val get_evar : symbols -> int -> Evar.t
 
-val get_level : symbols -> int -> Univ.Level.t
+val get_instance : symbols -> int -> UVars.Instance.t
 
 val get_proj : symbols -> int -> inductive * int
 
@@ -63,10 +62,13 @@ val register_native_file : string -> unit
 val is_loaded_native_file : string -> bool
 
 val compile_constant_field : env -> Constant.t ->
-  global list -> 'a pconstant_body -> global list
+  global list -> constant_body -> global list
 
 val compile_mind_field : ModPath.t -> Label.t ->
   global list -> mutual_inductive_body -> global list
+
+val compile_rewrite_rules : env -> Label.t ->
+  global list -> rewrite_rules_body -> global list
 
 val mk_conv_code : env -> Genlambda.evars -> string -> constr -> constr -> linkable_code
 val mk_norm_code : env -> Genlambda.evars -> string -> constr -> linkable_code

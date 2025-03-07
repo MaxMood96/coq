@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,6 +12,7 @@ open Util
 open Names
 open Indfun_common
 module RelDecl = Context.Rel.Declaration
+module ERelevance = EConstr.ERelevance
 
 let observe_tac s =
   observe_tac ~header:(Pp.str "observation") (fun _ _ -> Pp.str s)
@@ -22,9 +23,9 @@ let observe_tac s =
 *)
 let rec abstract_glob_constr c = function
   | [] -> c
-  | Constrexpr.CLocalDef (x, b, t) :: bl ->
+  | Constrexpr.CLocalDef (x, _, b, t) :: bl ->
     Constrexpr_ops.mkLetInC (x, b, t, abstract_glob_constr c bl)
-  | Constrexpr.CLocalAssum (idl, k, t) :: bl ->
+  | Constrexpr.CLocalAssum (idl, _, k, t) :: bl ->
     List.fold_right
       (fun x b -> Constrexpr_ops.mkLambdaC ([x], k, t, b))
       idl
@@ -43,7 +44,7 @@ let build_newrecursive lnameargsardef =
         let arityc = Constrexpr_ops.mkCProdN binders rtype in
         let arity, _ctx = Constrintern.interp_type env0 sigma arityc in
         let evd = Evd.from_env env0 in
-        let evd, (_, (_, impls')) =
+        let evd, (_, (_, impls', _locs)) =
           Constrintern.interp_context_evars ~program_mode:false env evd binders
         in
         let impl =
@@ -51,7 +52,7 @@ let build_newrecursive lnameargsardef =
             Constrintern.Recursive arity impls'
         in
         let open Context.Named.Declaration in
-        let r = Sorts.Relevant in
+        let r = ERelevance.relevant in
         (* TODO relevance *)
         ( EConstr.push_named
             (LocalAssum (Context.make_annot recname r, arity))
@@ -83,16 +84,17 @@ let is_rec names =
   let rec lookup names gt =
     match DAst.get gt with
     | GVar id -> check_id id names
-    | GRef _ | GEvar _ | GPatVar _ | GSort _ | GHole _ | GGenarg _ | GInt _ | GFloat _ ->
+    | GRef _ | GEvar _ | GPatVar _ | GSort _ | GHole _ | GGenarg _
+    | GInt _ | GFloat _ | GString _ ->
       false
     | GCast (b, _, _) -> lookup names b
     | GRec _ -> CErrors.user_err (Pp.str "GRec not handled")
     | GIf (b, _, lhs, rhs) ->
       lookup names b || lookup names lhs || lookup names rhs
-    | GProd (na, _, t, b) | GLambda (na, _, t, b) ->
+    | GProd (na, _, _, t, b) | GLambda (na, _, _, t, b) ->
       lookup names t
       || lookup (Nameops.Name.fold_right Id.Set.remove na names) b
-    | GLetIn (na, b, t, c) ->
+    | GLetIn (na, _, b, t, c) ->
       lookup names b
       || Option.cata (lookup names) true t
       || lookup (Nameops.Name.fold_right Id.Set.remove na names) c
@@ -119,9 +121,9 @@ let rec rebuild_bl aux bl typ =
   let open Constrexpr in
   match (bl, typ) with
   | [], _ -> (List.rev aux, typ)
-  | CLocalAssum (nal, bk, _) :: bl', typ -> rebuild_nal aux bk bl' nal typ
-  | CLocalDef (na, _, _) :: bl', {CAst.v = CLetIn (_, nat, ty, typ')} ->
-    rebuild_bl (Constrexpr.CLocalDef (na, nat, ty) :: aux) bl' typ'
+  | CLocalAssum (nal, _, bk, _) :: bl', typ -> rebuild_nal aux bk bl' nal typ
+  | CLocalDef (na, _, _, _) :: bl', {CAst.v = CLetIn (_, nat, ty, typ')} ->
+    rebuild_bl (Constrexpr.CLocalDef (na, None, nat, ty) :: aux) bl' typ'
   | _ -> assert false
 
 and rebuild_nal aux bk bl' nal typ =
@@ -130,19 +132,19 @@ and rebuild_nal aux bk bl' nal typ =
   | _, {CAst.v = CProdN ([], typ)} -> rebuild_nal aux bk bl' nal typ
   | [], _ -> rebuild_bl aux bl' typ
   | ( na :: nal
-    , {CAst.v = CProdN (CLocalAssum (na' :: nal', bk', nal't) :: rest, typ')} )
+    , {CAst.v = CProdN (CLocalAssum (na' :: nal', _, bk', nal't) :: rest, typ')} )
     ->
     if Name.equal na.CAst.v na'.CAst.v || Name.is_anonymous na'.CAst.v then
-      let assum = CLocalAssum ([na], bk, nal't) in
+      let assum = CLocalAssum ([na], None, bk, nal't) in
       let new_rest =
-        if nal' = [] then rest else CLocalAssum (nal', bk', nal't) :: rest
+        if nal' = [] then rest else CLocalAssum (nal', None, bk', nal't) :: rest
       in
       rebuild_nal (assum :: aux) bk bl' nal
         (CAst.make @@ CProdN (new_rest, typ'))
     else
-      let assum = CLocalAssum ([na'], bk, nal't) in
+      let assum = CLocalAssum ([na'], None, bk, nal't) in
       let new_rest =
-        if nal' = [] then rest else CLocalAssum (nal', bk', nal't) :: rest
+        if nal' = [] then rest else CLocalAssum (nal', None, bk', nal't) :: rest
       in
       rebuild_nal (assum :: aux) bk bl' (na :: nal)
         (CAst.make @@ CProdN (new_rest, typ'))
@@ -150,24 +152,12 @@ and rebuild_nal aux bk bl' nal typ =
 
 let rebuild_bl aux bl typ = rebuild_bl aux bl typ
 
-let recompute_binder_list fixpoint_exprl =
-  let fixl =
-    List.map
-      (fun fix ->
-        Vernacexpr.
-          { fix with
-            rec_order =
-              ComFixpoint.adjust_rec_order ~structonly:false fix.binders
-                fix.rec_order })
-      fixpoint_exprl
-  in
-  let (_, _, _, typel), _, ctx, _ =
-    ComFixpoint.interp_fixpoint ~check_recursivity:false ~cofix:false fixl
-  in
+let recompute_binder_list (rec_order, fixpoint_exprl) =
+  let typel, sigma = ComFixpoint.interp_fixpoint_short rec_order fixpoint_exprl in
   let constr_expr_typel =
     with_full_print
       (List.map (fun c ->
-           Constrextern.extern_constr (Global.env ()) (Evd.from_ctx ctx)
+           Constrextern.extern_constr (Global.env ()) sigma
              (EConstr.of_constr c)))
       typel
   in
@@ -184,7 +174,7 @@ let rec local_binders_length = function
   (* Assume that no `{ ... } contexts occur *)
   | [] -> 0
   | Constrexpr.CLocalDef _ :: bl -> 1 + local_binders_length bl
-  | Constrexpr.CLocalAssum (idl, _, _) :: bl ->
+  | Constrexpr.CLocalAssum (idl, _, _, _) :: bl ->
     List.length idl + local_binders_length bl
   | Constrexpr.CLocalPattern _ :: bl -> assert false
 
@@ -198,8 +188,8 @@ let build_functional_principle env (sigma : Evd.evar_map) old_princ_type sorts f
     _i proof_tac hook =
   (* First we get the type of the old graph principle *)
   let mutr_nparams =
-    (Tactics.compute_elim_sig sigma (EConstr.of_constr old_princ_type))
-      .Tactics.nparams
+    (Induction.compute_elim_sig sigma (EConstr.of_constr old_princ_type))
+      .Induction.nparams
   in
   let new_principle_type =
     Functional_principles_types.compute_new_princ_type_from_rel (Global.env ())
@@ -212,7 +202,7 @@ let build_functional_principle env (sigma : Evd.evar_map) old_princ_type sorts f
   in
   let map (c, u) = EConstr.mkConstU (c, EConstr.EInstance.make u) in
   let ftac = proof_tac (Array.map map funs) mutr_nparams in
-  let uctx = Evd.evar_universe_context sigma in
+  let uctx = Evd.ustate sigma in
   let typ = EConstr.of_constr new_principle_type in
   let body, typ, univs, _safe, _uctx =
     Declare.build_by_tactic env ~uctx ~poly:false ~typ ftac
@@ -225,10 +215,10 @@ let change_property_sort evd toSort princ princName =
   let open Context.Rel.Declaration in
   let toSort = EConstr.ESorts.kind evd toSort in
   let princ = EConstr.of_constr princ in
-  let princ_info = Tactics.compute_elim_sig evd princ in
+  let princ_info = Induction.compute_elim_sig evd princ in
   let change_sort_in_predicate decl =
     LocalAssum
-      ( get_annot decl
+      ( EConstr.Unsafe.to_binder_annot @@ get_annot decl
       , let args, ty =
           Term.decompose_prod (EConstr.Unsafe.to_constr (get_type decl))
         in
@@ -244,7 +234,7 @@ let change_property_sort evd toSort princ princName =
   in
   let init =
     let nargs =
-      princ_info.Tactics.nparams + List.length princ_info.Tactics.predicates
+      princ_info.Induction.nparams + List.length princ_info.Induction.predicates
     in
     Constr.mkApp
       ( EConstr.Unsafe.to_constr princName_as_constr
@@ -253,10 +243,8 @@ let change_property_sort evd toSort princ princName =
   ( evd
   , Term.it_mkLambda_or_LetIn
       (Term.it_mkLambda_or_LetIn init
-         (List.map change_sort_in_predicate princ_info.Tactics.predicates))
-      (List.map
-         (fun d -> Termops.map_rel_decl EConstr.Unsafe.to_constr d)
-         princ_info.Tactics.params) )
+         (List.map change_sort_in_predicate princ_info.Induction.predicates))
+      (EConstr.Unsafe.to_rel_context princ_info.Induction.params) )
 
 let generate_functional_principle (evd : Evd.evar_map ref) old_princ_type sorts
     new_princ_name funs i proof_tac =
@@ -269,12 +257,12 @@ let generate_functional_principle (evd : Evd.evar_map ref) old_princ_type sorts
       | None -> Array.make (Array.length funs) type_sort
       | Some a -> a
     in
-    let base_new_princ_name, new_princ_name =
+    let base_new_princ_name, new_princ_name, loc =
       match new_princ_name with
-      | Some id -> (id, id)
+      | Some {CAst.v=id; loc} -> (id, id, loc)
       | None ->
         let id_of_f = Label.to_id (Constant.label (fst f)) in
-        (id_of_f, Indrec.make_elimination_ident id_of_f (EConstr.ESorts.family !evd type_sort))
+        (id_of_f, Indrec.make_elimination_ident id_of_f (EConstr.ESorts.family !evd type_sort), None)
     in
     let names = ref [new_princ_name] in
     let hook new_principle_type _ =
@@ -298,7 +286,7 @@ let generate_functional_principle (evd : Evd.evar_map ref) old_princ_type sorts
           let univs = Evd.univ_entry ~poly:false evd' in
           let ce = Declare.definition_entry ~univs value in
           ignore
-            (Declare.declare_constant ~name
+            (Declare.declare_constant ?loc ~name
                ~kind:Decls.(IsDefinition Scheme)
                (Declare.DefinitionEntry ce));
           Declare.definition_message name;
@@ -315,7 +303,7 @@ let generate_functional_principle (evd : Evd.evar_map ref) old_princ_type sorts
     (* Pr  1278 :
        Don't forget to close the goal if an error is raised !!!!
     *)
-    let uctx = Evd.evar_universe_context sigma in
+    let uctx = Evd.ustate sigma in
     let entry = Declare.definition_entry ~univs ?types body in
     let (_ : Names.GlobRef.t) =
       Declare.declare_entry ~name:new_princ_name ~hook
@@ -387,7 +375,7 @@ let generate_principle (evd : Evd.evar_map ref) pconstants on_error is_general
     end
   with e when CErrors.noncritical e -> on_error names e
 
-let register_struct is_rec fixpoint_exprl =
+let register_struct is_rec (rec_order, fixpoint_exprl) =
   let open EConstr in
   match fixpoint_exprl with
   | [{Vernacexpr.fname; univs; binders; rtype; body_def}] when not is_rec ->
@@ -398,7 +386,7 @@ let register_struct is_rec fixpoint_exprl =
         CErrors.user_err
           Pp.(str "Body of Function must be given.")
     in
-    ComDefinition.do_definition ~name:fname.CAst.v ~poly:false
+    ComDefinition.do_definition ?loc:fname.CAst.loc ~name:fname.CAst.v ~poly:false
       ~kind:Decls.Definition univs binders None body (Some rtype);
     let evd, rev_pconstants =
       List.fold_left
@@ -416,7 +404,8 @@ let register_struct is_rec fixpoint_exprl =
     in
     (None, evd, List.rev rev_pconstants)
   | _ ->
-    ComFixpoint.do_fixpoint ~poly:false fixpoint_exprl;
+    let pm, p = ComFixpoint.do_mutually_recursive ~program_mode:false ~poly:false ~kind:(IsDefinition Fixpoint) (CFixRecOrder rec_order, fixpoint_exprl) in
+    assert (Option.is_empty pm && Option.is_empty p);
     let evd, rev_pconstants =
       List.fold_left
         (fun (evd, l) {Vernacexpr.fname} ->
@@ -453,17 +442,17 @@ let generate_correction_proof_wf f_ref tcc_lemma_ref is_mes functional_ref
    res = fv \rightarrow graph\ x_1\ldots x_n\ res\] decomposed as the context and the conclusion
 *)
 
-let generate_type evd g_to_f f graph =
+let generate_type env evd g_to_f f graph =
   let open Context.Rel.Declaration in
   let open EConstr in
   let open EConstr.Vars in
   (*i we deduce the number of arguments of the function and its returned type from the graph i*)
   let evd', graph =
-    Evd.fresh_global (Global.env ()) !evd
+    Evd.fresh_global env !evd
       (GlobRef.IndRef (fst (destInd !evd graph)))
   in
   evd := evd';
-  let sigma, graph_arity = Typing.type_of (Global.env ()) !evd graph in
+  let sigma, graph_arity = Typing.type_of env !evd graph in
   evd := sigma;
   let ctxt, _ = decompose_prod_decls !evd graph_arity in
   let fun_ctxt, res_type =
@@ -484,10 +473,10 @@ let generate_type evd g_to_f f graph =
   in
   let named_ctxt = Id.Set.of_list (List.map_filter filter fun_ctxt) in
   let res_id =
-    Namegen.next_ident_away_in_goal (Global.env ()) (Id.of_string "_res") named_ctxt
+    Namegen.next_ident_away_in_goal env (Id.of_string "_res") named_ctxt
   in
   let fv_id =
-    Namegen.next_ident_away_in_goal (Global.env ()) (Id.of_string "fv")
+    Namegen.next_ident_away_in_goal env (Id.of_string "fv")
       (Id.Set.add res_id named_ctxt)
   in
   (*i we can then type the argument to be applied to the function [f] i*)
@@ -511,21 +500,21 @@ let generate_type evd g_to_f f graph =
     \[\forall (x_1:t_1)\ldots(x_n:t_n), let fv := f x_1\ldots x_n in, forall res,  \]
     i*)
   let pre_ctxt =
-    LocalAssum (Context.make_annot (Name res_id) Sorts.Relevant, lift 1 res_type)
+    LocalAssum (Context.make_annot (Name res_id) ERelevance.relevant, lift 1 res_type)
     :: LocalDef
-         ( Context.make_annot (Name fv_id) Sorts.Relevant
+         ( Context.make_annot (Name fv_id) ERelevance.relevant
          , mkApp (f, args_as_rels)
          , res_type )
     :: fun_ctxt
   in
   (*i and we can return the solution depending on which lemma type we are defining i*)
   if g_to_f then
-    ( LocalAssum (Context.make_annot Anonymous Sorts.Relevant, graph_applied)
+    ( LocalAssum (Context.make_annot Anonymous ERelevance.relevant, graph_applied)
       :: pre_ctxt
     , lift 1 res_eq_f_of_args
     , graph )
   else
-    ( LocalAssum (Context.make_annot Anonymous Sorts.Relevant, res_eq_f_of_args)
+    ( LocalAssum (Context.make_annot Anonymous ERelevance.relevant, res_eq_f_of_args)
       :: pre_ctxt
     , lift 1 graph_applied
     , graph )
@@ -535,7 +524,7 @@ let generate_type evd g_to_f f graph =
 
    WARNING: while convertible, [type_of body] and [type] can be non equal
 *)
-let find_induction_principle evd f =
+let find_induction_principle env evd f =
   let f_as_constant, _u =
     match EConstr.kind !evd f with
     | Constr.Const c' -> c'
@@ -548,10 +537,10 @@ let find_induction_principle evd f =
     | None -> raise Not_found
     | Some rect_lemma ->
       let evd', rect_lemma =
-        Evd.fresh_global (Global.env ()) !evd (GlobRef.ConstRef rect_lemma)
+        Evd.fresh_global env !evd (GlobRef.ConstRef rect_lemma)
       in
       let evd', typ =
-        Typing.type_of ~refresh:true (Global.env ()) evd' rect_lemma
+        Typing.type_of ~refresh:true env evd' rect_lemma
       in
       evd := evd';
       (rect_lemma, typ) )
@@ -606,7 +595,7 @@ let prove_fun_correct evd graphs_constr schemes lemmas_types_infos i :
       (* and the principle to use in this lemma in $\zeta$ normal form *)
       let f_principle, princ_type = schemes.(i) in
       let princ_type = Reductionops.nf_zeta (Global.env ()) evd princ_type in
-      let princ_infos = Tactics.compute_elim_sig evd princ_type in
+      let princ_infos = Induction.compute_elim_sig evd princ_type in
       (* The number of args of the function is then easily computable *)
       let nb_fun_args =
         Termops.nb_prod (Proofview.Goal.sigma g) (Proofview.Goal.concl g) - 2
@@ -623,7 +612,7 @@ let prove_fun_correct evd graphs_constr schemes lemmas_types_infos i :
       in
       let ids = principle_id :: ids in
       (* We get the branches of the principle *)
-      let branches = List.rev princ_infos.Tactics.branches in
+      let branches = List.rev princ_infos.Induction.branches in
       (* and built the intro pattern for each of them *)
       let intro_pats =
         List.map
@@ -689,7 +678,7 @@ let prove_fun_correct evd graphs_constr schemes lemmas_types_infos i :
         (* in fact we must also add the parameters to the constructor args *)
         let constructor_args g =
           let params_id =
-            fst (List.chop princ_infos.Tactics.nparams args_names)
+            fst (List.chop princ_infos.Induction.nparams args_names)
           in
           List.map mkVar params_id @ constructor_args g
         in
@@ -857,7 +846,7 @@ let thin = Tactics.clear
 *)
 let tauto =
   let open Ltac_plugin in
-  let dp = List.map Id.of_string ["Tauto"; "Init"; "Coq"] in
+  let dp = List.map Id.of_string ["Tauto"; "Init"; "Corelib"] in
   let mp = ModPath.MPfile (DirPath.make dp) in
   let kn = KerName.make mp (Label.make "tauto") in
   Proofview.tclBIND (Proofview.tclUNIT ()) (fun () ->
@@ -877,7 +866,7 @@ let generalize_dependent_of x hyp =
             when (not (Id.equal id hyp))
                  && Termops.occur_var (Proofview.Goal.env g)
                       (Proofview.Goal.sigma g) x t ->
-            tclTHEN (Tactics.generalize [EConstr.mkVar id]) (thin [id])
+            tclTHEN (Generalize.generalize [EConstr.mkVar id]) (thin [id])
           | _ -> Proofview.tclUNIT ())
         (Proofview.Goal.hyps g))
 
@@ -912,13 +901,13 @@ and intros_with_rewrite_aux () : unit Proofview.tactic =
             tclTHENLIST
               [ unfold_in_concl
                   [ ( Locus.AllOccurrences
-                    , Tacred.EvalVarRef (destVar sigma args.(1)) ) ]
+                    , Evaluable.EvalVarRef (destVar sigma args.(1)) ) ]
               ; tclMAP
                   (fun id ->
                     tclTRY
                       (unfold_in_hyp
                          [ ( Locus.AllOccurrences
-                           , Tacred.EvalVarRef (destVar sigma args.(1)) ) ]
+                           , Evaluable.EvalVarRef (destVar sigma args.(1)) ) ]
                          (destVar sigma args.(1), Locus.InHyp)))
                   (pf_ids_of_hyps g)
               ; intros_with_rewrite () ]
@@ -931,13 +920,13 @@ and intros_with_rewrite_aux () : unit Proofview.tactic =
             tclTHENLIST
               [ unfold_in_concl
                   [ ( Locus.AllOccurrences
-                    , Tacred.EvalVarRef (destVar sigma args.(2)) ) ]
+                    , Evaluable.EvalVarRef (destVar sigma args.(2)) ) ]
               ; tclMAP
                   (fun id ->
                     tclTRY
                       (unfold_in_hyp
                          [ ( Locus.AllOccurrences
-                           , Tacred.EvalVarRef (destVar sigma args.(2)) ) ]
+                           , Evaluable.EvalVarRef (destVar sigma args.(2)) ) ]
                          (destVar sigma args.(2), Locus.InHyp)))
                   (pf_ids_of_hyps g)
               ; intros_with_rewrite () ]
@@ -965,7 +954,7 @@ and intros_with_rewrite_aux () : unit Proofview.tactic =
           when EConstr.eq_constr sigma t
                  (EConstr.of_constr
                     ( UnivGen.constr_of_monomorphic_global (Global.env ())
-                    @@ Coqlib.lib_ref "core.False.type" )) ->
+                    @@ Rocqlib.lib_ref "core.False.type" )) ->
           tauto
         | Case (_, _, _, _, _, v, _) ->
           tclTHENLIST [simplest_case v; intros_with_rewrite ()]
@@ -1076,7 +1065,7 @@ let prove_fun_complete funcs graphs schemes lemmas_types_infos i :
           (EConstr.of_constr schemes.(i))
       in
       tclTYPEOFTHEN graph_principle (fun sigma princ_type ->
-          let princ_infos = Tactics.compute_elim_sig sigma princ_type in
+          let princ_infos = Induction.compute_elim_sig sigma princ_type in
           (* Then we get the number of argument of the function
              and compute a fresh name for each of them
           *)
@@ -1140,12 +1129,12 @@ let prove_fun_complete funcs graphs schemes lemmas_types_infos i :
                     (Genredexpr.Cbv
                        {Redops.all_flags with Genredexpr.rDelta = false})
                     Locusops.onConcl
-                ; generalize (List.map mkVar ids)
+                ; Generalize.generalize (List.map mkVar ids)
                 ; thin ids ]
             else
               unfold_in_concl
                 [ ( Locus.AllOccurrences
-                  , Tacred.EvalConstRef
+                  , Evaluable.EvalConstRef
                       (fst (destConst (Proofview.Goal.sigma g) f)) ) ]
           in
           (* The proof of each branche itself *)
@@ -1181,7 +1170,7 @@ let prove_fun_complete funcs graphs schemes lemmas_types_infos i :
           tclTHENLIST
             [ tclMAP Simple.intro (args_names @ [res; hres])
             ; observe_tac "h_generalize"
-                (generalize
+                (Generalize.generalize
                    [ mkApp
                        ( applist (graph_principle, params)
                        , Array.map (fun c -> applist (c, params)) lemmas ) ])
@@ -1218,18 +1207,20 @@ let get_funs_constant mp =
   function
   | const ->
     let find_constant_body const =
-      match Global.body_of_constant Library.indirect_accessor const with
-      | Some (body, _, _) ->
+      let env = Global.env () in
+      let body = Environ.lookup_constant const env in
+      match body.Declarations.const_body with
+      | Def body ->
         let body =
-          Tacred.cbv_norm_flags
-            (CClosure.RedFlags.mkflags [CClosure.RedFlags.fZETA])
-            (Global.env ())
-            (Evd.from_env (Global.env ()))
+          Tacred.cbv_norm_flags ~strong:true
+            (RedFlags.mkflags [RedFlags.fZETA])
+            env
+            (Evd.from_env env)
             (EConstr.of_constr body)
         in
         let body = EConstr.Unsafe.to_constr body in
         body
-      | None ->
+      | Undef _ | OpaqueDef _ | Primitive _ | Symbol _ ->
         CErrors.user_err Pp.(str "Cannot define a principle over an axiom ")
     in
     let f = find_constant_body const in
@@ -1253,7 +1244,7 @@ let get_funs_constant mp =
             not
               (List.equal
                  (fun (n1, c1) (n2, c2) ->
-                   Context.eq_annot Name.equal n1 n2 && Constr.equal c1 c2)
+                   Context.eq_annot Name.equal Sorts.relevance_equal n1 n2 && Constr.equal c1 c2)
                  first_params params)
           then CErrors.user_err Pp.(str "Not a mutal recursive block"))
         l_params
@@ -1273,7 +1264,7 @@ let get_funs_constant mp =
           (* Hope this is correct *)
           let eq_infos (ia1, na1, ta1, ca1) (ia2, na2, ta2, ca2) =
             Array.equal Int.equal ia1 ia2
-            && Array.equal (Context.eq_annot Name.equal) na1 na2
+            && Array.equal (Context.eq_annot Name.equal Sorts.relevance_equal) na1 na2
             && Array.equal Constr.equal ta1 ta2
             && Array.equal Constr.equal ca1 ca2
           in
@@ -1300,7 +1291,6 @@ let make_scheme evd (fas : (Constr.pconstant * Sorts.family) list) : _ list =
   let this_block_funs =
     Array.map (fun (c, _) -> (c, snd first_fun)) this_block_funs_indexes
   in
-  let prop_sort = Sorts.InProp in
   let funs_indexes =
     let this_block_funs_indexes = Array.to_list this_block_funs_indexes in
     let eq c1 c2 = Environ.QConstant.equal env c1 c2 in
@@ -1312,15 +1302,14 @@ let make_scheme evd (fas : (Constr.pconstant * Sorts.family) list) : _ list =
     List.map
       (fun idx ->
         let ind = (first_fun_kn, idx) in
-        ((ind, snd first_fun), true, prop_sort))
+        ((ind, EConstr.EInstance.make @@ snd first_fun), true, EConstr.ESorts.prop))
       funs_indexes
   in
   let sigma, schemes = Indrec.build_mutual_induction_scheme env !evd ind_list in
   let _ = evd := sigma in
   let l_schemes =
     List.map
-      ( EConstr.of_constr
-      %> Retyping.get_type_of env sigma
+      (Retyping.get_type_of env sigma
       %> EConstr.Unsafe.to_constr )
       schemes
   in
@@ -1449,22 +1438,22 @@ let derive_correctness (funs : Constr.pconstant list) (graphs : inductive list)
         Util.Array.map2_i
           (fun i f_constr graph ->
             let type_of_lemma_ctxt, type_of_lemma_concl, graph =
-              generate_type evd false f_constr graph
+              generate_type env evd false f_constr graph
             in
             let type_info = (type_of_lemma_ctxt, type_of_lemma_concl) in
             graphs_constr.(i) <- graph;
             let type_of_lemma =
               EConstr.it_mkProd_or_LetIn type_of_lemma_concl type_of_lemma_ctxt
             in
-            let sigma, _ = Typing.type_of (Global.env ()) !evd type_of_lemma in
+            let sigma, _ = Typing.type_of env !evd type_of_lemma in
             evd := sigma;
             let type_of_lemma =
-              Reductionops.nf_zeta (Global.env ()) !evd type_of_lemma
+              Reductionops.nf_zeta env !evd type_of_lemma
             in
             observe
               Pp.(
                 str "type_of_lemma := "
-                ++ Printer.pr_leconstr_env (Global.env ()) !evd type_of_lemma);
+                ++ Printer.pr_leconstr_env env !evd type_of_lemma);
             (type_of_lemma, type_info))
           funs_constr graphs_constr
       in
@@ -1474,7 +1463,7 @@ let derive_correctness (funs : Constr.pconstant list) (graphs : inductive list)
         *)
         try
           if not (Int.equal (Array.length funs_constr) 1) then raise Not_found;
-          [|find_induction_principle evd funs_constr.(0)|]
+          [|find_induction_principle env evd funs_constr.(0)|]
         with Not_found ->
           Array.of_list
             (List.map
@@ -1515,11 +1504,12 @@ let derive_correctness (funs : Constr.pconstant list) (graphs : inductive list)
           let lem_cst, _ = EConstr.destConst !evd lem_cst_constr in
           update_Function {finfo with correctness_lemma = Some lem_cst})
         funs;
+      let env = Global.env () in
       let lemmas_types_infos =
         Util.Array.map2_i
           (fun i f_constr graph ->
             let type_of_lemma_ctxt, type_of_lemma_concl, graph =
-              generate_type evd true f_constr graph
+              generate_type env evd true f_constr graph
             in
             let type_info = (type_of_lemma_ctxt, type_of_lemma_concl) in
             graphs_constr.(i) <- graph;
@@ -1535,16 +1525,18 @@ let derive_correctness (funs : Constr.pconstant list) (graphs : inductive list)
           funs_constr graphs_constr
       in
       let ((kn, _) as graph_ind), u = destInd !evd graphs_constr.(0) in
-      let mib, _mip = Global.lookup_inductive graph_ind in
+      let mib, _mip = Inductive.lookup_mind_specif env graph_ind in
       let sigma, scheme =
-        Indrec.build_mutual_induction_scheme (Global.env ()) !evd
-          (Array.to_list
-             (Array.mapi
-                (fun i _ ->
-                  (((kn, i), EInstance.kind !evd u), true, Sorts.InType))
-                mib.Declarations.mind_packets))
+        let sigma, inds = CArray.fold_left_map_i (fun i sigma _ ->
+            let sigma, s = Evd.fresh_sort_in_family ~rigid:UnivRigid sigma InType in
+            sigma, (((kn, i), u), true, s))
+            !evd
+            mib.mind_packets
+        in
+        Indrec.build_mutual_induction_scheme env sigma
+          (Array.to_list inds)
       in
-      let schemes = Array.of_list scheme in
+      let schemes = Array.map_of_list EConstr.Unsafe.to_constr scheme in
       let proving_tac =
         prove_fun_complete funs_constr mib.Declarations.mind_packets schemes
           lemmas_types_infos
@@ -1594,15 +1586,15 @@ let warn_funind_cannot_build_inversion =
         strbrk "Cannot build inversion information"
         ++ if do_observe () then fnl () ++ CErrors.print e' else mt ())
 
-let derive_inversion fix_names =
+let derive_inversion env fix_names =
   try
-    let evd' = Evd.from_env (Global.env ()) in
+    let evd' = Evd.from_env env in
     (* we first transform the fix_names identifier into their corresponding constant *)
     let evd', fix_names_as_constant =
       List.fold_right
         (fun id (evd, l) ->
           let evd, c =
-            Evd.fresh_global (Global.env ()) evd
+            Evd.fresh_global env evd
               (Option.get (Constrintern.locate_reference (Libnames.qualid_of_ident id)))
           in
           let cst, u = EConstr.destConst evd c in
@@ -1622,7 +1614,7 @@ let derive_inversion fix_names =
         List.fold_right
           (fun id (evd, l) ->
             let evd, id =
-              Evd.fresh_global (Global.env ()) evd
+              Evd.fresh_global env evd
                 (Option.get (Constrintern.locate_reference
                    (Libnames.qualid_of_ident (mk_rel_id id))))
             in
@@ -1667,7 +1659,7 @@ let register_wf interactive_proof ?(is_mes = false) fname rec_impls wf_rel_expr
       pre_hook [fconst]
         (generate_correction_proof_wf f_ref tcc_lemma_ref is_mes functional_ref
            eq_ref rec_arg_num rec_arg_type relation);
-      derive_inversion [fname]
+      derive_inversion (Global.env ()) [fname]
     with e when CErrors.noncritical e -> (* No proof done *)
                                          ()
   in
@@ -1680,14 +1672,14 @@ let register_mes interactive_proof fname rec_impls wf_mes_expr wf_rel_expr_opt
     match wf_arg with
     | None -> (
       match args with
-      | [Constrexpr.CLocalAssum ([{CAst.v = Name x}], _k, t)] -> (t, x)
+      | [Constrexpr.CLocalAssum ([{CAst.v = Name x}], _, _k, t)] -> (t, x)
       | _ -> CErrors.user_err (Pp.str "Recursive argument must be specified") )
     | Some wf_args -> (
       try
         match
           List.find
             (function
-              | Constrexpr.CLocalAssum (l, _k, t) ->
+              | Constrexpr.CLocalAssum (l, _, _k, t) ->
                 List.exists
                   (function
                     | {CAst.v = Name id} -> Id.equal id wf_args | _ -> false)
@@ -1695,7 +1687,7 @@ let register_mes interactive_proof fname rec_impls wf_mes_expr wf_rel_expr_opt
               | _ -> false)
             args
         with
-        | Constrexpr.CLocalAssum (_, _k, t) -> (t, wf_args)
+        | Constrexpr.CLocalAssum (_, _, _k, t) -> (t, wf_args)
         | _ -> assert false
       with Not_found -> assert false )
   in
@@ -1745,20 +1737,18 @@ let register_mes interactive_proof fname rec_impls wf_mes_expr wf_rel_expr_opt
     using_lemmas args ret_type body
 
 let do_generate_principle_aux pconstants on_error register_built
-    interactive_proof fixpoint_exprl : Declare.Proof.t option =
+    interactive_proof (rec_order, fixpoint_exprl as fix) : Declare.Proof.t option =
   List.iter
     (fun {Vernacexpr.notations} ->
       if not (List.is_empty notations) then
         CErrors.user_err (Pp.str "Function does not support notations for now"))
     fixpoint_exprl;
   let lemma, _is_struct =
-    match fixpoint_exprl with
-    | [ ( { Vernacexpr.rec_order =
-              Some {CAst.v = Constrexpr.CWfRec (wf_x, wf_rel)} } as
-        fixpoint_expr ) ] ->
+    match rec_order with
+    | [ Some { CAst.v = Constrexpr.CWfRec (wf_x, wf_rel) } ] ->
       let ( {Vernacexpr.fname; univs = _; binders; rtype; body_def} as
           fixpoint_expr ) =
-        match recompute_binder_list [fixpoint_expr] with
+        match recompute_binder_list fix with
         | [e] -> e
         | _ -> assert false
       in
@@ -1782,12 +1772,10 @@ let do_generate_principle_aux pconstants on_error register_built
             wf_x.CAst.v using_lemmas binders rtype body pre_hook
         , false )
       else (None, false)
-    | [ ( { Vernacexpr.rec_order =
-              Some {CAst.v = Constrexpr.CMeasureRec (wf_x, wf_mes, wf_rel_opt)}
-          } as fixpoint_expr ) ] ->
+    | [ Some { CAst.v = Constrexpr.CMeasureRec (wf_x, wf_mes, wf_rel_opt) } ] ->
       let ( {Vernacexpr.fname; univs = _; binders; rtype; body_def} as
           fixpoint_expr ) =
-        match recompute_binder_list [fixpoint_expr] with
+        match recompute_binder_list fix with
         | [e] -> e
         | _ -> assert false
       in
@@ -1815,16 +1803,14 @@ let do_generate_principle_aux pconstants on_error register_built
     | _ ->
       List.iter
         (function
-          | {Vernacexpr.rec_order} -> (
-            match rec_order with
-            | Some {CAst.v = Constrexpr.CMeasureRec _ | Constrexpr.CWfRec _} ->
+            | Some { CAst.v = (Constrexpr.CMeasureRec _ | Constrexpr.CWfRec _) } ->
               CErrors.user_err
                 (Pp.str
                    "Cannot use mutual definition with well-founded recursion \
                     or measure")
-            | _ -> () ))
-        fixpoint_exprl;
-      let fixpoint_exprl = recompute_binder_list fixpoint_exprl in
+            | _ -> () )
+        rec_order;
+      let fixpoint_exprl = recompute_binder_list fix in
       let fix_names =
         List.map (function {Vernacexpr.fname} -> fname.CAst.v) fixpoint_exprl
       in
@@ -1832,7 +1818,7 @@ let do_generate_principle_aux pconstants on_error register_built
       let recdefs, _rec_impls = build_newrecursive fixpoint_exprl in
       let is_rec = List.exists (is_rec fix_names) recdefs in
       let lemma, evd, pconstants =
-        if register_built then register_struct is_rec fixpoint_exprl
+        if register_built then register_struct is_rec (rec_order, fixpoint_exprl)
         else (None, Evd.from_env (Global.env ()), pconstants)
       in
       let evd = ref evd in
@@ -1840,7 +1826,7 @@ let do_generate_principle_aux pconstants on_error register_built
         fixpoint_exprl recdefs
         (Functional_principles_proofs.prove_princ_for_struct evd
            interactive_proof);
-      if register_built then derive_inversion fix_names;
+      if register_built then derive_inversion (Global.env ()) fix_names;
       (lemma, true)
   in
   lemma
@@ -1914,14 +1900,14 @@ let rec chop_n_arrow n t =
         let new_n =
           let rec aux (n : int) = function
             | [] -> n
-            | CLocalAssum (nal, k, t'') :: nal_ta' ->
+            | CLocalAssum (nal, _, k, t'') :: nal_ta' ->
               let nal_l = List.length nal in
               if n >= nal_l then aux (n - nal_l) nal_ta'
               else
                 let new_t' =
                   CAst.make
                   @@ Constrexpr.CProdN
-                       ( CLocalAssum (snd (List.chop n nal), k, t'') :: nal_ta'
+                       ( CLocalAssum (snd (List.chop n nal), None, k, t'') :: nal_ta'
                        , t' )
                 in
                 raise (Stop new_t')
@@ -1946,11 +1932,11 @@ let rec add_args id new_args =
       CProdN
         ( List.map
             (function
-              | CLocalAssum (nal, k, b2) ->
-                CLocalAssum (nal, k, add_args id new_args b2)
-              | CLocalDef (na, b1, t) ->
+              | CLocalAssum (nal, r, k, b2) ->
+                CLocalAssum (nal, r, k, add_args id new_args b2)
+              | CLocalDef (na, r, b1, t) ->
                 CLocalDef
-                  ( na
+                  ( na, r
                   , add_args id new_args b1
                   , Option.map (add_args id new_args) t )
               | CLocalPattern _ ->
@@ -1961,11 +1947,11 @@ let rec add_args id new_args =
       CLambdaN
         ( List.map
             (function
-              | CLocalAssum (nal, k, b2) ->
-                CLocalAssum (nal, k, add_args id new_args b2)
-              | CLocalDef (na, b1, t) ->
+              | CLocalAssum (nal, r, k, b2) ->
+                CLocalAssum (nal, r, k, add_args id new_args b2)
+              | CLocalDef (na, r, b1, t) ->
                 CLocalDef
-                  ( na
+                  ( na, r
                   , add_args id new_args b1
                   , Option.map (add_args id new_args) t )
               | CLocalPattern _ ->
@@ -2032,7 +2018,7 @@ let rec get_args b t :
     * Constrexpr.constr_expr =
   let open Constrexpr in
   match b.CAst.v with
-  | Constrexpr.CLambdaN ((CLocalAssum (nal, k, ta) as d) :: rest, b') ->
+  | Constrexpr.CLambdaN ((CLocalAssum (nal, _, k, ta) as d) :: rest, b') ->
     let n = List.length nal in
     let nal_tas, b'', t'' =
       get_args
@@ -2050,17 +2036,16 @@ let make_graph (f_ref : GlobRef.t) =
   let c, c_body =
     match f_ref with
     | GlobRef.ConstRef c ->
-      if Environ.mem_constant c (Global.env ()) then (c, Global.lookup_constant c) else
+      if Environ.mem_constant c env then (c, Environ.lookup_constant c env) else
         CErrors.user_err
           Pp.(
             str "Cannot find "
             ++ Termops.pr_global_env env (ConstRef c))
     | _ -> CErrors.user_err Pp.(str "Not a function reference")
   in
-  match Global.body_of_constant_body Library.indirect_accessor c_body with
-  | None -> CErrors.user_err (Pp.str "Cannot build a graph over an axiom!")
-  | Some (body, _, _) ->
-    let env = Global.env () in
+  match c_body.Declarations.const_body with
+  | Undef _ | Primitive _ | Symbol _ | OpaqueDef _ -> CErrors.user_err (Pp.str "Cannot build a graph over an axiom!")
+  | Def body ->
     let extern_body, extern_type =
       with_full_print
         (fun () ->
@@ -2075,7 +2060,7 @@ let make_graph (f_ref : GlobRef.t) =
       | Constrexpr.CFix (l_id, fixexprl) ->
         let l =
           List.map
-            (fun (id, recexp, bl, t, b) ->
+            (fun (id, _, recexp, bl, t, b) ->
               let {CAst.loc; v = rec_id} =
                 match Option.get recexp with
                 | {CAst.v = CStructRec id} -> id
@@ -2086,8 +2071,8 @@ let make_graph (f_ref : GlobRef.t) =
                 List.flatten
                   (List.map
                      (function
-                       | Constrexpr.CLocalDef (na, _, _) -> []
-                       | Constrexpr.CLocalAssum (nal, _, _) ->
+                       | Constrexpr.CLocalDef (na, _, _, _) -> []
+                       | Constrexpr.CLocalAssum (nal, _, _, _) ->
                          List.map
                            (fun {CAst.loc; v = n} ->
                              CAst.make ?loc
@@ -2100,9 +2085,9 @@ let make_graph (f_ref : GlobRef.t) =
                      nal_tas)
               in
               let b' = add_args id.CAst.v new_args b in
+              Some (CAst.make (CStructRec (CAst.make rec_id))),
               { Vernacexpr.fname = id
               ; univs = None
-              ; rec_order = Some (CAst.make (CStructRec (CAst.make rec_id)))
               ; binders = nal_tas @ bl
               ; rtype = t
               ; body_def = Some b'
@@ -2112,17 +2097,17 @@ let make_graph (f_ref : GlobRef.t) =
         l
       | _ ->
         let fname = CAst.make (Label.to_id (Constant.label c)) in
-        [ { Vernacexpr.fname
+        [ None, { Vernacexpr.fname
           ; univs = None
-          ; rec_order = None
           ; binders = nal_tas
           ; rtype = t
           ; body_def = Some b
           ; notations = [] } ]
     in
     let mp = Constant.modpath c in
+    let expr_list = List.split expr_list in
     let pstate =
-      do_generate_principle_aux [(c, Univ.Instance.empty)] error_error false
+      do_generate_principle_aux [(c, UVars.Instance.empty)] error_error false
         false expr_list
     in
     assert (Option.is_empty pstate);
@@ -2130,7 +2115,7 @@ let make_graph (f_ref : GlobRef.t) =
     List.iter
       (fun {Vernacexpr.fname = {CAst.v = id}} ->
         add_Function false (Constant.make2 mp (Label.of_id id)))
-      expr_list
+      (snd expr_list)
 
 (* *************** statically typed entrypoints ************************* *)
 
@@ -2148,7 +2133,8 @@ let do_generate_principle fixl : unit =
   | None -> ()
 
 let build_scheme fas =
-  let evd = ref (Evd.from_env (Global.env ())) in
+  let env = Global.env () in
+  let evd = ref (Evd.from_env env) in
   let pconstants =
     List.map
       (fun (_, f, sort) ->
@@ -2158,16 +2144,16 @@ let build_scheme fas =
             CErrors.user_err
               Pp.(str "Cannot find " ++ Libnames.pr_qualid f ++ str ".")
         in
-        let evd', f = Evd.fresh_global (Global.env ()) !evd f_as_constant in
+        let evd', f = Evd.fresh_global env !evd f_as_constant in
         let _ = evd := evd' in
-        let sigma, _ = Typing.type_of ~refresh:true (Global.env ()) !evd f in
+        let sigma, _ = Typing.type_of ~refresh:true env !evd f in
         evd := sigma;
         let c, u =
           try EConstr.destConst !evd f
           with Constr.DestKO ->
             CErrors.user_err
               Pp.(
-                Printer.pr_econstr_env (Global.env ()) !evd f
+                Printer.pr_econstr_env env !evd f
                 ++ spc ()
                 ++ str "should be the named of a globally defined function")
         in
@@ -2180,15 +2166,16 @@ let build_scheme fas =
       let (_ : Constant.t) =
         let opaque = if opaque = Vernacexpr.Opaque then true else false in
         let def_entry = Declare.definition_entry ~univs ~opaque ?types body in
-        Declare.declare_constant ~name:princ_id
+        Declare.declare_constant ?loc:princ_id.CAst.loc ~name:princ_id.CAst.v
           ~kind:Decls.(IsProof Theorem)
           (Declare.DefinitionEntry def_entry)
       in
-      Declare.definition_message princ_id)
+      Declare.definition_message princ_id.v)
     fas bodies_types
 
 let build_case_scheme fa =
-  let env = Global.env () and sigma = Evd.from_env (Global.env ()) in
+  let env = Global.env () in
+  let sigma = Evd.from_env env in
   (*   let id_to_constr id =  *)
   (*     Constrintern.global_reference  id *)
   (*   in  *)
@@ -2215,7 +2202,6 @@ let build_case_scheme fa =
   let this_block_funs =
     Array.map (fun (c, _) -> (c, u)) this_block_funs_indexes
   in
-  let prop_sort = Sorts.InProp in
   let funs_indexes =
     let this_block_funs_indexes = Array.to_list this_block_funs_indexes in
     let eq c1 c2 = Environ.QConstant.equal env c1 c2 in
@@ -2223,7 +2209,7 @@ let build_case_scheme fa =
   in
   let ind, sf =
     let ind = (first_fun_kn, funs_indexes) in
-    ((ind, Univ.Instance.empty) (*FIXME*), prop_sort)
+    ((ind, EConstr.EInstance.empty) (*FIXME*), EConstr.ESorts.prop)
   in
   let sigma, scheme =
     Indrec.build_case_analysis_scheme_default env sigma ind sf

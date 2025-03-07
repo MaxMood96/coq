@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -79,16 +79,21 @@ let is_imported_ref = let open GlobRef in function
   | ConstRef kn ->
       let mp = Constant.modpath kn in is_imported_modpath mp
 
+let locate id =
+  match Nametab.locate_extended_nowarn (qualid_of_ident id) with
+  | TrueGlobal r -> r
+  | Abbrev _ -> raise Not_found
+
 let is_global id =
   try
-    let ref = Nametab.locate (qualid_of_ident id) in
+    let ref = locate id in
     not (is_imported_ref ref)
   with Not_found ->
     false
 
 let is_constructor id =
   try
-    match Nametab.locate (qualid_of_ident id) with
+    match locate id with
       | GlobRef.ConstructRef _ -> true
       | _ -> false
   with Not_found ->
@@ -113,12 +118,13 @@ let head_name sigma c = (* Find the head constant of a constr if any *)
     match EConstr.kind sigma c with
     | Prod (_,_,c) | Lambda (_,_,c) | LetIn (_,_,_,c)
     | Cast (c,_,_) | App (c,_) -> hdrec c
-    | Proj (kn,_) -> Some (Label.to_id (Constant.label (Projection.constant kn)))
+    | Proj (kn,_,_) -> Some (Label.to_id (Constant.label (Projection.constant kn)))
     | Const _ | Ind _ | Construct _ | Var _ as c ->
         Some (Nametab.basename_of_global (global_of_constr c))
     | Fix ((_,i),(lna,_,_)) | CoFix (i,(lna,_,_)) ->
         Some (match lna.(i).binder_name with Name id -> id | _ -> assert false)
-    | Sort _ | Rel _ | Meta _|Evar _|Case _ | Int _ | Float _ | Array _ -> None
+    | Sort _ | Rel _ | Meta _ | Evar _ | Case _
+    | Int _ | Float _ | String _ | Array _ -> None
   in
   hdrec c
 
@@ -146,7 +152,7 @@ let hdchar env sigma c =
     match EConstr.kind sigma c with
     | Prod (_,_,c) | Lambda (_,_,c) | LetIn (_,_,_,c) -> hdrec (k+1) c
     | Cast (c,_,_) | App (c,_) -> hdrec k c
-    | Proj (kn,_) -> lowercase_first_char (Label.to_id (Constant.label (Projection.constant kn)))
+    | Proj (kn,_,_) -> lowercase_first_char (Label.to_id (Constant.label (Projection.constant kn)))
     | Const (kn,_) -> lowercase_first_char (Label.to_id (Constant.label kn))
     | Ind (x,_) -> (try lowercase_first_char (Nametab.basename_of_global (GlobRef.IndRef x)) with Not_found when !Flags.in_debugger -> "zz")
     | Construct (x,_) -> (try lowercase_first_char (Nametab.basename_of_global (GlobRef.ConstructRef x)) with Not_found when !Flags.in_debugger -> "zz")
@@ -166,6 +172,7 @@ let hdchar env sigma c =
     | Meta _ | Case _ -> "y"
     | Int _ -> "i"
     | Float _ -> "f"
+    | String _ -> "s"
     | Array _ -> "a"
   in
   hdrec 0 c
@@ -215,24 +222,20 @@ let it_mkLambda_or_LetIn_name env sigma b hyps =
    to test dependence of scripts on auto-generated names.
    We also supply a version which only adds a prefix. *)
 
-let get_mangle_names =
+let { Goptions.get = get_mangle_names } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Mangle";"Names"]
     ~value:false
+    ()
 
-let get_mangle_names_light =
+let { Goptions.get = get_mangle_names_light } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Mangle";"Names";"Light"]
     ~value:false
+    ()
 
-let mangle_names_prefix =
+let { Goptions.get = mangle_names_prefix } =
   Goptions.declare_interpreted_string_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Mangle";"Names";"Prefix"]
     ~value:("_")
     (fun x ->
@@ -245,6 +248,7 @@ let mangle_names_prefix =
       )
     )
     (fun x -> x)
+    ()
 
 (** The name "foo" becomes "_0" if we get_mangle_names and "_foo" if
     get_mangle_names_light is also set. Otherwise it is left alone. *)
@@ -275,6 +279,57 @@ let restart_subscript id =
     (* It would probably be better with something in the spirit of
      *** make_ident id (Some 0) *** but compatibility would be lost... *)
     forget_subscript id
+
+module Generator =
+struct
+
+type _ t =
+| Fresh : Fresh.t t
+| IdSet : Id.Set.t t
+
+type 'a input = 'a t * 'a
+
+let fresh = Fresh
+let idset = IdSet
+
+let max_map (type a) (gen : a t) (avoid : a) =
+match gen with
+| Fresh -> Fresh.max_map avoid
+| IdSet ->
+  let fold id accu =
+    let id, ss = get_subscript id in
+    match Id.Map.find_opt id accu with
+    | Some old_ss when Subscript.compare ss old_ss <= 0 -> accu
+    | _ -> Id.Map.add id ss accu
+  in
+  Id.Set.fold fold avoid Id.Map.empty
+
+let is_fresh (type a) (gen : a t) id (avoid : a) = match gen with
+| Fresh -> not (Fresh.mem id avoid)
+| IdSet -> not (Id.Set.mem id avoid)
+
+let gen_ident (type a) ?(mangle = true) ?(filter = (fun _ -> false)) (gen : a t) id (state : a) : Id.t * a =
+  let id = if mangle then mangle_id id else id in
+  match gen with
+  | Fresh ->
+    let rec gen state id =
+      let (id, state) = Fresh.fresh id state in
+      if filter id then gen state id else id
+    in
+    let id = gen state id in
+    (id, Fresh.add id state)
+  | IdSet ->
+    let rec gen id = if Id.Set.mem id state || filter id then gen (increment_subscript id) else id in
+    let id = gen id in
+    (id, Id.Set.add id state)
+
+let next_name_away gen na avoid =
+  let id = match na with Name id -> id | Anonymous -> default_non_dependent_ident in
+  let id = mangle_id id in
+  let id = if is_fresh gen id avoid then id else restart_subscript id in
+  gen_ident ~mangle:false gen id avoid
+
+end
 
 let visible_ids sigma (nenv, c) =
   let accu = ref (GlobRef.Set_env.empty, Int.Set.empty, Id.Set.empty) in
@@ -329,12 +384,11 @@ let visible_ids sigma (nenv, c) =
 
 (* 1- Looks for a fresh name for printing in cases pattern *)
 
-let next_name_away_in_cases_pattern sigma env_t na avoid =
+let next_name_away_in_cases_pattern gen sigma env_t na avoid =
   let id = match na with Name id -> id | Anonymous -> default_dependent_ident in
   let visible = visible_ids sigma env_t in
-  let bad id = Id.Set.mem id avoid || is_constructor id
-                                    || Id.Set.mem id visible in
-  next_ident_away_from id bad
+  let bad id = is_constructor id || Id.Set.mem id visible in
+  Generator.gen_ident ~filter:bad gen id avoid
 
 (* 2- Looks for a fresh name for introduction in goal *)
 
@@ -350,11 +404,13 @@ let next_ident_away_in_goal env id avoid =
   let bad id = Id.Set.mem id avoid || (is_global id && not (is_section_variable env id)) in
   next_ident_away_from id bad
 
-let next_name_away_in_goal env na avoid =
+let next_name_away_in_goal (type a) (gen : a Generator.t) env na (avoid : a) =
   let id = match na with
     | Name id -> id
     | Anonymous -> default_non_dependent_ident in
-  next_ident_away_in_goal env id avoid
+  let id = if Generator.is_fresh gen id avoid then id else restart_subscript id in
+  let bad id = is_global id && not (is_section_variable env id) in
+  Generator.gen_ident ~filter:bad gen id avoid
 
 (* 3- Looks for next fresh name outside a list that is moreover valid
    as a global identifier; the legacy algorithm is that if the name is
@@ -418,12 +474,12 @@ let make_all_name_different env sigma =
    looks for name of same base with lower available subscript beyond current
    subscript *)
 
-let next_ident_away_for_default_printing sigma env_t id avoid =
+let next_ident_away_for_default_printing gen sigma env_t id avoid =
   let visible = visible_ids sigma env_t in
-  let bad id = Id.Set.mem id avoid || Id.Set.mem id visible in
-  next_ident_away_from id bad
+  let bad id = Id.Set.mem id visible in
+  Generator.gen_ident ~filter:bad gen id avoid
 
-let next_name_away_for_default_printing sigma env_t na avoid =
+let next_name_away_for_default_printing gen sigma env_t na avoid =
   let id = match na with
   | Name id   -> id
   | Anonymous ->
@@ -431,7 +487,7 @@ let next_name_away_for_default_printing sigma env_t na avoid =
       (* taken into account by the function compute_displayed_name_in; *)
       (* just in case, invent a valid name *)
       default_non_dependent_ident in
-  next_ident_away_for_default_printing sigma env_t id avoid
+  next_ident_away_for_default_printing gen sigma env_t id avoid
 
 (**********************************************************************)
 (* Displaying terms avoiding bound variables clashes *)
@@ -458,26 +514,30 @@ type renaming_flags =
   | RenamingForGoal
   | RenamingElsewhereFor of (Name.t list * constr)
 
-let next_name_for_display env sigma flags =
+let next_name_for_display gen env sigma flags na avoid =
   match flags with
-  | RenamingForCasesPattern env_t -> next_name_away_in_cases_pattern sigma env_t
-  | RenamingForGoal -> next_name_away_in_goal env
-  | RenamingElsewhereFor env_t -> next_name_away_for_default_printing sigma env_t
+  | RenamingForCasesPattern env_t -> next_name_away_in_cases_pattern gen sigma env_t na avoid
+  | RenamingForGoal -> next_name_away_in_goal gen env na avoid
+  | RenamingElsewhereFor env_t -> next_name_away_for_default_printing gen sigma env_t na avoid
 
 (* Remark: Anonymous var may be dependent in Evar's contexts *)
-let compute_displayed_name_in_gen_poly noccurn_fun env sigma flags avoid na c =
-  if noccurn_fun sigma 1 c then Anonymous, avoid
+let compute_displayed_name_in_gen_poly gen noccurn_fun env sigma flags avoid na c =
+  let noccurs =
+    try noccurn_fun sigma 1 c
+    with _ when !Flags.in_debugger -> false
+  in
+  if noccurs then Anonymous, avoid
   else
-    let fresh_id = next_name_for_display env sigma flags na avoid in
-    Name fresh_id, Id.Set.add fresh_id avoid
+    let fresh_id, avoid = next_name_for_display gen env sigma flags na avoid in
+    Name fresh_id, avoid
 
-let compute_displayed_name_in = compute_displayed_name_in_gen_poly noccurn
+let compute_displayed_name_in gen = compute_displayed_name_in_gen_poly gen noccurn
 
-let compute_displayed_name_in_gen f env sigma =
+let compute_displayed_name_in_gen gen f env sigma =
   (* only flag which does not need a constr, maybe to be refined *)
   let flag = RenamingForGoal in
-  compute_displayed_name_in_gen_poly f env sigma flag
+  compute_displayed_name_in_gen_poly gen f env sigma flag
 
-let compute_displayed_let_name_in env sigma flags avoid na =
-  let fresh_id = next_name_for_display env sigma flags na avoid in
-  (Name fresh_id, Id.Set.add fresh_id avoid)
+let compute_displayed_let_name_in gen env sigma flags avoid na =
+  let fresh_id, avoid = next_name_for_display gen env sigma flags na avoid in
+  (Name fresh_id, avoid)

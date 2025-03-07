@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -61,9 +61,9 @@ let force_is_plugin ~what () = match !plugin_name with
   | Some (Some n) -> n
   | Some None | None -> fatal ("DECLARE PLUGIN required before "^what)
 
-let check_is_plugin () = match !plugin_name with
+let check_is_plugin ~what () = match !plugin_name with
   | Some b -> b
-  | None -> plugin_name := Some None; None
+  | None -> fatal ("DECLARE PLUGIN required before "^what)
 
 let print_list fmt pr l =
   let rec prl fmt = function
@@ -137,7 +137,7 @@ let print_local fmt ext =
   match locals with
   | [] -> ()
   | e :: locals ->
-    let mk_e fmt e = fprintf fmt "Pcoq.Entry.make \"%s\"" e in
+    let mk_e fmt e = fprintf fmt "Procq.Entry.make \"%s\"" e in
     let () = fprintf fmt "@[<hv 2>let %s =@ @[%a@]@]@ " e mk_e e in
     let iter e = fprintf fmt "@[<hv 2>and %s =@ @[%a@]@]@ " e mk_e e in
     let () = List.iter iter locals in
@@ -220,7 +220,6 @@ let print_pat fmt = print_opt fmt print_string in
 function
 | "", Some s -> fprintf fmt "Tok.PKEYWORD (%a)" print_string s
 | "IDENT", s -> fprintf fmt "Tok.PIDENT (%a)" print_pat s
-| "PATTERNIDENT", s -> fprintf fmt "Tok.PPATTERNIDENT (%a)" print_pat s
 | "FIELD", s -> fprintf fmt "Tok.PFIELD (%a)" print_pat s
 | "NUMBER", None -> fprintf fmt "Tok.PNUMBER None"
 | "NUMBER", Some s -> fprintf fmt "Tok.PNUMBER (Some (NumTok.Unsigned.of_string %a))" print_string s
@@ -238,49 +237,49 @@ let rec print_prod fmt p =
 
 and print_extrule fmt (tkn, vars, body) =
   let tkn = List.rev tkn in
-  fprintf fmt "@[Pcoq.Production.make@ @[(%a)@]@ @[(%a)@]@]" (print_symbols ~norec:false) tkn print_fun (vars, body)
+  fprintf fmt "@[Procq.Production.make@ @[(%a)@]@ @[(%a)@]@]" (print_symbols ~norec:false) tkn print_fun (vars, body)
 
 and print_symbols ~norec fmt = function
-| [] -> fprintf fmt "Pcoq.Rule.stop"
+| [] -> fprintf fmt "Procq.Rule.stop"
 | tkn :: tkns ->
-  let c = if norec then "Pcoq.Rule.next_norec" else "Pcoq.Rule.next" in
-  fprintf fmt "%s @[(%a)@ (%a)@]" c (print_symbols ~norec) tkns print_symbol tkn
+  let c = if norec then "Procq.Rule.next_norec" else "Procq.Rule.next" in
+  fprintf fmt "@[%s@ (%a)@ (%a)@]" c (print_symbols ~norec) tkns print_symbol tkn
 
 and print_symbol fmt tkn = match tkn with
 | SymbToken (t, s) ->
-  fprintf fmt "(Pcoq.Symbol.token (%a))" print_tok (t, s)
+  fprintf fmt "(Procq.Symbol.token (%a))" print_tok (t, s)
 | SymbEntry (e, None) ->
-  fprintf fmt "(Pcoq.Symbol.nterm %s)" e
+  fprintf fmt "(Procq.Symbol.nterm %s)" e
 | SymbEntry (e, Some l) ->
-  fprintf fmt "(Pcoq.Symbol.nterml %s (%a))" e print_string l
+  fprintf fmt "(Procq.Symbol.nterml %s (%a))" e print_string l
 | SymbSelf ->
-  fprintf fmt "Pcoq.Symbol.self"
+  fprintf fmt "Procq.Symbol.self"
 | SymbNext ->
-  fprintf fmt "Pcoq.Symbol.next"
+  fprintf fmt "Procq.Symbol.next"
 | SymbList0 (s, None) ->
-  fprintf fmt "(Pcoq.Symbol.list0 %a)" print_symbol s
+  fprintf fmt "(Procq.Symbol.list0 %a)" print_symbol s
 | SymbList0 (s, Some sep) ->
-  fprintf fmt "(Pcoq.Symbol.list0sep (%a) (%a) false)" print_symbol s print_anonymized_symbol sep
+  fprintf fmt "(Procq.Symbol.list0sep (%a) (%a) false)" print_symbol s print_anonymized_symbol sep
 | SymbList1 (s, None) ->
-  fprintf fmt "(Pcoq.Symbol.list1 (%a))" print_symbol s
+  fprintf fmt "(Procq.Symbol.list1 (%a))" print_symbol s
 | SymbList1 (s, Some sep) ->
-  fprintf fmt "(Pcoq.Symbol.list1sep (%a) (%a) false)" print_symbol s print_anonymized_symbol sep
+  fprintf fmt "(Procq.Symbol.list1sep (%a) (%a) false)" print_symbol s print_anonymized_symbol sep
 | SymbOpt s ->
-  fprintf fmt "(Pcoq.Symbol.opt %a)" print_symbol s
+  fprintf fmt "(Procq.Symbol.opt %a)" print_symbol s
 | SymbRules rules ->
   let pr fmt (r, body) =
     let (vars, tkn) = List.split r in
     let tkn = List.rev tkn in
-    fprintf fmt "Pcoq.Rules.make @[(%a)@ (%a)@]" (print_symbols ~norec:true) tkn print_fun (vars, body)
+    fprintf fmt "Procq.Rules.make @[(%a)@ (%a)@]" (print_symbols ~norec:true) tkn print_fun (vars, body)
   in
   let pr fmt rules = print_list fmt pr rules in
-  fprintf fmt "(Pcoq.Symbol.rules %a)" pr (List.rev rules)
+  fprintf fmt "(Procq.Symbol.rules %a)" pr (List.rev rules)
 | SymbQuote c ->
   fprintf fmt "(%s)" c
 
 and print_anonymized_symbol fmt tkn = match tkn with
 | SymbToken (t, s) ->
-  fprintf fmt "(Pcoq.Symbol.tokens [Pcoq.TPattern (%a)])" print_tok (t, s)
+  fprintf fmt "(Procq.Symbol.tokens [Procq.TPattern (%a)])" print_tok (t, s)
 | _ -> print_symbol fmt (SymbRules [[None, tkn], mk_code "()"])
 
 let print_rule fmt r =
@@ -297,29 +296,29 @@ let gramext_plugin_uid name =
   " ~plugin_uid:(\""^name^"\", \""^(!file_name)^":"^string_of_int cnt^"\")"
 
 let grammar_extend () =
-  match check_is_plugin () with
+  match check_is_plugin ~what:"GRAMMAR EXTEND" () with
   | Some name -> "Egramml.grammar_extend"^gramext_plugin_uid name
-  | None -> "Pcoq.grammar_extend"
+  | None -> "Procq.grammar_extend"
 
 let print_entry fmt e = match e.gentry_rules with
 | GDataReuse (pos, r) ->
   let rules = List.rev r in
   let pr_pos fmt pos = print_opt fmt print_string pos in
   let pr_prd fmt prd = print_list fmt print_prod prd in
-  fprintf fmt "let () =@ @[%s@ %s@ @[(Pcoq.Reuse (%a, %a))@]@]@ in@ "
+  fprintf fmt "let () =@ @[%s@ %s@ @[(Procq.Reuse (%a, %a))@]@]@ in@ "
     (grammar_extend ()) e.gentry_name pr_pos pos pr_prd rules
 | GDataFresh (pos, rules) ->
   let print_rules fmt rules = print_list fmt print_rule rules in
   let pr_check fmt () = match pos with
-  | None -> fprintf fmt "let () =@ @[assert@ (Pcoq.Entry.is_empty@ %s)@]@ in@\n" e.gentry_name
+  | None -> fprintf fmt "let () =@ @[assert@ (Procq.Entry.is_empty@ %s)@]@ in@\n" e.gentry_name
   | Some _ -> fprintf fmt ""
   in
   let pos = match pos with None -> First | Some pos -> pos in
-  fprintf fmt "%alet () =@ @[%s@ %s@ @[(Pcoq.Fresh@ (%a, %a))@]@]@ in@ "
+  fprintf fmt "%alet () =@ @[%s@ %s@ @[(Procq.Fresh@ (%a, %a))@]@]@ in@ "
     pr_check () (grammar_extend ()) e.gentry_name print_position pos print_rules rules
 
 let print_ast fmt ext =
-  let () = fprintf fmt "let _ = @[" in
+  let () = fprintf fmt "@[<2>let _ =@ " in
   let () = fprintf fmt "@[<v>%a@]" print_local ext in
   let () = List.iter (fun e -> print_entry fmt e) ext.gramext_entries in
   let () = fprintf fmt "()@]@\n" in
@@ -376,58 +375,72 @@ let print_atts_right fmt = function
   | Some atts ->
     let rec aux fmt = function
       | [] -> assert false
-      | [_,y] -> fprintf fmt "%s" y
-      | (_,y) :: rem -> fprintf fmt "(%s ++ %a)" y aux rem
+      | [_,y] -> print_code fmt y
+      | (_,y) :: rem -> fprintf fmt "(%a ++ %a)" print_code y aux rem
     in
     let nota = match atts with [_] -> "" | _ -> "Attributes.Notations." in
     fprintf fmt "(Attributes.parse %s%a atts)" nota aux atts
 
 let understand_state = function
-  | "close_proof" -> "vtcloseproof", false
-  | "open_proof" -> "vtopenproof", true
-  | "proof" -> "vtmodifyproof", false
-  | "proof_opt_query" -> "vtreadproofopt", false
-  | "proof_query" -> "vtreadproof", false
-  | "read_program" -> "vtreadprogram", false
-  | "program" -> "vtmodifyprogram", false
-  | "declare_program" -> "vtdeclareprogram", false
-  | "program_interactive" -> "vtopenproofprogram", false
+  | "close_proof" -> "vtcloseproof", ["lemma"; "pm"]
+  | "open_proof" -> "vtopenproof", []
+  | "proof" -> "vtmodifyproof", ["pstate"]
+  | "proof_opt_query" -> "vtreadproofopt", ["pstate"]
+  | "proof_query" -> "vtreadproof", ["pstate"]
+  | "read_program" -> "vtreadprogram", ["pm"]
+  | "program" -> "vtmodifyprogram", ["pm"]
+  | "declare_program" -> "vtdeclareprogram", ["pm"]
+  | "program_interactive" -> "vtopenproofprogram", ["pm"]
+  | "opaque_access" -> "vtopaqueaccess", ["opaque_access"]
   | s -> fatal ("unsupported state specifier: " ^ s)
+
+let rec pr_named_arguments fmt = function
+| [] -> assert false
+| [s] -> fprintf fmt "~%s" s
+| s :: l -> fprintf fmt "~%s@ %a" s pr_named_arguments l
+
+let pr_begin_wrapper fmt = function
+| [] -> fprintf fmt "fun () ->"
+| args -> fprintf fmt "fun %a ->" pr_named_arguments args
+
+let pr_end_wrapper fmt = function
+| [] -> fprintf fmt ""
+| args -> fprintf fmt "@ %a" pr_named_arguments args
 
 let print_body_state state fmt r =
   let state = match r.vernac_state with Some _ as s -> s | None -> state in
   match state with
-  | None -> fprintf fmt "Vernacextend.vtdefault (fun () -> %a)" print_code r.vernac_body
+  | None -> fprintf fmt "Vernactypes.vtdefault (fun () -> %a)" print_code r.vernac_body
   | Some "CUSTOM" -> print_code fmt r.vernac_body
   | Some state ->
-    let state, unit_wrap = understand_state state in
-    fprintf fmt "Vernacextend.%s (%s%a)" state (if unit_wrap then "fun () ->" else "")
-      print_code r.vernac_body
+    let state, wrap = understand_state state in
+    fprintf fmt "Vernactypes.%s (%a (%a)%a)" state pr_begin_wrapper wrap
+      print_code r.vernac_body pr_end_wrapper wrap
 
 let print_body_fun state fmt r =
   match r.vernac_synterp with
   | None ->
-    fprintf fmt "let coqpp_body %a%a = @[%a@] in "
+    fprintf fmt "let coqpp_body %a%a =@ @[%a@] in@ "
       print_binders r.vernac_toks print_atts_left r.vernac_atts (print_body_state state) r
   | Some (id,pe) ->
-    fprintf fmt "let coqpp_body %a%a = @[(let %s = %a in %a)@] in "
+    fprintf fmt "let coqpp_body %a%a =@ @[(let %s = %a in %a)@] in@ "
       print_binders r.vernac_toks print_atts_left r.vernac_atts id print_code pe  (print_body_state state) r
 
 let print_body state fmt r =
-  fprintf fmt "@[(%afun %a?loc ~atts ()@ -> coqpp_body %a%a)@]"
+  fprintf fmt "@[<2>(%a@[<2>fun %a?loc ~atts () ->@]@ @[<2>coqpp_body@ %a%a@])@]"
     (print_body_fun state) r print_binders r.vernac_toks
     print_binders r.vernac_toks print_atts_right r.vernac_atts
 
 let rec print_sig fmt = function
 | [] -> fprintf fmt "@[Vernacextend.TyNil@]"
 | ExtTerminal s :: rem ->
-  fprintf fmt "@[Vernacextend.TyTerminal (\"%s\", %a)@]" s print_sig rem
+  fprintf fmt "@[Vernacextend.TyTerminal@ @[<1>(\"%s\",@ %a)@]@]" s print_sig rem
 | ExtNonTerminal (symb, _) :: rem ->
-  fprintf fmt "@[Vernacextend.TyNonTerminal (%a, %a)@]"
+  fprintf fmt "@[Vernacextend.TyNonTerminal (%a,@ %a)@]"
     print_symbol symb print_sig rem
 
 let print_rule state fmt r =
-  fprintf fmt "Vernacextend.TyML (%b, %a, %a, %a)"
+  fprintf fmt "Vernacextend.TyML@ @[<v1>(%b,@ %a,@ %a,@ %a)@]"
     r.vernac_depr print_sig r.vernac_toks (print_body state) r print_rule_classifier r
 
 let print_rules state fmt rules =
@@ -448,8 +461,8 @@ let print_entry fmt = function
 
 let print_ast fmt ext =
   let pr fmt () =
-    fprintf fmt "Vernacextend.vernac_extend %s ~command:\"%s\" %a ?entry:%a %a"
-      (match check_is_plugin () with | Some name -> "~plugin:\""^name^"\"" | None -> "")
+    fprintf fmt "Vernacextend.static_vernac_extend ~plugin:%s ~command:\"%s\" %a ?entry:%a %a"
+      (match check_is_plugin ~what:"VERNAC EXTEND" () with | Some name -> "(Some \""^name^"\")" | None -> "None")
       ext.vernacext_name print_classifier ext.vernacext_class
       print_entry ext.vernacext_entry (print_rules ext.vernacext_state) ext.vernacext_rules
   in
@@ -511,8 +524,8 @@ struct
 let terminal s =
   let p =
     if s <> "" && s.[0] >= '0' && s.[0] <= '9' then "CLexer.terminal_number"
-    else "Pcoq.terminal" in
-  let c = Printf.sprintf "Pcoq.Symbol.token (%s \"%s\")" p s in
+    else "Procq.terminal" in
+  let c = Printf.sprintf "Procq.Symbol.token (%s \"%s\")" p s in
   SymbQuote c
 
 let rec parse_symb self = function
@@ -548,8 +561,8 @@ let print_rules fmt (name, rules) =
        factorization of parsing rules. It allows to recognize rules of the
        form [ entry(x) ] -> [ x ] so as not to generate a proxy entry and
        reuse the same entry directly. *)
-    fprintf fmt "@[Vernacextend.Arg_alias (%s)@]" e
-  | _ -> fprintf fmt "@[Vernacextend.Arg_rules (%a)@]" pr rules
+    fprintf fmt "@[Vernacextend.Arg_alias@ @[<2>(%s)@]@]" e
+  | _ -> fprintf fmt "@[Vernacextend.Arg_rules@ @[<2>(%a)@]@]" pr rules
 
 let print_printer fmt = function
 | None -> fprintf fmt "@[fun _ -> Pp.str \"missing printer\"@]"
@@ -558,14 +571,14 @@ let print_printer fmt = function
 let print_ast fmt arg =
   let name = arg.vernacargext_name in
   let pr fmt () =
-    fprintf fmt "Vernacextend.vernac_argument_extend ~plugin:\"%s\" ~name:%a @[{@\n\
-      Vernacextend.arg_parsing = %a;@\n\
-      Vernacextend.arg_printer = fun env sigma -> %a;@\n}@]"
+    fprintf fmt "Vernacextend.vernac_argument_extend ~plugin:\"%s\" ~name:%a @[<2>{@\n\
+      Vernacextend.arg_parsing =@ %a;@\n\
+      Vernacextend.arg_printer = fun env sigma ->@ %a;@\n}@]"
       (force_is_plugin ~what:"VERNAC ARGUMENT EXTEND" ())
       print_string name print_rules (name, arg.vernacargext_rules)
       print_printer arg.vernacargext_printer
   in
-  fprintf fmt "let (wit_%s, %s) = @[%a@]@\nlet _ = (wit_%s, %s)@\n"
+  fprintf fmt "@[<2>let (wit_%s, %s) =@ @[%a@]@]@\nlet _ = (wit_%s, %s)@\n"
     name name pr () name name
 
 end
@@ -662,11 +675,10 @@ let print_ast fmt arg =
 end
 
 let declare_plugin fmt name =
-  fprintf fmt "let _ = Mltop.add_known_module \"%s\"@\n" name;
+  Option.iter (fprintf fmt "let _ = Mltop.add_known_module \"%s\"@\n") name;
   let () = match !plugin_name with
-    | None -> plugin_name := Some (Some name)
-    | Some (Some _) -> fatal "Multiple DECLARE PLUGIN not allowed";
-    | Some None -> fatal "DECLARE PLUGIN must be before VERNAC / GRAMMAR EXTEND"
+    | None -> plugin_name := Some name
+    | Some _ -> fatal "Multiple DECLARE PLUGIN not allowed";
   in
   ()
 
@@ -681,17 +693,13 @@ let pr_ast fmt = function
 | ArgumentExt arg -> fprintf fmt "%a@\n" ArgumentExt.print_ast arg
 
 let help () =
-  Format.eprintf "Usage: coqpp file.mlg@\n%!";
+  Format.eprintf "Usage: rocq preprocess-mlg file.mlg@\n%!";
   exit 1
 
-let parse () =
-  let () =
-    if Array.length Sys.argv <> 2
-    then help ()
-  in
-  match Sys.argv.(1) with
-  | "-help" | "--help" -> help ()
-  | file -> file
+let parse = function
+  | ["-help"|"--help"] -> help()
+  | [file] -> file
+  | _ -> help ()
 
 let output_name file =
   try
@@ -700,8 +708,8 @@ let output_name file =
   | Invalid_argument _ ->
     fatal "Input file must have an extension for coqpp [input.ext -> input.ml]"
 
-let () =
-  let file = parse () in
+let main args =
+  let file = parse args in
   let output = output_name file in
   let ast = parse_file file in
   let chan = open_out output in

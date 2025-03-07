@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -91,8 +91,6 @@ and op = Eq | Ge | Gt
 val eval_op : op -> Q.t -> Q.t -> bool
 val compare_op : op -> op -> int
 
-(*val opMult : op -> op -> op*)
-
 val opAdd : op -> op -> op
 
 (** [is_strict c]
@@ -146,12 +144,6 @@ module LinPoly : sig
    *)
   val var : var -> t
 
-  (** [coq_poly_of_linpol c p]
-      @param p is a multi-variate polynomial.
-      @param c maps a rational to a Coq polynomial coefficient.
-      @return the coq expression corresponding to polynomial [p].*)
-  val coq_poly_of_linpol : (Q.t -> 'a) -> t -> 'a Mc.pExpr
-
   (** [of_monomial m]
       @returns 1.x where x is the variable (index) for monomial m *)
   val of_monomial : Monomial.t -> t
@@ -185,13 +177,6 @@ module LinPoly : sig
    *)
   val constant : Q.t -> t
 
-  (** [search_linear pred p]
-      @return a variable x such p = a.x + b such that
-      p is linear in x i.e x does not occur in b and
-      a is a constant such that [pred a] *)
-
-  val search_linear : (Q.t -> bool) -> t -> var option
-
   (** [search_all_linear pred p]
       @return all the variables x such p = a.x + b such that
       p is linear in x i.e x does not occur in b and
@@ -202,11 +187,6 @@ module LinPoly : sig
      @return the product of the polynomial [p*q] *)
   val product : t -> t -> t
 
-  (** [factorise x p]
-      @return [a,b] such that [p = a.x + b]
-      and [x] does not occur in [b] *)
-  val factorise : var -> t -> t * t
-
   (** [collect_square p]
       @return a mapping m such that m[s] = s^2
       for every s^2 that is a monomial of [p] *)
@@ -216,23 +196,19 @@ module LinPoly : sig
       @return the set of monomials. *)
   val monomials : t -> ISet.t
 
-  (** [degree p]
-      @return return the maximum degree *)
-  val degree : t -> int
-
   (** [pp_var o v] pretty-prints a monomial indexed by v. *)
   val pp_var : out_channel -> var -> unit
 
   (** [pp o p] pretty-prints a polynomial. *)
   val pp : out_channel -> t -> unit
 
-  (** [pp_goal typ o l] pretty-prints the list of constraints as a Coq goal. *)
+  (** [pp_goal typ o l] pretty-prints the list of constraints as a Rocq goal. *)
   val pp_goal : string -> out_channel -> (t * op) list -> unit
 end
 
 module ProofFormat : sig
   (** Proof format used by the proof-generating procedures.
-      It is fairly close to Coq format but a bit more liberal.
+      It is fairly close to Rocq format but a bit more liberal.
 
       It is used for proofs over Z, Q, R.
       However, certain constructions e.g. [CutPrf] are only relevant for Z.
@@ -263,22 +239,19 @@ module ProofFormat : sig
   (* x = z - t, z >= 0, t >= 0 *)
 
   val pr_size : prf_rule -> Q.t
-  val pr_rule_max_def : prf_rule -> int
-  val pr_rule_max_hyp : prf_rule -> int
-  val proof_max_def : proof -> int
   val normalise_proof : int -> proof -> int * proof
   val output_prf_rule : out_channel -> prf_rule -> unit
   val output_proof : out_channel -> proof -> unit
   val add_proof : prf_rule -> prf_rule -> prf_rule
   val mul_cst_proof : Q.t -> prf_rule -> prf_rule
   val mul_proof : prf_rule -> prf_rule -> prf_rule
-  val compile_proof : int list -> proof -> Micromega.zArithProof
 
   module Env: sig
     type t
-    val of_list : int list -> t
-    val of_listi : 'a list -> t
+    val make : int -> t
   end
+
+  val compile_proof : Env.t -> proof -> Micromega.zArithProof
 
   val cmpl_prf_rule :
        ('a Micromega.pExpr -> 'a Micromega.pol)
@@ -288,22 +261,24 @@ module ProofFormat : sig
     -> 'a Micromega.psatz
 
   val proof_of_farkas : prf_rule IMap.t -> Vect.t -> prf_rule
-  val eval_prf_rule : (int -> LinPoly.t * op) -> prf_rule -> LinPoly.t * op
-  val eval_proof : (LinPoly.t * op) IMap.t -> proof -> bool
   val simplify_proof : proof -> proof * Mutils.ISet.t
 
-  module PrfRuleMap : Map.S with type key = prf_rule
 end
 
 val output_cstr : out_channel -> cstr -> unit
-val opMult : op -> op -> op
 
 (** [module WithProof] constructs polynomials packed with the proof that their sign is correct. *)
 module WithProof : sig
-  type t = (LinPoly.t * op) * ProofFormat.prf_rule
+  type t
 
   (** [InvalidProof] is raised if the operation is invalid. *)
   exception InvalidProof
+
+  val repr : t -> (LinPoly.t * op) * ProofFormat.prf_rule
+
+  val proof : t -> ProofFormat.prf_rule
+
+  val polynomial : t -> LinPoly.t
 
   val compare : t -> t -> int
   val annot : string -> t -> t
@@ -334,10 +309,18 @@ module WithProof : sig
  *)
   val neg : t -> t
 
-  (** [mult p q]
-      @return the polynomial p*q with its sign and proof.
-      @raise InvalidProof if p is not a constant and p  is not an equality *)
-  val mult : LinPoly.t -> t -> t
+  (** [mul_cst c q]
+      @return the polynomial c * q with its sign and proof. *)
+  val mul_cst : Q.t -> t -> t
+
+  (** [def p op i] creates an alias with the variable index [i] *)
+  val def : LinPoly.t -> op -> int -> t
+
+  (** [square p q] is q = p^2 >= 0 *)
+  val square : LinPoly.t -> LinPoly.t -> t
+
+  (** [mkhyp p op i] binds p to hypothesis [i] *)
+  val mkhyp : LinPoly.t -> op -> int -> t
 
   (** [cutting_plane p] does integer reasoning and adjust the constant to be integral *)
   val cutting_plane : t -> t option
@@ -357,7 +340,7 @@ module WithProof : sig
   (** [sort sys] sorts constraints according to the lexicographic order (number of variables, size of the smallest coefficient *)
   val sort : t list -> ((int * (Q.t * var)) * t) list
 
-  (** [subst sys] performs the equivalent of the 'subst' tactic of Coq.
+  (** [subst sys] performs the equivalent of the 'subst' tactic of Rocq.
     For every p=0 \in sys such that p is linear in x with coefficient +/- 1
                                i.e. p = 0 <-> x = e and x \notin e.
     Replace x by e in sys
@@ -368,21 +351,15 @@ module WithProof : sig
 
   val subst : t list -> t list
 
-  (** [subst_constant b sys] performs the equivalent of the 'subst' tactic of Coq
+  (** [subst_constant b sys] performs the equivalent of the 'subst' tactic of Rocq
       only if there is an equation a.x = c for a,c a constant and a divides c if b= true*)
   val subst_constant : bool -> t list -> t list
 
-  (** [subst1 sys] performs a single substitution *)
-  val subst1 : t list -> t list
-
   val saturate_subst : bool -> t list -> t list
-  val is_substitution : bool -> t -> var option
 end
 
 module BoundWithProof : sig
   type t
-
-  val compare : t -> t -> int
   val make : WithProof.t -> t option
   val mul_bound : t -> t -> t option
   val bound : t -> Vect.Bound.t

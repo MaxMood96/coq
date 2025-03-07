@@ -1,6 +1,6 @@
 (** Extraction to Haskell : use of basic Haskell types *)
 
-Require Coq.extraction.Extraction.
+Require Corelib.extraction.Extraction.
 
 Extract Inductive bool => "Prelude.Bool" [ "Prelude.True" "Prelude.False" ].
 Extract Inductive option => "Prelude.Maybe" [ "Prelude.Just" "Prelude.Nothing" ].

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -10,8 +10,8 @@
 
 open EConstr
 
-val congruence_tac : int -> constr list -> unit Proofview.tactic
+val congruence_tac : int option -> constr list -> unit Proofview.tactic
 
-val simple_congruence_tac : int -> constr list -> unit Proofview.tactic
+val simple_congruence_tac : int option -> constr list -> unit Proofview.tactic
 
 val f_equal : unit Proofview.tactic

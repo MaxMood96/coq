@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -34,7 +34,7 @@ val new_instance_interactive
   -> ?hook:(GlobRef.t -> unit)
   -> Vernacexpr.hint_info_expr
   -> (bool * constr_expr) option
-  -> Id.t * Declare.Proof.t
+  -> lident * Declare.Proof.t
 
 val new_instance
   : locality:Hints.hint_locality
@@ -45,7 +45,7 @@ val new_instance
   -> (bool * constr_expr)
   -> ?hook:(GlobRef.t -> unit)
   -> Vernacexpr.hint_info_expr
-  -> Id.t
+  -> lident
 
 val new_instance_program
   : locality:Hints.hint_locality
@@ -57,7 +57,7 @@ val new_instance_program
   -> (bool * constr_expr) option
   -> ?hook:(GlobRef.t -> unit)
   -> Vernacexpr.hint_info_expr
-  -> Declare.OblState.t * Id.t
+  -> Declare.OblState.t * lident
 
 val declare_new_instance
   : locality:Hints.hint_locality
@@ -84,18 +84,30 @@ module Event : sig
     | NewInstance of instance
 end
 
-(* Observers are called whenever a class or an instance are declared *)
-val add_observer : (Event.t -> unit) -> unit
+(** Activated observers are called whenever a class or an instance are declared.
+
+    [register_observer] is to be called once per process for a given
+    string, unless [override] is [true]. The registered observer is not activated.
+
+    Activation state is part of the summary. It is up to the caller to
+    use libobject for persistence if desired.
+*)
+
+type observer
+
+val register_observer : name:string -> ?override:bool -> (Event.t -> unit) -> observer
+
+val activate_observer : observer -> unit
+
+val deactivate_observer : observer -> unit
 
 (** Setting opacity *)
 
 val set_typeclass_transparency
   :  locality:Hints.hint_locality
-  -> Tacred.evaluable_global_reference list
+  -> Evaluable.t list
   -> bool
   -> unit
-
-val tc_transparency_locality : Hints.hint_locality Attributes.attribute
 
 val set_typeclass_transparency_com
   :  locality:Hints.hint_locality
@@ -103,16 +115,22 @@ val set_typeclass_transparency_com
   -> bool
   -> unit
 
+val set_typeclass_mode
+  :  locality:Hints.hint_locality
+  -> GlobRef.t
+  -> Hints.hint_mode list
+  -> unit
+
 (** For generation on names based on classes only *)
 
-val id_of_class : typeclass -> Id.t
-
 val refine_att : bool Attributes.attribute
-
-val instance_locality : Hints.hint_locality Attributes.attribute
 
 (** {6 Low level interface used by Add Morphism, do not use } *)
 module Internal :
 sig
 val add_instance : typeclass -> hint_info -> Hints.hint_locality -> GlobRef.t -> unit
 end
+
+
+(** A configurable warning to output if a default mode is used for a class declaration. *)
+val warn_default_mode : ?loc:Loc.t -> (GlobRef.t * Hints.hint_mode list) -> unit

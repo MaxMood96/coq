@@ -1,8 +1,8 @@
 package "quotation" (
     directory = "src"
     version = "dev"
-    description = "An quotation test plugin"
-    requires = "coq-core.plugins.ltac"
+    description = "A quotation test plugin"
+    requires = "rocq-runtime.plugins.ltac"
     archive(byte) = "quotation_plugin.cma"
     archive(native) = "quotation_plugin.cmxa"
     plugin(byte) = "quotation_plugin.cma"

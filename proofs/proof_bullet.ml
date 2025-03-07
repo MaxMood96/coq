@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -54,7 +54,7 @@ module Strict = struct
   | NeedClosingBrace (* Some unfocussed goal exists "{" needed to focus them *)
   | ProofFinished (* No more goal anywhere *)
 
-  (* give a message only if more informative than the standard coq message *)
+  (* give a message only if more informative than the standard rocq message *)
   let suggest_on_solved_goal sugg =
     match sugg with
     | NeedClosingBrace -> Pp.(str"Try unfocusing with \"}\".")
@@ -84,7 +84,7 @@ module Strict = struct
 
 
   (* spiwack: we need only one focus kind as we keep a stack of (distinct!) bullets *)
-  let bullet_kind = (new_focus_kind () : t list focus_kind)
+  let bullet_kind = (new_focus_kind "bullet_kind" : t list focus_kind)
   let bullet_cond = done_cond ~loose_end:true bullet_kind
 
   (* spiwack: as it is bullets are reset (locally) by *any* non-bullet focusing command
@@ -109,8 +109,8 @@ module Strict = struct
      of bullet or higher) then raise [Proof.CannotUnfocusThisWay]. *)
   let pop pr =
     match get_bullets pr with
-    | b::_ -> unfocus bullet_kind pr () , b
-    | _ -> assert false
+    | b::_ -> Some (unfocus bullet_kind pr (), b)
+    | _ -> None
 
   let push (b:t) pr =
     focus bullet_cond (b::get_bullets pr) 1 pr
@@ -126,16 +126,16 @@ module Strict = struct
             let us look at the bullet needed. *)
       let rec loop prf =
         match pop prf with
-        | prf, b ->
+        | Some (prf, b) ->
           (* pop went well, this means that there are no more goals
            *under this* bullet b, see if a new b can be pushed. *)
           begin
             try ignore (push b prf); Suggest b
-            with _ ->
+            with e when CErrors.noncritical e ->
               (* b could not be pushed, so we must look for a outer bullet *)
               loop prf
           end
-        | exception _ ->
+        | None ->
           (* No pop was possible, but there are still
              subgoals somewhere: there must be a "}" to use. *)
           NeedClosingBrace
@@ -143,7 +143,7 @@ module Strict = struct
       loop prf
 
   let rec pop_until (prf : Proof.t) bul : Proof.t =
-    let prf', b = pop prf in
+    let prf', b = Option.get (pop prf) in
     if bullet_eq bul b then prf'
     else pop_until prf' bul
 
@@ -174,10 +174,8 @@ module Strict = struct
 end
 
 (* Current bullet behavior, controlled by the option *)
-let current_behavior =
+let { Goptions.get = current_behavior } =
   Goptions.declare_interpreted_string_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Bullet";"Behavior"]
     ~value:Strict.strict
     (fun n ->
@@ -185,6 +183,7 @@ let current_behavior =
       with Not_found ->
         CErrors.user_err Pp.(str ("Unknown bullet behavior: \"" ^ n ^ "\".")))
     (fun v -> v.name)
+    ()
 
 let put p b =
   (current_behavior ()).put p b

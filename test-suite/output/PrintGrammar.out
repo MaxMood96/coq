@@ -39,7 +39,7 @@ Entry lconstr is
 
 Entry term is
 [ "200" RIGHTA
-  [ binder_constr ]
+  [  ]
 | "100" RIGHTA
   [ SELF; "<:"; term LEVEL "200"
   | SELF; "<<:"; term LEVEL "200"
@@ -90,23 +90,21 @@ Entry term is
 | "10" LEFTA
   [ SELF; LIST1 arg
   | "@"; global; univ_annot; LIST0 NEXT
-  | "@"; pattern_ident; LIST1 identref ]
+  | "@"; pattern_ident; LIST1 identref
+  | binder_constr ]
 | "9" LEFTA
   [ ".."; term LEVEL "0"; ".." ]
 | "8" LEFTA
   [  ]
 | "1" LEFTA
-  [ SELF; ".("; "@"; global; univ_annot; LIST0 (term LEVEL "9"); ")"
+  [ SELF; ".2"
+  | SELF; ".1"
+  | SELF; ".("; "@"; global; univ_annot; LIST0 (term LEVEL "9"); ")"
   | SELF; ".("; global; univ_annot; LIST0 arg; ")"
-  | SELF; "%"; IDENT ]
+  | SELF; "%"; IDENT
+  | SELF; "%_"; IDENT ]
 | "0" LEFTA
-  [ IDENT "ltac"; ":"; "("; ltac_expr; ")"
-  | "("; term LEVEL "200"; ","; term LEVEL "200"; ","; LIST1 (term LEVEL
-    "200") SEP ","; ")"
-  | "("; term LEVEL "200"; ","; term LEVEL "200"; ")"
-  | "("; term LEVEL "200"; ")"
-  | "{|"; record_declaration; '|}'
-  | "{"; "'"; pattern LEVEL "0"; "&"; term LEVEL "200"; "&"; term LEVEL
+  [ "{"; "'"; pattern LEVEL "0"; "&"; term LEVEL "200"; "&"; term LEVEL
     "200"; "}"
   | "{"; "'"; pattern LEVEL "0"; "&"; term LEVEL "200"; "}"
   | "{"; "'"; pattern LEVEL "0"; ":"; term LEVEL "200"; "&"; term LEVEL
@@ -131,20 +129,26 @@ Entry term is
   | "{"; term LEVEL "99"; "|"; term LEVEL "200"; "&"; term LEVEL "200"; "}"
   | "{"; term LEVEL "99"; "|"; term LEVEL "200"; "}"
   | "{"; term LEVEL "99"; "}"
-  | "{"; binder_constr; "}"
+  | IDENT "ltac"; ":"; "("; ltac_expr; ")"
+  | "("; term LEVEL "200"; ","; term LEVEL "200"; ","; LIST1 (term LEVEL
+    "200") SEP ","; ")"
+  | "("; term LEVEL "200"; ","; term LEVEL "200"; ")"
+  | "("; term LEVEL "200"; ")"
+  | "{|"; record_declaration; '|}'
   | "`{"; term LEVEL "200"; "}"
   | "`("; term LEVEL "200"; ")"
   | NUMBER
   | atomic_constr
   | term_match
-  | ident; fields; univ_annot
-  | ident; univ_annot
+  | reference; univ_annot
+  | string
   | test_array_opening; "["; "|"; array_elems; "|"; lconstr; type_cstr;
     test_array_closing; "|"; "]"; univ_annot ] ]
 
 Entry univ_annot is
 [ LEFTA
-  [ "@{"; LIST0 universe_level; "}"
+  [ "@{"; LIST0 univ_level_or_quality;
+    OPT [ "|"; LIST0 univ_level_or_quality ]; "}"
   |  ] ]
 
 Entry fix_decls is

@@ -39,8 +39,6 @@ Abort.
 
 (* Submitted by B. Baydemir (BZ#1882) *)
 
-Require Import List.
-
 Definition alist R := list (nat * R)%type.
 
 Section Properties.
@@ -63,9 +61,9 @@ Abort.
 
 (* The calls to "destruct" below did not work before revision 12356 *)
 
-Variable A0:Type.
-Variable P:A0->Type.
-Require Import JMeq.
+Parameter A0:Type.
+Parameter P:A0->Type.
+Require Import TestSuite.jmeq.
 Goal forall a b (p:P a) (q:P b),
   forall H:a = b, eq_rect a P p b H = q -> JMeq (existT _ a p) (existT _ b q).
 intros.

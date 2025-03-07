@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -22,7 +22,7 @@ type unification_error =
   | ConversionFailed of env * constr * constr (* Non convertible closed terms *)
   | IncompatibleInstances of env * existential * constr * constr
   | MetaOccurInBody of Evar.t
-  | InstanceNotSameType of Evar.t * env * types * types
+  | InstanceNotSameType of Evar.t * env * types option * types
   | InstanceNotFunctionalType of Evar.t * env * constr * types
   | UnifUnivInconsistency of UGraph.univ_inconsistency
   | CannotSolveConstraint of Evd.evar_constraint * unification_error
@@ -32,9 +32,11 @@ type position = (Id.t * Locus.hyp_location_flag) option
 
 type position_reporting = (position * int) * constr
 
-type subterm_unification_error = bool * position_reporting * position_reporting * (constr * constr * unification_error) option
+type subterm_unification_error = bool * position_reporting * position_reporting
 
-type type_error = (constr, types) ptype_error
+type type_error = (constr, types, ERelevance.t) ptype_error
+
+let of_type_error = map_ptype_error ERelevance.make EConstr.of_constr
 
 type pretype_error =
   (* Old Case *)
@@ -59,6 +61,7 @@ type pretype_error =
   | UnexpectedType of constr * constr * unification_error
   | NotProduct of constr
   | TypingError of type_error
+  | CantApplyBadTypeExplained of (constr,types) pcant_apply_bad_type * unification_error
   | CannotUnifyOccurrences of subterm_unification_error
   | UnsatisfiableConstraints of
     (Evar.t * Evar_kinds.t) option * Evar.Set.t
@@ -68,6 +71,7 @@ exception PretypeError of env * Evd.evar_map * pretype_error
 
 let precatchable_exception = function
   | CErrors.UserError _ | TypeError _ | PretypeError _
+  | Reductionops.AnomalyInConversion _
   | Nametab.GlobalizationError _ -> true
   | _ -> false
 
@@ -93,10 +97,14 @@ let error_cant_apply_not_functional ?loc env sigma rator randl =
   raise_type_error ?loc
     (env, sigma, CantApplyNonFunctional (rator, randl))
 
-let error_cant_apply_bad_type ?loc env sigma (n,c,t) rator randl =
-  raise_type_error ?loc
-    (env, sigma,
-       CantApplyBadType ((n,c,t), rator, randl))
+let error_cant_apply_bad_type ?loc env sigma ?error (n,c,t) rator randl =
+  let v = ((n,c,t), rator, randl) in
+  match error with
+  | None ->
+    raise_type_error ?loc
+      (env, sigma,
+       CantApplyBadType v)
+  | Some e -> raise_pretype_error ?loc (env,sigma, CantApplyBadTypeExplained (v, e))
 
 let error_ill_formed_branch ?loc env sigma c i actty expty =
   raise_type_error
@@ -113,6 +121,9 @@ let error_ill_typed_rec_body ?loc env sigma i na jl tys =
     (env, sigma, IllTypedRecBody (i, na, jl, tys))
 
 let error_elim_arity ?loc env sigma pi c a =
+  (* XXX type_errors should have a 'sort type parameter *)
+  let a = Option.map EConstr.Unsafe.to_sorts a in
+  let pi = Util.on_snd EConstr.Unsafe.to_instance pi in
   raise_type_error ?loc
     (env, sigma, ElimArity (pi, c, a))
 
@@ -147,12 +158,10 @@ let error_cannot_find_well_typed_abstraction env sigma p l e =
 let error_wrong_abstraction_type env sigma na a p l =
   raise (PretypeError (env, sigma,WrongAbstractionType (na,a,p,l)))
 
-let error_abstraction_over_meta env sigma hdmeta metaarg =
-  let m = Evd.meta_name sigma hdmeta and n = Evd.meta_name sigma metaarg in
+let error_abstraction_over_meta env sigma m n =
   raise (PretypeError (env, sigma,AbstractionOverMeta (m,n)))
 
-let error_non_linear_unification env sigma hdmeta t =
-  let m = Evd.meta_name sigma hdmeta in
+let error_non_linear_unification env sigma m t =
   raise (PretypeError (env, sigma,NonLinearUnification (m,t)))
 
 (*s Ml Case errors *)

@@ -4,6 +4,9 @@
 Programmable proof search
 =========================
 
+Tactics
+-------
+
 .. tacn:: auto {? @nat_or_var } {? @auto_using } {? @hintbases }
 
    .. insertprodn auto_using hintbases
@@ -18,8 +21,13 @@ Programmable proof search
    tactic, then it reduces the goal to an atomic one using :tacn:`intros` and
    introduces the newly generated hypotheses as hints. Then it looks at
    the list of tactics associated with the head symbol of the goal and
-   tries to apply one of them.  Lower cost tactics are tried before higher-cost
-   tactics.  This process is recursively applied to the generated subgoals.
+   tries to apply one of them.  This process is recursively applied to the
+   generated subgoals.
+
+   Within each hintbase, lower cost tactics are tried before higher-cost
+   tactics.  When multiple hintbases are specified, all hints in the
+   first database are tried before any in the second database (and so forth)
+   regardless of their cost (unlike :tacn:`eauto` and :tacn:`typeclasses eauto`).
 
    :n:`@nat_or_var`
      Specifies the maximum search depth.  The default is 5.
@@ -105,11 +113,7 @@ Programmable proof search
 
    .. example::
 
-      .. coqtop:: none
-
-         Set Warnings "-deprecated-hint-without-locality".
-
-      .. coqtop:: all
+      .. rocqtop:: all
 
          Hint Resolve ex_intro : core.
          Goal forall P:nat -> Prop, P 0 -> exists n, P n.
@@ -133,12 +137,6 @@ Programmable proof search
 
       Behaves like :tacn:`eauto` but shows the tactics it tries to solve the goal,
       including failing paths.
-
-   .. tacn:: dfs eauto {? @nat_or_var } {? @auto_using } {? @hintbases }
-
-      .. deprecated:: 8.16
-
-      An alias for :tacn:`eauto`.
 
 .. tacn:: autounfold {? @hintbases } {? @simple_occurrences }
 
@@ -202,80 +200,77 @@ conditional rewriting. The second one ( *Mac Carthy function*)
 involves conditional rewritings and shows how to deal with them using
 the optional tactic of the ``Hint Rewrite`` command.
 
-
 .. example:: Ackermann function
 
-   .. coqtop:: in reset
-
-      Require Import Arith.
-
-   .. coqtop:: in
+   .. rocqtop:: in reset
 
       Parameter Ack : nat -> nat -> nat.
 
-   .. coqtop:: in
+   .. rocqtop:: in
 
       Axiom Ack0 : forall m:nat, Ack 0 m = S m.
       Axiom Ack1 : forall n:nat, Ack (S n) 0 = Ack n 1.
       Axiom Ack2 : forall n m:nat, Ack (S n) (S m) = Ack n (Ack (S n) m).
 
-   .. coqtop:: in
+   .. rocqtop:: in
 
       Global Hint Rewrite Ack0 Ack1 Ack2 : base0.
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       Lemma ResAck0 : Ack 3 2 = 29.
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       autorewrite with base0 using try reflexivity.
 
 .. example:: MacCarthy function
 
-   .. coqtop:: in reset
+   This example requires the Stdlib library.
 
-      Require Import Lia.
+   .. rocqtop:: in reset extra-stdlib
 
-   .. coqtop:: in
+      From Stdlib Require Import Arith Lia.
+
+   .. rocqtop:: in extra-stdlib
 
       Parameter g : nat -> nat -> nat.
 
-   .. coqtop:: in
+   .. rocqtop:: in extra-stdlib
 
       Axiom g0 : forall m:nat, g 0 m = m.
       Axiom g1 : forall n m:nat, (n > 0) -> (m > 100) -> g n m = g (pred n) (m - 10).
       Axiom g2 : forall n m:nat, (n > 0) -> (m <= 100) -> g n m = g (S n) (m + 11).
 
-   .. coqtop:: in
+   .. rocqtop:: in extra-stdlib
 
       Global Hint Rewrite g0 g1 g2 using lia : base1.
 
-   .. coqtop:: in
+   .. rocqtop:: in extra-stdlib
 
       Lemma Resg0 : g 1 110 = 100.
 
-   .. coqtop:: out
+   .. rocqtop:: out extra-stdlib
 
       Show.
 
-   .. coqtop:: all
+   .. rocqtop:: all extra-stdlib
 
       autorewrite with base1 using reflexivity || simpl.
 
-   .. coqtop:: none
+   .. rocqtop:: none extra-stdlib
 
       Qed.
 
-   .. coqtop:: all
+   .. rocqtop:: all extra-stdlib
 
       Lemma Resg1 : g 1 95 = 91.
 
-   .. coqtop:: all
+   .. rocqtop:: all extra-stdlib
 
       autorewrite with base1 using reflexivity || simpl.
 
-   .. coqtop:: none
+   .. rocqtop:: none extra-stdlib
 
       Qed.
 
@@ -305,13 +300,13 @@ Hints used by :tacn:`auto`, :tacn:`eauto` and other tactics are stored in hint
 databases.  Each database maps head symbols to a list of hints.  Use the
 :cmd:`Print Hint` command to view a database.
 
-Each hint has a cost that is a nonnegative
-integer and an optional pattern. Hints with lower costs are tried first.
+Each hint has a cost and an optional pattern. Hints with lower
+cost are tried first.  (Cost is not used to limit the scope of searches.)
 :tacn:`auto` tries a hint when the conclusion of the current goal matches its
 pattern or when the hint has no pattern.
 
-Creating Hint databases
------------------------
+Creating hint databases
+```````````````````````
 
 Hint databases can be created with the :cmd:`Create HintDb` command or implicitly
 by adding a hint to an unknown database.  We recommend you always use :cmd:`Create HintDb`
@@ -325,7 +320,8 @@ and `Constants`, while implicitly created databases have the `Opaque` setting.
 
 .. cmd:: Create HintDb @ident {? discriminated }
 
-   Creates a new hint database named :n:`@ident`. The database is
+   If there is no hint database named :n:`@name`, creates a new hint database
+   with that name.  Otherwise, does nothing.  The database is
    implemented by a Discrimination Tree (DT) that serves as a filter to select
    the lemmas that will be applied. When discriminated, the DT uses
    transparency information to decide if a constant should considered rigid for
@@ -335,6 +331,55 @@ and `Constants`, while implicitly created databases have the `Opaque` setting.
    unification.
 
    By default, hint databases are undiscriminated.
+
+   .. warn:: @ident already exists and is {? not } discriminated
+      :name: mismatched-hint-db
+
+      `Create HintDb` will not change whether a pre-existing database
+      is discriminated.
+
+
+Hint databases defined in the Rocq standard library
+```````````````````````````````````````````````````
+
+Several hint databases are defined in the Rocq standard library. The
+database contains all hints declared
+to belong to it in the currently loaded modules.
+In particular, requiring new modules may extend the database.
+At Rocq startup, only the core database is nonempty and ready to be used immediately.
+
+:core: This special database is automatically used by ``auto``, except when
+       pseudo-database ``nocore`` is given to ``auto``. The core database
+       contains only basic lemmas about negation, conjunction, and so on.
+       Most of the hints in this database come from the Init and Logic directories.
+
+:arith: all lemmas about Peano’s arithmetic proved in the
+        directories Init and Arith.
+
+:zarith: lemmas about binary signed integers from the
+         directories theories/ZArith. The database also contains
+         high-cost hints that call :tacn:`lia` on equations and
+         inequalities in ``nat`` or ``Z``.
+
+:bool: lemmas about booleans, mostly from directory theories/Bool.
+
+:datatypes: lemmas about lists, streams and so on that are mainly proved
+            in the Lists subdirectory.
+
+:sets: lemmas about sets and relations from the directories Sets and
+       Relations.
+
+:typeclass_instances: special database containing all typeclass instances declared in the
+                      environment, including those used for ``setoid_rewrite``,
+                      from the Classes directory.
+
+:fset: internal database for the implementation of the ``FSets`` library.
+
+:ordered_type: lemmas about ordered types (as defined in the legacy ``OrderedType`` module),
+               mainly used in the ``FSets`` and ``FMaps`` libraries.
+
+You are advised not to put your own hints in the core database, but
+use one or more databases specific to your development.
 
 .. _creating_hints:
 
@@ -347,8 +392,13 @@ Creating Hints
    *(Deprecated since version 8.10:* If no :token:`ident`\s
    are given, the hint is added to the `core` database.)
 
+   Hints in hint databases are ordered, which is the order in which they're
+   tried, as shown by the :cmd:`Print HintDb` command.
+   Hints with lower costs are tried first.  Hints with the same cost are tried
+   in reverse of their order of definition, i.e., last to first.
+
    Outside of sections, these commands support the :attr:`local`, :attr:`export`
-   and :attr:`global` attributes. :attr:`global` is the default.
+   and :attr:`global` attributes. :attr:`export` is the default.
 
    Inside sections, some commands only support the :attr:`local` attribute. These are
    :cmd:`Hint Immediate`, :cmd:`Hint Resolve`, :cmd:`Hint Constructors`,
@@ -364,16 +414,10 @@ Creating Hints
    + :attr:`global` hints are visible from other modules when they :cmd:`Import` or
      :cmd:`Require` the current module.
 
-   .. versionadded:: 8.14
+   .. versionchanged:: 8.18
 
-      The :cmd:`Hint Rewrite` now supports locality attributes like other `Hint` commands.
-
-   .. deprecated:: 8.13
-
-      The default value for hint locality will change in a future release. Hints
-      added outside of sections without an explicit locality are deprecated. We
-      recommend using :attr:`export` where possible. This warning is treated as
-      an error by default.
+      The default value for hint locality outside sections is
+      now :attr:`export`. It used to be :attr:`global`.
 
    The `Hint` commands are:
 
@@ -416,9 +460,9 @@ Creating Hints
 
       :n:`@one_term`
         Permits declaring a hint without declaring a new
-        constant first, but this is not recommended.
+        constant first. This is deprecated.
 
-         .. warn:: Declaring arbitrary terms as hints is fragile; it is recommended to declare a toplevel constant instead
+         .. warn:: Declaring arbitrary terms as hints is fragile and deprecated; it is recommended to declare a toplevel constant instead
             :undocumented:
 
       .. exn:: @qualid cannot be used as a hint
@@ -466,10 +510,10 @@ Creating Hints
       .. exn:: Cannot coerce @qualid to an evaluable reference.
          :undocumented:
 
-   .. cmd:: Hint {| Constants | Variables } {| Transparent | Opaque } {? : {+ @ident } }
-      :name: Hint Constants; Hint Variables
+   .. cmd:: Hint {| Constants | Projections | Variables } {| Transparent | Opaque } {? : {+ @ident } }
+      :name: Hint Constants; Hint Projections; Hint Variables
 
-      Sets the transparency flag for constants or variables for the specified hint
+      Sets the transparency flag for constants, projections or variables for the specified hint
       databases.
       These flags affect the unification of hints in the database.
       We advise using this just after a :cmd:`Create HintDb` command.
@@ -480,19 +524,17 @@ Creating Hints
       :tacn:`unfold`. :n:`@natural` is the cost, :n:`@one_pattern` is the pattern
       to match and :n:`@ltac_expr` is the action to apply.
 
-      .. note::
+      **Usage tip**: tactics that can succeed even if they don't change the context,
+      such as most of the :ref:`conversion tactics <applyingconversionrules>`, should
+      be prefaced with :tacn:`progress` to avoid needless repetition of the tactic.
 
-         Use a :cmd:`Hint Extern` with no pattern to do
-         pattern matching on hypotheses using ``match goal with``
-         inside the tactic.
+      **Usage tip**: Use a :cmd:`Hint Extern` with no pattern to do
+      pattern matching on hypotheses using ``match goal with``
+      inside the tactic.
 
       .. example::
 
-         .. coqtop:: none
-
-            Set Warnings "-deprecated-hint-without-locality".
-
-         .. coqtop:: in
+         .. rocqtop:: in
 
             Hint Extern 4 (~(_ = _)) => discriminate : core.
 
@@ -506,13 +548,9 @@ Creating Hints
 
       .. example::
 
-         .. coqtop:: reset none
+         .. rocqtop:: reset all
 
-            Set Warnings "-deprecated-hint-without-locality".
-
-         .. coqtop:: all
-
-            Require Import List.
+            Require Import ListDef.
             Hint Extern 5 ({?X1 = ?X2} + {?X1 <> ?X2}) =>
               generalize  X1, X2; decide equality : eqdec.
             Goal forall a b:list (nat * nat), {a = b} + {a <> b}.
@@ -568,17 +606,19 @@ Creating Hints
 
    .. cmd:: Hint Mode @qualid {+ {| + | ! | - } } {? : {+ @ident } }
 
-      Sets an optional mode of use for the identifier :n:`@qualid`. When
+      Sets an optional mode of resolution for the identifier :n:`@qualid`. When
       proof search has a goal that ends in an application of :n:`@qualid` to
       arguments :n:`@arg ... @arg`, the mode tells if the hints associated with
-      :n:`@qualid` can be applied or not. A mode specification is a list of ``+``,
-      ``!`` or ``-`` items that specify if an argument of the identifier is to be
-      treated as an input (``+``), if its head only is an input (``!``) or an output
-      (``-``) of the identifier. Mode ``-`` matches any term, mode ``+`` matches a
+      :n:`@qualid` can be applied or not, depending on a criterion on the arguments.
+      A mode specification is a list of ``+``, ``!`` or ``-`` items that specify if
+      an argument of the identifier is to be treated as an input (``+``), if its
+      head only is an input (``!``) or an output (``-``) of the identifier.
+      Mode ``-`` matches any term, mode ``+`` matches a
       term if and only if it does not contain existential variables, while mode ``!``
       matches a term if and only if the *head* of the term is not an existential variable.
       The head of a term is understood here as the applicative head, recursively,
-      ignoring casts.
+      ignoring casts. For a mode declaration to match a list of arguments, each argument should
+      match its corresponding mode.
 
       :cmd:`Hint Mode` is especially useful for typeclasses, when one does not want
       to support default instances and wants to avoid ambiguity in general. Setting a parameter
@@ -601,7 +641,45 @@ Creating Hints
       refers to a local variable that will go out of scope when closing the
       section. As a result the hint will not survive either.
 
-.. cmd:: Hint Rewrite {? {| -> | <- } } {+ @one_term } {? using @ltac_expr } {? : {* @ident } }
+   .. example:: Logic programming with addition on natural numbers
+
+      This example illustrates the use of modes to control how resolutions
+      can be triggered during proof search.
+
+      .. rocqtop:: all reset
+
+         Parameter plus : nat -> nat -> nat -> Prop.
+         Hint Mode plus ! - - : plus.
+         Hint Mode plus - ! - : plus.
+
+      .. rocqtop:: in
+
+         Axiom plus0l : forall m : nat, plus 0 m m.
+         Axiom plus0r : forall n : nat, plus n 0 n.
+         Axiom plusSl : forall n m r : nat, plus n m r -> plus (S n) m (S r).
+         Axiom plusSr : forall n m r : nat, plus n m r -> plus m (S m) (S r).
+         Hint Resolve plus0l plus0r plusSl plusSr : plus.
+
+      The previous commands define the addition predicate and set its mode so it
+      can resolve goals if and only if one of the first two arguments is headed
+      by a constructor or constant. The last argument of the predicate will be
+      the inferred result.
+
+      .. rocqtop:: all
+
+         Goal exists x y, plus x y 12.
+         Proof. eexists ?[x], ?[y].
+            Fail typeclasses eauto with plus.
+            instantiate (y := 1).
+            typeclasses eauto with plus.
+         Defined.
+
+      In the proof script, the first call to :tacn:`typeclasses eauto` fails as the two
+      arguments are headed by an existential variable, while when we instantiate the second
+      argument with ``1``, typeclass resolution succeeds as the second declared mode is matched,
+      and instantiates ``x`` with ``11``.
+
+.. cmd:: Hint Rewrite {? {| -> | <- } } {+ @one_term } {? using @ltac_expr } {? : {+ @ident } }
 
    :n:`{? using @ltac_expr }`
      If specified, :n:`@ltac_expr` is applied to the generated subgoals, except for the
@@ -644,91 +722,36 @@ Creating Hints
 
 .. cmd:: Print HintDb @ident
 
-   This command displays all hints from database :n:`@ident`.
-
-
-Hint databases defined in the Coq standard library
---------------------------------------------------
-
-Several hint databases are defined in the Coq standard library. The
-actual content of a database is the collection of hints declared
-to belong to this database in each of the various modules currently
-loaded. Especially, requiring new modules may extend the database.
-At Coq startup, only the core database is nonempty and can be used.
-
-:core: This special database is automatically used by ``auto``, except when
-       pseudo-database ``nocore`` is given to ``auto``. The core database
-       contains only basic lemmas about negation, conjunction, and so on.
-       Most of the hints in this database come from the Init and Logic directories.
-
-:arith: This database contains all lemmas about Peano’s arithmetic proved in the
-        directories Init and Arith.
-
-:zarith: contains lemmas about binary signed integers from the
-         directories theories/ZArith. The database also contains
-         high-cost hints that call :tacn:`lia` on equations and
-         inequalities in ``nat`` or ``Z``.
-
-:bool: contains lemmas about booleans, mostly from directory theories/Bool.
-
-:datatypes: is for lemmas about lists, streams and so on that are mainly proved
-            in the Lists subdirectory.
-
-:sets: contains lemmas about sets and relations from the directories Sets and
-       Relations.
-
-:typeclass_instances: contains all the typeclass instances declared in the
-                      environment, including those used for ``setoid_rewrite``,
-                      from the Classes directory.
-
-:fset: internal database for the implementation of the ``FSets`` library.
-
-:ordered_type: lemmas about ordered types (as defined in the legacy ``OrderedType`` module),
-               mainly used in the ``FSets`` and ``FMaps`` libraries.
-
-You are advised not to put your own hints in the core database, but
-use one or several databases specific to your development.
+   This command displays all hints from database :n:`@ident`.  Hints
+   in each group ("For ... ->") are shown in the order in which they will be tried
+   (first to last).  The groups are shown ordered alphabetically on the last component of
+   the symbol name.  Note that hints with the same cost are tried in
+   reverse of the order they're defined in, i.e., last to first.
 
 Hint locality
--------------
+`````````````
 
-Hints provided by the ``Hint`` commands are erased when closing a section.
-Conversely, all hints of a module ``A`` that are not defined inside a
-section (and not defined with option ``Local``) become available when the
-module ``A`` is required (using e.g. ``Require A.``).
-
-As of today, hints only have a binary behavior regarding locality, as
-described above: either they disappear at the end of a section scope,
-or they remain global forever. This causes a scalability issue,
-because hints coming from an unrelated part of the code may badly
-influence another development. It can be mitigated to some extent
-thanks to the :cmd:`Remove Hints` command,
-but this is a mere workaround and has some limitations (for instance, external
-hints cannot be removed).
-
-A proper way to fix this issue is to bind the hints to their module scope, as
-for most of the other objects Coq uses. Hints should only be made available when
-the module they are defined in is imported, not just required. It is very
-difficult to change the historical behavior, as it would break a lot of scripts.
-We propose a smooth transitional path by providing the :opt:`Loose Hint Behavior`
-option which accepts three flags allowing for a fine-grained handling of
-non-imported hints.
+As explained at the beginning of :ref:`creating_hints`, hints outside sections have three
+possible localities: :attr:`local`, :attr:`export`, and :attr:`global`,
+with :attr:`export` now being the default. The default used to
+be :attr:`global`, so old code bases may still use it. The following
+option may be useful to help transition hints from the :attr:`global`
+to the :attr:`export` locality, as it can provide an over-approximation
+of where these hints are used:
 
 .. opt:: Loose Hint Behavior {| "Lax" | "Warn" | "Strict" }
 
-   This :term:`option` accepts three values, which control the behavior of hints w.r.t.
-   :cmd:`Import`:
+   This :term:`option` accepts three values:
 
-   - "Lax": this is the default, and corresponds to the historical behavior,
-     that is, hints defined outside of a section have a global scope.
+   - "Lax": no scope errors or warnings are generated for hints. This is the default.
 
    - "Warn": outputs a warning when a non-imported hint is used. Note that this
      is an over-approximation, because a hint may be triggered by a run that
      will eventually fail and backtrack, resulting in the hint not being
      actually useful for the proof.
 
-   - "Strict": changes the behavior of an unloaded hint to a immediate fail
-     tactic, allowing to emulate an import-scoped hint mechanism.
+   - "Strict": fails when a non-imported hint is used, with the same caveats
+     as "Warn".
 
 .. _tactics-implicit-automation:
 

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -20,9 +20,9 @@ module NamedDecl = Context.Named.Declaration
 (* Absurd *)
 
 let mk_absurd_proof env r t =
-  Tacticals.pf_constr_of_global (Coqlib.(lib_ref "core.not.type")) >>= fun coq_not ->
+  Tacticals.pf_constr_of_global (Rocqlib.(lib_ref "core.not.type")) >>= fun rocq_not ->
   Refine.refine ~typecheck:true begin fun sigma ->
-    let sigma, negev = Evarutil.new_evar env sigma (mkApp (coq_not, [|t|])) in
+    let sigma, negev = Evarutil.new_evar env sigma (mkApp (rocq_not, [|t|])) in
     let sigma, ev = Evarutil.new_evar ~relevance:r env sigma t in
     sigma, mkApp (negev, [|ev|])
   end
@@ -34,7 +34,7 @@ let absurd c =
     let j = Retyping.get_judgment_of env sigma c in
     let sigma, j = Coercion.inh_coerce_to_sort env sigma j in
     let t = nf_betaiota env sigma j.Environ.utj_val in
-    let r = ESorts.relevance_of_sort sigma j.Environ.utj_type in
+    let r = ESorts.relevance_of_sort j.Environ.utj_type in
     Proofview.Unsafe.tclEVARS sigma <*>
     Tactics.exfalso <*> mk_absurd_proof env r t
   end
@@ -113,7 +113,7 @@ let contradiction_term (c,lbind as cl) =
     let sigma = Tacmach.project gl in
     let env = Proofview.Goal.env gl in
     let typ = Tacmach.pf_get_type_of gl c in
-    let _, ccl = hnf_decompose_prod env sigma typ in
+    let _, ccl = whd_decompose_prod env sigma typ in
     if is_empty_type env sigma ccl then
       Tacticals.tclTHEN
         (elim false None cl None)

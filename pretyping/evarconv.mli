@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -69,17 +69,37 @@ val unify : ?flags:unify_flags -> ?with_ho:bool ->
 val solve_unif_constraints_with_heuristics :
   env -> ?flags:unify_flags -> ?with_ho:bool -> evar_map -> evar_map
 
-(** Check all pending unification problems are solved and raise a
-    PretypeError otherwise *)
+(** Check all pending unification problems relative to a set of evars
+    are solved and raise a PretypeError otherwise *)
 
-val check_problems_are_solved : env -> evar_map -> unit
+val check_problems_are_solved : ?evars:Evar.Set.t -> env -> evar_map -> unit
 
-(** Check if a canonical structure is applicable *)
+(** Hook for the canonical structure resolution *)
 
+type hook = Environ.env -> Evd.evar_map -> ((Names.Constant.t * EConstr.EInstance.t) * EConstr.t list option * EConstr.t) -> (EConstr.t * EConstr.t list) -> (Evd.evar_map * Structures.CanonicalSolution.t) option
+
+val all_hooks : hook CString.Map.t ref
+
+val register_hook : name:CString.Map.key -> ?override:bool -> hook -> unit
+
+val active_hooks : string list ref
+
+val deactivate_hook : name:Util.String.t -> unit
+
+val activate_hook : name:CString.Map.key -> unit
+
+val apply_hooks : hook
+
+(** Check if a canonical structure is applicable. *)
+
+val decompose_proj : ?metas:(Constr.metavariable -> types option) -> env -> evar_map -> state -> (Names.Constant.t * EConstr.EInstance.t) *
+            (EConstr.t list option * EConstr.t * Reductionops.Stack.t)
 val check_conv_record : env -> evar_map ->
-  state -> state ->
+  (Names.Constant.t * EConstr.EInstance.t) *
+            (EConstr.t list option * EConstr.t * Reductionops.Stack.t) ->
+  state ->
   evar_map * (constr * constr)
-  * constr * constr list * (EConstr.t list * EConstr.t list) *
+  * constr * constr list * (EConstr.t list * EConstr.t list option) *
     (EConstr.t list * EConstr.t list) *
     (Stack.t * Stack.t) * constr *
     (int option * constr)
@@ -134,9 +154,12 @@ val evar_unify : Evarsolve.unifier
 
 (**/**)
 (* For debugging *)
+module Cs_keys_cache : sig type t end
+
 val evar_eqappr_x : ?rhs_is_already_stuck:bool -> unify_flags ->
-  env -> evar_map ->
-    conv_pb -> state -> state ->
+  env -> evar_map -> conv_pb ->
+  Cs_keys_cache.t ->
+  bool option -> state -> state ->
       Evarsolve.unification_result
 
 val occur_rigidly : Evarsolve.unify_flags ->

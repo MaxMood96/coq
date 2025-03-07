@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -109,7 +109,7 @@ module type Task = sig
 
       These functions are meant to parametrize the worker manager on
       the actions to be taken when things go wrong or are cancelled
-      (you can kill a worker in CoqIDE, or using kill -9...)
+      (you can kill a worker in RocqIDE, or using kill -9...)
 
       E.g. master can decide to inhabit the (delegate) Future.t with a
       closure (to be run in master), i.e. make the document still
@@ -147,7 +147,7 @@ module MakeQueue(T : Task) () : sig
   (** [create n pri] will initialize the queue with [n] workers having
       priority [pri]. If [n] is 0, the queue won't spawn any process,
       working in a lazy local manner. [not imposed by the this API] *)
-  val create : int -> CoqworkmgrApi.priority -> queue
+  val create : spawn_args:string list -> int -> CoqworkmgrApi.priority -> queue
 
   (** [destroy q] Deallocates [q], cancelling all pending tasks. *)
   val destroy : queue -> unit
@@ -205,13 +205,13 @@ module MakeQueue(T : Task) () : sig
 
   (** [with_n_workers n pri f] creates a queue, runs the function, destroys
       the queue. The user should call join *)
-  val with_n_workers : int -> CoqworkmgrApi.priority -> (queue -> 'a) -> 'a
+  val with_n_workers : spawn_args:string list -> int -> CoqworkmgrApi.priority -> (queue -> 'a) -> 'a
 
 end
 
 (** Server-side functor. [MakeWorker T] creates the server task
     dispatcher. *)
-module MakeWorker(T : Task) () : sig
+module MakeWorker(_ : Task) () : sig
 
   (** [init_stdout ()] is called at [Coqtop.toploop_init] time. *)
   val init_stdout : unit -> unit

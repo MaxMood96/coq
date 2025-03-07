@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -90,4 +90,4 @@ val get_native_string : ml_ast -> string
 val pp_native_string : ml_ast -> Pp.t
 
 (* Registered sig type *)
-val sig_type_ref : unit -> GlobRef.t
+val sig_type_name : string

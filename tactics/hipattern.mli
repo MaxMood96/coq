@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,7 +11,7 @@
 open Names
 open Evd
 open EConstr
-open Coqlib
+open Rocqlib
 
 (** High-order patterns *)
 
@@ -86,7 +86,7 @@ val is_equality_type       : testing_function
 val match_with_nottype     : (constr * constr) matching_function
 val is_nottype             : testing_function
 
-val match_with_forall_term    : (Name.t Context.binder_annot * constr * constr) matching_function
+val match_with_forall_term    : (Name.t EConstr.binder_annot * constr * constr) matching_function
 val is_forall_term            : testing_function
 
 val match_with_imp_term    : (constr * constr) matching_function
@@ -116,26 +116,26 @@ type equation_kind =
 exception NoEquationFound
 
 val match_with_equation:
-  Environ.env -> evar_map -> constr -> coq_eq_data option * constr * equation_kind
+  Environ.env -> evar_map -> constr -> rocq_eq_data option * constr * equation_kind
 
 (***** Destructing patterns bound to some theory *)
 
 (** Match terms [eq A t u], [identity A t u] or [JMeq A t A u]
    Returns associated lemmas and [A,t,u] or fails PatternMatchingFailure *)
 val find_eq_data_decompose : Environ.env -> evar_map -> constr ->
-      coq_eq_data * EInstance.t * (types * constr * constr)
+      rocq_eq_data * EInstance.t * (types * constr * constr)
 
 (** Idem but fails with an error message instead of PatternMatchingFailure *)
 val find_this_eq_data_decompose : Environ.env -> evar_map -> constr ->
-      coq_eq_data * EInstance.t * (types * constr * constr)
+      rocq_eq_data * EInstance.t * (types * constr * constr)
 
 (** A variant that returns more informative structure on the equality found *)
-val find_eq_data : Environ.env -> evar_map -> constr -> coq_eq_data * EInstance.t * equation_kind
+val find_eq_data : Environ.env -> evar_map -> constr -> rocq_eq_data * EInstance.t * equation_kind
 
 (** Match a term of the form [(existT A P t p)]
    Returns associated lemmas and [A,P,t,p] *)
 val find_sigma_data_decompose : Environ.env -> evar_map -> constr ->
-  coq_sigma_data * (EInstance.t * constr * constr * constr * constr)
+  rocq_sigma_data * (EInstance.t * constr * constr * constr * constr)
 
 (** Match a term of the form [{x:A|P}], returns [A] and [P] *)
 val match_sigma : Environ.env -> evar_map -> constr -> constr * constr
@@ -149,3 +149,6 @@ val match_eqdec : Environ.env -> evar_map -> constr -> bool * GlobRef.t * constr
 (** Match a negation *)
 val is_matching_not : Environ.env -> evar_map -> constr -> bool
 val is_matching_imp_False : Environ.env -> evar_map -> constr -> bool
+
+(** Test if a homogeneous relation (in Prop) and, if so, returns the domain *)
+val is_homogeneous_relation : ?loc:Loc.t -> Environ.env -> evar_map -> constr -> types

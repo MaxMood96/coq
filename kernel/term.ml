@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -15,16 +15,6 @@ open Names
 open Vars
 open Constr
 open Context
-
-(* Deprecated *)
-type sorts_family = Sorts.family = InSProp | InProp | InSet | InType | InQSort
-[@@ocaml.deprecated "Alias for Sorts.family"]
-
-type sorts = Sorts.t = private
-  | SProp | Prop | Set
-  | Type of Univ.Universe.t  (** Type *)
-  | QSort of Sorts.QVar.t * Univ.Universe.t
-[@@ocaml.deprecated "Alias for Sorts.t"]
 
 (****************************************************************************)
 (*              Functions for dealing with constr terms                     *)
@@ -286,18 +276,33 @@ let decompose_prod_n_decls n =
   in
   prodec_rec Context.Rel.empty n
 
+let decompose_lambda_prod_n_decls n =
+  if n < 0 then
+    anomaly (str "decompose_lambda_prod_n_decls: integer parameter must be positive.");
+  let rec lamprodec_rec l n c t =
+    if Int.equal n 0 then (l, c, t)
+    else
+      let open Context.Rel.Declaration in
+      match kind c, kind t with
+      | Lambda (na, u, c), Prod (_, _, t) -> lamprodec_rec (LocalAssum (na, u) :: l) (n-1) c t
+      | LetIn (na, b, u, c), LetIn (_, _, _, t) -> lamprodec_rec (LocalDef (na, b, u) :: l) (n-1) c t
+      | _ -> anomaly (str "decompose_lambda_prod_n_decls: not same form.")
+  in
+  lamprodec_rec Context.Rel.empty n
+
 (** Given a positive integer n, decompose a lambda term [fun
-   (x1:T1)..(xn:Tn) => T] into the pair of the abstracted
-   context [(xn,None,Tn);...;(x1,None,T1)] and of the inner body [T]. *)
+   (x1:T1)..(xn:Tn) => T] (possibly with let-ins before xn) into the pair of the
+   abstracted context [(xn,None,Tn);...;(x1,None,T1)] and of the inner body [T]. *)
 let decompose_lambda_n_assum n =
   if n < 0 then
-    anomaly (str  "decompose_lambda_n_assum: integer parameter must be positive.");
+    anomaly (str "decompose_lambda_n_assum: integer parameter must be positive.");
   let rec lamdec_rec l n c =
     if Int.equal n 0 then l,c
     else
       let open Context.Rel.Declaration in
       match kind c with
       | Lambda (x,t,c)  -> lamdec_rec (Context.Rel.add (LocalAssum (x,t)) l) (n-1) c
+      | LetIn (x,b,t,c) -> lamdec_rec (Context.Rel.add (LocalDef (x,b,t)) l) n c
       | Cast (c,_,_)    -> lamdec_rec l n c
       | _c -> anomaly (str "decompose_lambda_n_assum: not enough abstractions.")
   in
@@ -362,7 +367,7 @@ let mkArity (sign,s) = it_mkProd_or_LetIn (mkSort s) sign
 let rec isArity c =
   match kind c with
   | Prod (_,_,c)    -> isArity c
-  | LetIn (_,b,_,c) -> isArity (subst1 b c)
+  | LetIn (_,_,_,c) -> isArity c
   | Cast (c,_,_)      -> isArity c
   | Sort _          -> true
   | _               -> false
@@ -381,3 +386,10 @@ let decompose_lam = decompose_lambda
 let decompose_lam_n = decompose_lambda_n
 let decompose_lam_n_assum = decompose_lambda_n_assum
 let decompose_lam_n_decls = decompose_lambda_n_decls
+
+type sorts_family = Sorts.family = InSProp | InProp | InSet | InType | InQSort
+
+type sorts = Sorts.t = private
+  | SProp | Prop | Set
+  | Type of Univ.Universe.t  (** Type *)
+  | QSort of Sorts.QVar.t * Univ.Universe.t

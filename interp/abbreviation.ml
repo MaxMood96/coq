@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -22,9 +22,9 @@ open Notationextern
 type abbreviation =
   { abbrev_pattern : interpretation;
     abbrev_onlyparsing : bool;
-    abbrev_deprecation : Deprecation.t option;
-    abbrev_also_in_cases_pattern : bool;
+    abbrev_user_warns : Globnames.extended_global_reference UserWarn.with_qf option;
     abbrev_activated : bool; (* Not really necessary in practice *)
+    abbrev_src : Loc.t option;
   }
 
 let abbrev_table =
@@ -44,7 +44,7 @@ let toggle_abbreviation ~on ~use kn =
       | OnlyParsing | ParsingAndPrinting ->
          if on then
            begin
-             Nametab.push_abbreviation ?deprecated:data.abbrev_deprecation (Nametab.Until 1) sp kn;
+             Nametab.push_abbreviation ?user_warns:data.abbrev_user_warns (Nametab.Until 1) sp kn;
              Nametab.push_abbreviation (Nametab.Exactly 1) sp kn
            end
          else
@@ -61,10 +61,11 @@ let load_abbreviation i ((sp,kn),(_local,abbrev)) =
     user_err
       (Id.print (basename sp) ++ str " already exists.");
   add_abbreviation kn sp abbrev;
-  Nametab.push_abbreviation ?deprecated:abbrev.abbrev_deprecation (Nametab.Until i) sp kn
+  Nametab.push_abbreviation ?user_warns:abbrev.abbrev_user_warns (Nametab.Until i) sp kn;
+  abbrev.abbrev_src |> Option.iter (fun loc -> Nametab.set_cci_src_loc (Abbrev kn) loc)
 
 let is_alias_of_already_visible_name sp = function
-  | _,NRef (ref,_) ->
+  | _,NRef (ref,None) ->
       let (dir,id) = repr_qualid (Nametab.shortest_qualid_of_global Id.Set.empty ref) in
       DirPath.is_empty dir && Id.equal id (basename sp)
   | _ ->
@@ -77,7 +78,7 @@ let open_abbreviation i ((sp,kn),(_local,abbrev)) =
     if not abbrev.abbrev_onlyparsing then
       (* Redeclare it to be used as (short) name in case an other (distfix)
          notation was declared in between *)
-      Notationextern.declare_uninterpretation ~also_in_cases_pattern:abbrev.abbrev_also_in_cases_pattern (AbbrevRule kn) pat
+      Notationextern.declare_uninterpretation (AbbrevRule kn) pat
   end
 
 let import_abbreviation i sp kn =
@@ -103,13 +104,13 @@ let inAbbreviation : Id.t -> (bool * abbreviation) -> obj =
     subst_function = subst_abbreviation;
     classify_function = classify_abbreviation }
 
-let declare_abbreviation ~local ?(also_in_cases_pattern=true) deprecation id ~onlyparsing pat =
+let declare_abbreviation ~local user_warns id ~onlyparsing pat =
   let abbrev =
     { abbrev_pattern = pat;
       abbrev_onlyparsing = onlyparsing;
-      abbrev_deprecation = deprecation;
-      abbrev_also_in_cases_pattern = also_in_cases_pattern;
+      abbrev_user_warns = user_warns;
       abbrev_activated = true;
+      abbrev_src = Loc.get_current_command_loc();
     }
   in
   add_leaf (inAbbreviation id (local,abbrev))

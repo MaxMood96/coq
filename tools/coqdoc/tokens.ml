@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -104,7 +104,7 @@ let buffer_char is_symbolchar ctag c =
       restart_buffering ()
   | Buffering (was_symbolchar,tag,translated,tt) ->
       if tag <> ctag then
-        (* A strong tag comes from Coq; if different Coq tags *)
+        (* A strong tag comes from Rocq; if different Rocq tags *)
         (* hence, we don't try to see the chars as part of a single token *)
         let translated =
           match tt.node with

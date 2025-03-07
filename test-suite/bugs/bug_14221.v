@@ -1,20 +1,20 @@
 Axiom proof_admitted : False.
 Tactic Notation "admit" := abstract case proof_admitted.
-Require Coq.Program.Program.
-Export Coq.Program.Program.
+Require Corelib.Program.Basics Corelib.Program.Tactics.
+Export Corelib.Program.Basics Corelib.Program.Tactics.
 Set Primitive Projections.
 Set Universe Polymorphism.
 
 Close Scope nat_scope.
 Require Setoid.
-Require Export Coq.Classes.CMorphisms.
+Require Export Corelib.Classes.CMorphisms.
 
 Notation "∀  x .. y , P" := (forall x, .. (forall y, P) ..)
   (at level 200, x binder, y binder, right associativity).
 
 Class Setoid A := {
   equiv : crelation A;
-  setoid_equiv :> Equivalence equiv
+  setoid_equiv :: Equivalence equiv
 }.
 
 Notation "f ≈ g" := (equiv f g) (at level 79).
@@ -46,7 +46,7 @@ Class Category := {
 
   uhom := Type : Type;
   hom : obj -> obj -> uhom where "a ~> b" := (hom a b);
-  homset :> ∀ X Y, Setoid (X ~> Y);
+  homset :: ∀ X Y, Setoid (X ~> Y);
 
   id {x} : x ~> x;
 }.
@@ -71,7 +71,7 @@ Class Functor (C D : Category) := {
   fobj : C -> D;
   fmap {x y : C} (f : x ~> y) : fobj x ~> fobj y;
 
-  fmap_respects :> ∀ x y, Proper (equiv ==> equiv) (@fmap x y);
+  fmap_respects :: ∀ x y, Proper (equiv ==> equiv) (@fmap x y);
 
   fmap_id {x : C} : fmap (@id C x) ≈ id;
 }.

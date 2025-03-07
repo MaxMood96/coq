@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -16,7 +16,18 @@ end
 
 module type S = Set.S
 
-module Make(M : OrderedType) : S
+module type ExtS =
+sig
+  include CSig.SetS
+  (** The underlying Set library *)
+
+  module List : sig
+    val union : t list -> t
+    (** Union of sets from a list *)
+  end
+end
+
+module Make(M : Map.OrderedType) : ExtS
   with type elt = M.t
   and type t = Set.Make(M).t
 
@@ -26,7 +37,7 @@ sig
   val hash : t -> int
 end
 
-module Hashcons (M : OrderedType) (H : HashedType with type t = M.t) : Hashcons.S with
+module Hashcons (M : OrderedType) (_ : HashedType with type t = M.t) : Hashcons.S with
   type t = Set.Make(M).t
   and type u = M.t -> M.t
 (** Create hash-consing for sets. The hashing function provided must be

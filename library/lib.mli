@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -41,6 +41,8 @@ type 'summary library_segment = ('summary node * Libobject.t list) list
   current list of operations (most recent ones coming first). *)
 
 val add_leaf : Libobject.obj -> unit
+
+val add_discharged_leaf : Libobject.discharged_obj -> unit
 
 (** {6 ... } *)
 
@@ -89,28 +91,35 @@ val is_modtype : unit -> bool
 val is_modtype_strict : unit -> bool
 val is_module : unit -> bool
 
+type discharged_item =
+  | DischargedExport of Libobject.ExportObj.t
+  | DischargedLeaf of Libobject.discharged_obj
+
+type classified_objects = {
+  substobjs : Libobject.t list;
+  keepobjs : Libobject.t list;
+  escapeobjs : Libobject.t list;
+  anticipateobjs : Libobject.t list;
+}
+
 (** The [StagedLibS] abstraction describes operations and traversal for Lib at a
     given stage. *)
 module type StagedLibS = sig
 
   type summary
 
-  type classified_objects = {
-    substobjs : Libobject.t list;
-    keepobjs : Libobject.t list;
-    anticipateobjs : Libobject.t list;
-  }
-  val classify_segment : Libobject.t list -> classified_objects
-
   (** Returns the opening node of a given name *)
-  val find_opening_node : Id.t -> summary node
+  val find_opening_node : ?loc:Loc.t -> Id.t -> summary node
 
   val add_entry : summary node -> unit
   val add_leaf_entry : Libobject.t -> unit
 
   (** {6 Sections } *)
   val open_section : Id.t -> unit
-  val close_section : unit -> unit
+
+  (** [close_section] needs to redo Export, so the complete
+      implementation needs to involve [Declaremods]. *)
+  val close_section : unit -> discharged_item list
 
   (** {6 Modules and module types } *)
 
@@ -139,6 +148,8 @@ module type StagedLibS = sig
   (** Keep only the libobject structure, not the objects themselves *)
   val drop_objects : frozen -> frozen
 
+  val declare_info : Library_info.t -> unit
+
 end
 
 (** We provide two instances of [StagedLibS], corresponding to the Synterp and
@@ -151,9 +162,14 @@ module Interp : StagedLibS with type summary = Summary.Interp.frozen
 
 val start_compilation : DirPath.t -> ModPath.t -> unit
 
-(** Finalize the compilation of a library and return respectively the library
-    prefix, the regular objects, and the syntax-related objects. *)
-val end_compilation : DirPath.t -> Nametab.object_prefix * Interp.classified_objects * Synterp.classified_objects
+type compilation_result = {
+  info : Library_info.t;
+  synterp_objects : classified_objects;
+  interp_objects : classified_objects;
+}
+
+(** Finalize the compilation of a library. *)
+val end_compilation : DirPath.t -> compilation_result
 
 (** The function [library_dp] returns the [DirPath.t] of the current
    compiling library (or [default_library]) *)
@@ -173,11 +189,12 @@ val is_in_section : GlobRef.t -> bool
 
 (** {6 Discharge: decrease the section level if in the current section } *)
 
+(** [discharge_proj_repr p] discharges projection [p] if the associated record
+    was defined in the current section. If that is not the case, it returns [p]
+    unchanged. *)
 val discharge_proj_repr : Projection.Repr.t -> Projection.Repr.t
 
 (** Compatibility layer *)
 
+(** This also does init_summaries *)
 val init : unit -> unit
-
-val open_section : Id.t -> unit
-val close_section : unit -> unit

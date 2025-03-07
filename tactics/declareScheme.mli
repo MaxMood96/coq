@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,6 +8,8 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-val declare_scheme : string -> (Names.inductive * Names.Constant.t) array -> unit
-val lookup_scheme : string -> Names.inductive -> Names.Constant.t
-val all_schemes : unit -> Names.Indset.t
+open Names
+
+val declare_scheme : Libobject.locality -> string -> (inductive * Constant.t) -> unit
+val lookup_scheme : string -> inductive -> Constant.t
+val all_schemes : unit -> Constant.t CString.Map.t Indmap.t

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -114,6 +114,7 @@ let spc   () = Ppcmd_print_break (1,0)
 let cut   () = Ppcmd_print_break (0,0)
 let align () = Ppcmd_print_break (0,0)
 let int   n  = str (string_of_int n)
+let int64 n  = str (Int64.to_string n)
 let real  r  = str (string_of_float r)
 let bool  b  = str (string_of_bool b)
 
@@ -139,17 +140,7 @@ let hov n s = Ppcmd_box(Pp_hovbox n,s)
 (* Opening and closing of tags *)
 let tag t s = Ppcmd_tag(t,s)
 
-(* In new syntax only double quote char is escaped by repeating it *)
-let escape_string s =
-  let rec escape_at s i =
-    if i<0 then s
-    else if s.[i] == '"' then
-      let s' = String.sub s 0 i^"\""^String.sub s i (String.length s - i) in
-      escape_at s' (i-1)
-    else escape_at s (i-1) in
-  escape_at s (String.length s - 1)
-
-let qstring s = str "\"" ++ str (escape_string s) ++ str "\""
+let qstring s = str (CString.quote_coq_string s)
 let qs = qstring
 let quote s = h (str "\"" ++ s ++ str "\"")
 
@@ -163,6 +154,10 @@ let rec pr_com ft s =
   match os with
       Some s2 -> Format.pp_force_newline ft (); pr_com ft s2
     | None -> ()
+
+let pr_com ft s =
+  pr_com ft s;
+  Format.pp_print_break ft 0 0
 
 let start_pfx = "start."
 let end_pfx = "end."
@@ -184,7 +179,7 @@ let pp_with ft pp =
     | Pp_hbox     -> Format.pp_open_hbox ft ()
     | Pp_vbox n   -> Format.pp_open_vbox ft n
     | Pp_hvbox n  -> Format.pp_open_hvbox ft n
-    | Pp_hovbox n -> Format.pp_open_hovbox ft n
+    | Pp_hovbox n -> Format.pp_open_box ft n
   in
   let rec pp_cmd = let open Format in function
     | Ppcmd_empty             -> ()
@@ -354,6 +349,68 @@ let db_print_pp fmt pp =
 
 let db_string_of_pp pp =
   Format.asprintf "%a" db_print_pp pp
+
+let has_format_special s =
+  (* String.exists needs ocaml 4.13 *)
+  let rec aux i =
+    if i = String.length s then false
+    else match String.unsafe_get s i with
+      | '@' | '%' | '\\' | '"' -> true
+      | _ -> aux (i+1)
+  in
+  aux 0
+
+let pp_as_format ?(with_tags=false) pp =
+  let open Format in
+  let fmt, return =
+    let buf = Buffer.create 200 in
+    let fmt = Format.formatter_of_buffer buf in
+    fmt, (fun () -> Format.pp_print_flush fmt (); buf)
+  in
+  let args = ref [] in
+  let open_box bty =
+    fprintf fmt "%s" "@[";
+    match bty with
+    | Pp_hbox -> fprintf fmt "<h>"
+    | Pp_vbox i -> if i = 0 then fprintf fmt "<v>" else fprintf fmt "<v %d>" i
+    | Pp_hvbox i -> if i = 0 then fprintf fmt "<hv>" else fprintf fmt "<hv %d>" i
+    | Pp_hovbox i -> if i = 0 then () else fprintf fmt "<%d>" i
+  in
+  let close_box () = fprintf fmt "%s" "@]" in
+  let rec pprec pp =
+  match pp with
+  | Ppcmd_empty -> ()
+  | Ppcmd_string s ->
+    if has_format_special s then begin
+      fprintf fmt "%s" "%s";
+      args := s :: !args
+    end else fprintf fmt "%s" s
+  | Ppcmd_glue l -> List.iter pprec l
+  | Ppcmd_box (bty, pp) ->
+    open_box bty;
+    pprec pp;
+    close_box ()
+  | Ppcmd_tag (tag,pp) ->
+    if with_tags then begin
+      fprintf fmt "%s<%s>" "@{" tag;
+      pprec pp;
+      fprintf fmt "%s" "@}"
+    end
+    else pprec pp
+  | Ppcmd_print_break (nspaces,offset) -> begin match nspaces, offset with
+      | 0, 0 -> fprintf fmt "%s" "@,"
+      | 1, 0 -> fprintf fmt "%s" "@ "
+      | _ -> fprintf fmt "%s<%d %d>" "@;" nspaces offset
+    end
+  | Ppcmd_force_newline -> fprintf fmt "%s" "@."
+  | Ppcmd_comment [] -> ()
+  | Ppcmd_comment _ -> failwith "not implemented pp_as_format on nonempty Ppcmd_comment"
+  in
+  let () = pprec pp in
+  let buf = return () in
+  let fmt = Buffer.contents buf in
+  let args = List.rev !args in
+  fmt, args
 
 let rec flatten pp =
   match pp with

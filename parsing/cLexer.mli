@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -56,17 +56,17 @@ val terminal_number : string -> NumTok.Unsigned.t Tok.p
 (** [after loc] Will advance a lexing location as the lexer does; this
     can be used to implement parsing resumption from a given position:
 {[
-  let loc = Pcoq.Parsable.loc pa |> after in
+  let loc = Procq.Parsable.loc pa |> after in
   let str = Gramlib.Stream.of_string text in
-  (* Stream.count being correct is critical for Coq's lexer *)
+  (* Stream.count being correct is critical for Rocq's lexer *)
   Gramlib.Stream.njunk loc.ep str;
-  let pa = Pcoq.Parsable.make ~loc str in
+  let pa = Procq.Parsable.make ~loc str in
   (* ready to resume parsing *)
 ]}
 *)
 val after : Loc.t -> Loc.t
 
-(** The lexer of Coq: *)
+(** The lexer of Rocq: *)
 
 module Lexer :
   Gramlib.Plexing.S

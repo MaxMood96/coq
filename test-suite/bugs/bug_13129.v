@@ -1,4 +1,4 @@
-From Coq Require Export Morphisms Setoid .
+From Corelib Require Export Morphisms Setoid .
 
 Class Equiv A := equiv: relation A.
 

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -21,14 +21,14 @@ open Names
 let mkGRef ref = DAst.make @@ GRef (ref, None)
 let mkGVar id = DAst.make @@ GVar id
 let mkGApp (rt, rtl) = DAst.make @@ GApp (rt, rtl)
-let mkGLambda (n, t, b) = DAst.make @@ GLambda (n, Explicit, t, b)
-let mkGProd (n, t, b) = DAst.make @@ GProd (n, Explicit, t, b)
-let mkGLetIn (n, b, t, c) = DAst.make @@ GLetIn (n, b, t, c)
+let mkGLambda (n, t, b) = DAst.make @@ GLambda (n, None, Explicit, t, b)
+let mkGProd (n, t, b) = DAst.make @@ GProd (n, None, Explicit, t, b)
+let mkGLetIn (n, b, t, c) = DAst.make @@ GLetIn (n, None, b, t, c)
 let mkGCases (rto, l, brl) = DAst.make @@ GCases (RegularStyle, rto, l, brl)
 
 let mkGHole () =
   DAst.make
-  @@ GHole (Evar_kinds.BinderType Anonymous, Namegen.IntroAnonymous)
+  @@ GHole (GBinderType Anonymous)
 
 (*
   Some basic functions to decompose glob_constrs
@@ -46,11 +46,11 @@ let glob_decompose_app =
 
 (* [glob_make_eq t1 t2] build the glob_constr corresponding to [t2 = t1] *)
 let glob_make_eq ?(typ = mkGHole ()) t1 t2 =
-  mkGApp (mkGRef (Coqlib.lib_ref "core.eq.type"), [typ; t2; t1])
+  mkGApp (mkGRef (Rocqlib.lib_ref "core.eq.type"), [typ; t2; t1])
 
 (* [glob_make_neq t1 t2] build the glob_constr corresponding to [t1 <> t2] *)
 let glob_make_neq t1 t2 =
-  mkGApp (mkGRef (Coqlib.lib_ref "core.not.type"), [glob_make_eq t1 t2])
+  mkGApp (mkGRef (Rocqlib.lib_ref "core.not.type"), [glob_make_eq t1 t2])
 
 let remove_name_from_mapping mapping na =
   match na with Anonymous -> mapping | Name id -> Id.Map.remove id mapping
@@ -66,21 +66,22 @@ let change_vars =
           GApp (change_vars mapping rt', List.map (change_vars mapping) rtl)
         | GProj (f, rtl, rt) ->
           GProj (f, List.map (change_vars mapping) rtl, change_vars mapping rt)
-        | GLambda (name, k, t, b) ->
+        | GLambda (name, r, k, t, b) ->
           GLambda
             ( name
-            , k
+            , r, k
             , change_vars mapping t
             , change_vars (remove_name_from_mapping mapping name) b )
-        | GProd (name, k, t, b) ->
+        | GProd (name, r, k, t, b) ->
           GProd
             ( name
-            , k
+            , r, k
             , change_vars mapping t
             , change_vars (remove_name_from_mapping mapping name) b )
-        | GLetIn (name, def, typ, b) ->
+        | GLetIn (name, r, def, typ, b) ->
           GLetIn
             ( name
+            , r
             , change_vars mapping def
             , Option.map (change_vars mapping) typ
             , change_vars (remove_name_from_mapping mapping name) b )
@@ -115,7 +116,7 @@ let change_vars =
             , Array.map (change_vars mapping) t
             , change_vars mapping def
             , change_vars mapping ty )
-        | GSort _ | GHole _ | GGenarg _ | GInt _ as x -> x)
+        | GSort _ | GHole _ | GGenarg _ | GInt _ | GString _ as x -> x)
       rt
   and change_vars_br mapping ({CAst.loc; v = idl, patl, res} as br) =
     let new_mapping = List.fold_right Id.Map.remove idl mapping in
@@ -190,24 +191,24 @@ let rec alpha_rt excluded rt =
     @@
     match DAst.get rt with
     | (GRef _ | GVar _ | GEvar _ | GPatVar _) as rt -> rt
-    | GLambda (Anonymous, k, t, b) ->
+    | GLambda (Anonymous, r, k, t, b) ->
       let new_id =
         Namegen.next_ident_away (Id.of_string "_x") (Id.Set.of_list excluded)
       in
       let new_excluded = new_id :: excluded in
       let new_t = alpha_rt new_excluded t in
       let new_b = alpha_rt new_excluded b in
-      GLambda (Name new_id, k, new_t, new_b)
-    | GProd (Anonymous, k, t, b) ->
+      GLambda (Name new_id, r, k, new_t, new_b)
+    | GProd (Anonymous, r, k, t, b) ->
       let new_t = alpha_rt excluded t in
       let new_b = alpha_rt excluded b in
-      GProd (Anonymous, k, new_t, new_b)
-    | GLetIn (Anonymous, b, t, c) ->
+      GProd (Anonymous, r, k, new_t, new_b)
+    | GLetIn (Anonymous, r, b, t, c) ->
       let new_b = alpha_rt excluded b in
       let new_t = Option.map (alpha_rt excluded) t in
       let new_c = alpha_rt excluded c in
-      GLetIn (Anonymous, new_b, new_t, new_c)
-    | GLambda (Name id, k, t, b) ->
+      GLetIn (Anonymous, r, new_b, new_t, new_c)
+    | GLambda (Name id, r, k, t, b) ->
       let new_id = Namegen.next_ident_away id (Id.Set.of_list excluded) in
       let t, b =
         if Id.equal new_id id then (t, b)
@@ -218,8 +219,8 @@ let rec alpha_rt excluded rt =
       let new_excluded = new_id :: excluded in
       let new_t = alpha_rt new_excluded t in
       let new_b = alpha_rt new_excluded b in
-      GLambda (Name new_id, k, new_t, new_b)
-    | GProd (Name id, k, t, b) ->
+      GLambda (Name new_id, r, k, new_t, new_b)
+    | GProd (Name id, r, k, t, b) ->
       let new_id = Namegen.next_ident_away id (Id.Set.of_list excluded) in
       let new_excluded = new_id :: excluded in
       let t, b =
@@ -230,8 +231,8 @@ let rec alpha_rt excluded rt =
       in
       let new_t = alpha_rt new_excluded t in
       let new_b = alpha_rt new_excluded b in
-      GProd (Name new_id, k, new_t, new_b)
-    | GLetIn (Name id, b, t, c) ->
+      GProd (Name new_id, r, k, new_t, new_b)
+    | GLetIn (Name id, r, b, t, c) ->
       let new_id = Namegen.next_ident_away id (Id.Set.of_list excluded) in
       let c =
         if Id.equal new_id id then c
@@ -241,7 +242,7 @@ let rec alpha_rt excluded rt =
       let new_b = alpha_rt new_excluded b in
       let new_t = Option.map (alpha_rt new_excluded) t in
       let new_c = alpha_rt new_excluded c in
-      GLetIn (Name new_id, new_b, new_t, new_c)
+      GLetIn (Name new_id, r, new_b, new_t, new_c)
     | GLetTuple (nal, (na, rto), t, b) ->
       let rev_new_nal, new_excluded, mapping =
         List.fold_left
@@ -283,7 +284,7 @@ let rec alpha_rt excluded rt =
         , alpha_rt excluded lhs
         , alpha_rt excluded rhs )
     | GRec _ -> user_err Pp.(str "Not handled GRec")
-    | (GSort _ | GInt _ | GFloat _ | GHole _ | GGenarg _) as rt -> rt
+    | (GSort _ | GInt _ | GFloat _ | GString _ | GHole _ | GGenarg _) as rt -> rt
     | GCast (b, k, c) ->
       GCast (alpha_rt excluded b, k, alpha_rt excluded c)
     | GApp (f, args) ->
@@ -316,12 +317,12 @@ let is_free_in id =
       (fun ?loc -> function GRef _ -> false | GVar id' -> Id.compare id' id == 0
         | GEvar _ -> false | GPatVar _ -> false
         | GApp (rt, rtl) | GProj (_, rtl, rt) -> List.exists is_free_in (rt :: rtl)
-        | GLambda (n, _, t, b) | GProd (n, _, t, b) ->
+        | GLambda (n, _, _, t, b) | GProd (n, _, _, t, b) ->
           let check_in_b =
             match n with Name id' -> not (Id.equal id' id) | _ -> true
           in
           is_free_in t || (check_in_b && is_free_in b)
-        | GLetIn (n, b, t, c) ->
+        | GLetIn (n, _, b, t, c) ->
           let check_in_c =
             match n with Name id' -> not (Id.equal id' id) | _ -> true
           in
@@ -346,7 +347,7 @@ let is_free_in id =
         | GGenarg _ -> false (* XXX isn't this incorrect? *)
         | GCast (b, _, t) ->
           is_free_in b || is_free_in t
-        | GInt _ | GFloat _ -> false
+        | GInt _ | GFloat _ | GString _ -> false
         | GArray (_u, t, def, ty) ->
           Array.exists is_free_in t || is_free_in def || is_free_in ty)
       x
@@ -383,16 +384,17 @@ let replace_var_by_term x_id term =
           GApp (replace_var_by_pattern rt', List.map replace_var_by_pattern rtl)
         | GProj (f, rtl, rt) ->
           GProj (f, List.map replace_var_by_pattern rtl, replace_var_by_pattern rt)
-        | GLambda (Name id, _, _, _) as rt when Id.compare id x_id == 0 -> rt
-        | GLambda (name, k, t, b) ->
-          GLambda (name, k, replace_var_by_pattern t, replace_var_by_pattern b)
-        | GProd (Name id, _, _, _) as rt when Id.compare id x_id == 0 -> rt
-        | GProd (name, k, t, b) ->
-          GProd (name, k, replace_var_by_pattern t, replace_var_by_pattern b)
-        | GLetIn (Name id, _, _, _) as rt when Id.compare id x_id == 0 -> rt
-        | GLetIn (name, def, typ, b) ->
+        | GLambda (Name id, _, _, _, _) as rt when Id.compare id x_id == 0 -> rt
+        | GLambda (name, r, k, t, b) ->
+          GLambda (name, r, k, replace_var_by_pattern t, replace_var_by_pattern b)
+        | GProd (Name id, _, _, _, _) as rt when Id.compare id x_id == 0 -> rt
+        | GProd (name, r, k, t, b) ->
+          GProd (name, r, k, replace_var_by_pattern t, replace_var_by_pattern b)
+        | GLetIn (Name id, _, _, _, _) as rt when Id.compare id x_id == 0 -> rt
+        | GLetIn (name, r, def, typ, b) ->
           GLetIn
             ( name
+            , r
             , replace_var_by_pattern def
             , Option.map replace_var_by_pattern typ
             , replace_var_by_pattern b )
@@ -423,6 +425,7 @@ let replace_var_by_term x_id term =
         | (GSort _ | GHole _ | GGenarg _) as rt -> rt (* is this correct for GGenarg? *)
         | GInt _ as rt -> rt
         | GFloat _ as rt -> rt
+        | GString _ as rt -> rt
         | GArray (u, t, def, ty) ->
           GArray
             ( u
@@ -503,19 +506,18 @@ let expand_as =
   in
   let rec expand_as map =
     DAst.map (function
-      | (GRef _ | GEvar _ | GPatVar _ | GSort _ | GHole _ | GGenarg _ | GInt _ | GFloat _)
-        as rt ->
-        rt
+      | (GRef _ | GEvar _ | GPatVar _ | GSort _ | GHole _ | GGenarg _ | GInt _
+         | GFloat _ | GString _ ) as rt -> rt
       | GVar id as rt -> (
         try DAst.get (Id.Map.find id map) with Not_found -> rt )
       | GApp (f, args) -> GApp (expand_as map f, List.map (expand_as map) args)
       | GProj (f, args, c) -> GProj (f, List.map (expand_as map) args, expand_as map c)
-      | GLambda (na, k, t, b) ->
-        GLambda (na, k, expand_as map t, expand_as map b)
-      | GProd (na, k, t, b) -> GProd (na, k, expand_as map t, expand_as map b)
-      | GLetIn (na, v, typ, b) ->
+      | GLambda (na, r, k, t, b) ->
+        GLambda (na, r, k, expand_as map t, expand_as map b)
+      | GProd (na, r, k, t, b) -> GProd (na, r, k, expand_as map t, expand_as map b)
+      | GLetIn (na, r, v, typ, b) ->
         GLetIn
-          (na, expand_as map v, Option.map (expand_as map) typ, expand_as map b)
+          (na, r, expand_as map v, Option.map (expand_as map) typ, expand_as map b)
       | GLetTuple (nal, (na, po), v, b) ->
         GLetTuple
           ( nal
@@ -545,79 +547,88 @@ let expand_as =
   in
   expand_as Id.Map.empty
 
-(* [resolve_and_replace_implicits ?expected_type env sigma rt] solves implicits of [rt] w.r.t. [env] and [sigma] and then replace them by their solution
- *)
+(* [resolve_and_replace_implicits] solves implicits of its argument and replaces them by their solution *)
 
-exception Found of Evd.any_evar_info
-
-let resolve_and_replace_implicits ?(flags = Pretyping.all_and_fail_flags)
-    ?(expected_type = Pretyping.WithoutTypeConstraint) env sigma rt =
+let resolve_and_replace_implicits exptyp env sigma rt =
   let open Evd in
   let open Evar_kinds in
   (* we first (pseudo) understand [rt] and get back the computed evar_map *)
   (* FIXME : JF (30/03/2017) I'm not completely sure to have split understand as needed.
      If someone knows how to prevent solved existantial removal in  understand, please do not hesitate to change the computation of [ctx] here *)
-  let ctx, _, _ =
-    Pretyping.ise_pretype_gen flags env sigma Glob_ops.empty_lvar expected_type
-      rt
+  let implicit_holes = ref [] in
+  let binder_holes = ref [] in
+  let ctx =
+    let open Pretyping in
+    let open Evarutil in
+    (* Intercept the pretyper for holes and record the generated evar *)
+    let register_evar kind loc evk = match kind with
+    | GImplicitArg (grk, pk, bk) -> implicit_holes := ((loc, grk, pk, bk), evk) :: !implicit_holes
+    | GBinderType na -> binder_holes := ((loc, na), evk) :: !binder_holes
+    | _ -> ()
+    in
+    let pretype_hole self kind ?loc ~flags tycon env sigma =
+      let sigma, j = default_pretyper.pretype_hole self kind ?loc ~flags tycon env sigma in
+      (* The value is guaranteed to be an undefined evar at this point *)
+      let evk, _ = EConstr.destEvar sigma j.uj_val in
+      let () = register_evar kind loc evk  in
+      sigma, j
+    in
+    let pretype_type self c ?loc ~flags valcon env sigma =
+      let sigma, j = default_pretyper.pretype_type self c ?loc ~flags valcon env sigma in
+      let () = match DAst.get c, EConstr.kind sigma j.utj_val with
+      | GHole (kind), Evar (evk, _) -> register_evar kind c.CAst.loc evk
+      | _ -> ()
+      in
+      sigma, j
+    in
+    let flags = Pretyping.all_and_fail_flags in
+    let pretype_flags = {
+      program_mode = false;
+      use_coercions = true;
+      poly = false;
+      resolve_tc = true;
+      undeclared_evars_patvars = false;
+      patvars_abstract = false;
+      unconstrained_sorts = false;
+    } in
+    let vars = Evarutil.VarSet.variables (Global.env ()) in
+    let hypnaming = RenameExistingBut vars in
+    let genv = GlobEnv.make ~hypnaming env sigma Glob_ops.empty_lvar in
+    let pretyper = { default_pretyper with pretype_hole; pretype_type } in
+    let sigma', _ = eval_pretyper pretyper ~flags:pretype_flags (Some exptyp) genv sigma rt in
+    solve_remaining_evars flags env ~initial:sigma sigma'
   in
   let ctx = Evd.minimize_universes ctx in
   let f c =
     EConstr.of_constr
       (Evarutil.nf_evars_universes ctx (EConstr.Unsafe.to_constr c))
   in
+  let expand_hole evopt default = match evopt with
+  | None -> default
+  | Some evk ->
+    (* we found the evar corresponding to this hole *)
+    let EvarInfo evi = Evd.find ctx evk in
+    match Evd.evar_body evi with
+    | Evar_defined c ->
+      (* we just have to lift the solution in glob_term *)
+      Detyping.detype Detyping.Now env ctx (f c)
+    | Evar_empty ->
+      (* the hole was not solved : we do nothing *)
+      default
+  in
   (* then we map [rt] to replace the implicit holes by their values *)
   let rec change rt =
     match DAst.get rt with
-    | GHole (ImplicitArg (grk, pk, bk), _) -> (
-      try
-        (* we only want to deal with implicit arguments *)
-
-        (* we scan the new evar map to find the evar corresponding to this hole (by looking the source *)
-        Evd.fold (* to simulate an iter *)
-          (fun _ (EvarInfo evi) _ ->
-            match Evd.evar_source evi with
-            | loc_evi, ImplicitArg (gr_evi, p_evi, b_evi) ->
-              if
-                Environ.QGlobRef.equal env grk gr_evi && pk = p_evi && bk = b_evi
-                && rt.CAst.loc = loc_evi
-              then raise (Found (EvarInfo evi))
-            | _ -> ())
-          ctx ();
-        (* the hole was not solved : we do nothing *)
-        rt
-      with Found (EvarInfo evi) -> (
-        (* we found the evar corresponding to this hole *)
-        match Evd.evar_body evi with
-        | Evar_defined c ->
-          (* we just have to lift the solution in glob_term *)
-          Detyping.detype Detyping.Now Id.Set.empty env ctx (f c)
-        | Evar_empty -> rt (* the hole was not solved : we do nothing *) ) )
-    | GHole (BinderType na, _) ->
-      (* we only want to deal with implicit arguments *)
-      let res =
-        try
-          (* we scan the new evar map to find the evar corresponding to this hole (by looking the source *)
-          Evd.fold (* to simulate an iter *)
-            (fun _ (EvarInfo evi) _ ->
-              match Evd.evar_source evi with
-              | loc_evi, BinderType na' ->
-                if Name.equal na na' && rt.CAst.loc = loc_evi then
-                  raise (Found (EvarInfo evi))
-              | _ -> ())
-            ctx ();
-          (* the hole was not solved : we do nothing *)
-          rt
-        with Found (EvarInfo evi) -> (
-          (* we found the evar corresponding to this hole *)
-          match Evd.evar_body evi with
-          | Evar_defined c ->
-            (* we just have to lift the solution in glob_term *)
-            Detyping.detype Detyping.Now Id.Set.empty env ctx (f c)
-          | Evar_empty -> rt )
-        (* the hole was not solved : we d when falseo nothing *)
+    | GHole (GImplicitArg (grk, pk, bk)) ->
+      let eq (loc1, gr1, p1, b1) (loc2, gr2, p2, b2) =
+        Environ.QGlobRef.equal env gr1 gr2 && p1 = p2 && b1 == (b2 : bool) && loc1 = (loc2 : Loc.t option)
       in
-      res
+      let evopt = List.assoc_f_opt eq (rt.CAst.loc, grk, pk, bk) !implicit_holes in
+      expand_hole evopt rt
+    | GHole (GBinderType na) ->
+      let eq (loc1, na1) (loc2, na2) = Name.equal na1 na2 && loc1 = (loc2 : Loc.t option) in
+      let evopt = List.assoc_f_opt eq (rt.CAst.loc, na) !binder_holes in
+      expand_hole evopt rt
     | _ -> Glob_ops.map_glob_constr change rt
   in
   change rt

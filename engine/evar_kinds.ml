@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -51,3 +51,12 @@ type t =
   | MatchingVar of matching_var_kind
   | VarInstance of Id.t
   | SubEvar of subevar_kind option * Evar.t
+
+type glob_evar_kind =
+  | GImplicitArg of GlobRef.t * (int * Id.t option) * bool (** Force inference *)
+  | GBinderType of Name.t
+  | GNamedHole of bool (* fresh? *) * Id.t (* coming from some ?[id] syntax *)
+  | GQuestionMark of question_mark
+  | GCasesType
+  | GInternalHole
+  | GImpossibleCase

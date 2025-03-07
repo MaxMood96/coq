@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -7,13 +7,6 @@
 (*         *     GNU Lesser General Public License Version 2.1          *)
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
-
-type 'a pervasives_ref = 'a ref
-val pervasives_ref : 'a -> 'a ref
-val pervasives_compare : 'a -> 'a -> int
-val (!) : 'a ref -> 'a
-val (+) : int -> int -> int
-val (-) : int -> int -> int
 
 (** This module contains numerous utility functions on strings, lists,
    arrays, etc. *)
@@ -23,6 +16,15 @@ val (-) : int -> int -> int
 val on_fst : ('a -> 'b) -> 'a * 'c -> 'b * 'c
 val on_snd : ('a -> 'b) -> 'c * 'a -> 'c * 'b
 val map_pair : ('a -> 'b) -> 'a * 'a -> 'b * 'b
+
+(** Folding under pairs *)
+
+val fold_fst : ('c -> 'a -> 'c * 'a) -> 'c -> 'a * 'b -> 'c * ('a * 'b)
+val fold_snd : ('c -> 'b -> 'c * 'b) -> 'c -> 'a * 'b -> 'c * ('a * 'b)
+
+(** Equality on pairs *)
+
+val eq_pair : ('a -> 'a -> bool) -> ('b -> 'b -> bool) -> ('a * 'b -> 'a * 'b -> bool)
 
 (** Mapping under triplets *)
 
@@ -119,10 +121,10 @@ val try_finally: ('a -> 'b) -> 'a -> ('c -> unit) -> 'c -> 'b
 (** {6 Enriched exceptions} *)
 
 type iexn = Exninfo.iexn
-[@@ocaml.deprecated "please use [Exninfo.iexn]"]
+[@@ocaml.deprecated "(8.12) please use [Exninfo.iexn]"]
 
 val iraise : Exninfo.iexn -> 'a
-[@@ocaml.deprecated "please use [Exninfo.iraise]"]
+[@@ocaml.deprecated "(8.12) please use [Exninfo.iraise]"]
 
 (** {6 Misc. } *)
 
@@ -145,6 +147,15 @@ type 'a until = 'a CSig.until = Stop of 'a | Cont of 'a
 type ('a, 'b) eq = ('a, 'b) CSig.eq = Refl : ('a, 'a) eq
 
 val sym : ('a, 'b) eq -> ('b, 'a) eq
+
+(** Helpers to write comparison functions *)
+module Compare : sig
+  type list = [] | (::) : (('a -> 'a -> int) * 'a * 'a) * list -> list
+
+  val compare : list -> int
+  (** Compare the elements in the order they are given using the
+      provided comparison function until the first non-zero result. *)
+end
 
 val open_utf8_file_in : string -> in_channel
 (** Open an utf-8 encoded file and skip the byte-order mark if any. *)

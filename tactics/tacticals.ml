@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -16,6 +16,9 @@ open Constr
 open EConstr
 open Declarations
 open Tactypes
+open Proofview
+open Proofview.Notations
+open Tacmach
 
 module RelDecl = Context.Rel.Declaration
 module NamedDecl = Context.Named.Declaration
@@ -29,8 +32,10 @@ exception FailError of int * Pp.t Lazy.t
 let catch_failerror (e, info) =
   match e with
   | FailError (lvl,s) when lvl > 0 ->
-    Exninfo.iraise (FailError (lvl - 1, s), info)
-  | e -> Control.check_for_interrupt ()
+    tclZERO ~info (FailError (lvl - 1, s))
+  | e ->
+    Control.check_for_interrupt ();
+    tclUNIT ()
 
 (************************************************************************)
 (* Elimination Tacticals                                                *)
@@ -105,18 +110,18 @@ let compute_induction_names check_and branchletsigns = function
       let names = fix_empty_or_and_pattern (Array.length branchletsigns) names in
       get_and_check_or_and_pattern_gen check_and ?loc names branchletsigns
 
+let is_recursive_argument env self recarg = match Declareops.dest_recarg recarg with
+| Norec | Mrec (RecArgPrim _)  -> false
+| Mrec (RecArgInd ind) -> Environ.QInd.equal env self ind
+
 (* Compute the let-in signature of case analysis or standard induction scheme *)
 let compute_constructor_signatures env ~rec_flag ((_,k as ity),u) =
   let rec analrec c recargs =
     match c, recargs with
     | RelDecl.LocalAssum _ :: c, recarg::rest ->
-        let rest = analrec c rest in
-        begin match Declareops.dest_recarg recarg with
-        | Norec | Nested _  -> true :: rest
-        | Mrec (_,j)  ->
-            if rec_flag && Int.equal j k then true :: true :: rest
-            else true :: rest
-        end
+      let rest = analrec c rest in
+      if rec_flag && is_recursive_argument env ity recarg then true :: true :: rest
+      else true :: rest
     | RelDecl.LocalDef _ :: c, rest -> false :: analrec c rest
     | [], [] -> []
     | _ -> anomaly (Pp.str "compute_constructor_signatures.")
@@ -126,10 +131,6 @@ let compute_constructor_signatures env ~rec_flag ((_,k as ity),u) =
   let lc = Array.map map mip.mind_nf_lc in
   let lrecargs = Declareops.dest_subterms mip.mind_recargs in
   Array.map2 analrec lc lrecargs
-
-open Proofview
-open Proofview.Notations
-open Tacmach
 
 let tclIDTAC = tclUNIT ()
 
@@ -160,14 +161,6 @@ let tclZEROMSG ?info ?loc msg =
   in
   let err = UserError msg in
   tclZERO ~info err
-
-let catch_failerror e =
-  try
-    catch_failerror e;
-    tclUNIT ()
-  with e when CErrors.noncritical e ->
-    let _, info = Exninfo.capture e in
-    tclZERO ~info e
 
 (* spiwack: I chose to give the Ltac + the same semantics as
     [Proofview.tclOR], however, for consistency with the or-else
@@ -378,8 +371,9 @@ let tclPROGRESS t =
 
 (* Check that holes in arguments have been resolved *)
 
-let check_evars env sigma extsigma origsigma =
-  (* origsigma ⊆ extsigma ⊆ sigma *)
+let check_evar_list env sigma evars origsigma =
+  (* origsigma ⊆ sigma *)
+  (* evars ⊆ sigma *)
   let reachable = lazy (Evarutil.reachable_from_evars sigma
                           (Evar.Map.domain (Evd.undefined_map origsigma))) in
   let rec is_undefined_up_to_restriction sigma evk =
@@ -394,25 +388,26 @@ let check_evars env sigma extsigma origsigma =
           evar remaining after typing from the initial term given to
           apply/elim and co tactics, is it correct? *)
         None in
-  if Evd.undefined_map extsigma == Evd.undefined_map origsigma then ()
-  else
-  let rest =
-    Evd.fold_undefined (fun evk evi acc ->
+  Evar.Set.fold (fun evk acc ->
       match is_undefined_up_to_restriction sigma evk with
       | Some (evk',evi) ->
           (* If [evk'] descends from [evk] which descends itself from
             an originally undefined evar in [origsigma], it is a not
             a fresh undefined hole from [sigma]. *)
           if Evar.Set.mem evk (Lazy.force reachable) then acc
-          else (evk',evi)::acc
+          else evk'::acc
       | _ -> acc)
-      extsigma []
-  in
-  match rest with
-  | [] -> ()
-  | (evk, EvarInfo evi) :: _ ->
-    let (loc,_) = Evd.evar_source evi in
-    Pretype_errors.error_unsolvable_implicit ?loc env sigma evk None
+      evars []
+
+let check_evars env sigma extsigma origsigma =
+  (* origsigma ⊆ extsigma ⊆ sigma *)
+  if Evd.undefined_map extsigma != Evd.undefined_map origsigma then
+    match check_evar_list env sigma (Evar.Map.domain (Evd.undefined_map extsigma)) origsigma with
+    | [] -> ()
+    | evk :: _ ->
+      let EvarInfo evi = Evd.find sigma evk in
+      let (loc,_) = Evd.evar_source evi in
+      Pretype_errors.error_unsolvable_implicit ?loc env sigma evk None
 
 let tclMAPDELAYEDWITHHOLES accept_unresolved_holes l tac =
   let rec aux = function
@@ -440,24 +435,42 @@ let tclMAPDELAYEDWITHHOLES accept_unresolved_holes l tac =
   tclMAPDELAYEDWITHHOLES accept_unresolved_holes [fun _ _ -> (sigma,())] (fun () -> tac)
   but with value not necessarily in unit *)
 
+let with_holes_check ~sigma_initial ~sigma =
+  tclEVARMAP >>= fun sigma_final ->
+  tclENV >>= fun env ->
+  try
+    let () = check_evars env sigma_final sigma sigma_initial in
+    tclUNIT ()
+  with e when CErrors.noncritical e ->
+    let e, info = Exninfo.capture e in
+    tclZERO ~info e
+
+let tclRUNWITHHOLES accept_unresolved_holes tac0 tac =
+  if accept_unresolved_holes then tac0 >>= tac
+  else
+    tclEVARMAP >>= fun sigma_initial ->
+    tac0 >>= fun v ->
+    tclEVARMAP >>= fun sigma ->
+    if sigma == sigma_initial then tac v
+    else
+      tac v >>= fun v ->
+      with_holes_check ~sigma_initial ~sigma <*>
+      tclUNIT v
+
 let tclWITHHOLES accept_unresolved_holes tac sigma =
   tclEVARMAP >>= fun sigma_initial ->
-    if sigma == sigma_initial then tac
-    else
-      let check_evars_if x =
-        if not accept_unresolved_holes then
-          tclEVARMAP >>= fun sigma_final ->
-            tclENV >>= fun env ->
-              try
-                let () = check_evars env sigma_final sigma sigma_initial in
-                tclUNIT x
-              with e when CErrors.noncritical e ->
-                let e, info = Exninfo.capture e in
-                tclZERO ~info e
-        else
-          tclUNIT x
-      in
-      Proofview.Unsafe.tclEVARS sigma <*> tac >>= check_evars_if
+  if sigma == sigma_initial then tac
+  else
+    Proofview.Unsafe.tclEVARS sigma <*>
+    tac >>= fun v ->
+    (if accept_unresolved_holes then tclUNIT () else with_holes_check ~sigma_initial ~sigma) <*>
+    tclUNIT v
+
+let tactic_of_delayed d =
+  Proofview.Goal.enter_one ~__LOC__ @@ fun gl ->
+  let sigma, v = pf_apply d gl in
+  Proofview.Unsafe.tclEVARS sigma <*>
+  tclUNIT v
 
 let tclDELAYEDWITHHOLES check x tac =
   Proofview.Goal.enter begin fun gl ->

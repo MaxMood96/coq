@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,8 +8,10 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
+val zify_register_locality : Hints.hint_locality Attributes.attribute
+
 module type S = sig
-  val register : Libnames.qualid -> unit
+  val register : Hints.hint_locality -> Libnames.qualid -> unit
   val print : unit -> unit
 end
 
@@ -27,6 +29,5 @@ module Saturate : S
 val zify_tac : unit Proofview.tactic
 val saturate : unit Proofview.tactic
 val iter_specs : unit Proofview.tactic
-val assert_inj : EConstr.constr -> unit Proofview.tactic
 val iter_let : Ltac_plugin.Tacinterp.Value.t -> unit Proofview.tactic
 val elim_let : unit Proofview.tactic

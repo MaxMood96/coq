@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -47,35 +47,35 @@ let name_context env ctxt =
        (env,[]) (List.rev ctxt))
 
 (* Some pre declaration of constant we are going to use *)
-let andb_prop = fun _ -> UnivGen.constr_of_monomorphic_global (Global.env ()) (Coqlib.lib_ref "core.bool.andb_prop")
+let andb_prop = fun _ -> UnivGen.constr_of_monomorphic_global (Global.env ()) (Rocqlib.lib_ref "core.bool.andb_prop")
 
 let andb_true_intro = fun _ ->
   UnivGen.constr_of_monomorphic_global (Global.env ())
-    (Coqlib.lib_ref "core.bool.andb_true_intro")
+    (Rocqlib.lib_ref "core.bool.andb_true_intro")
 
 (* We avoid to use lazy as the binding of constants can change *)
-let bb () = UnivGen.constr_of_monomorphic_global (Global.env ()) (Coqlib.lib_ref "core.bool.type")
-let tt () = UnivGen.constr_of_monomorphic_global (Global.env ()) (Coqlib.lib_ref "core.bool.true")
-let ff () = UnivGen.constr_of_monomorphic_global (Global.env ()) (Coqlib.lib_ref "core.bool.false")
-let eq () = UnivGen.constr_of_monomorphic_global (Global.env ()) (Coqlib.lib_ref "core.eq.type")
-let int63_eqb () = UnivGen.constr_of_monomorphic_global (Global.env ()) (Coqlib.lib_ref "num.int63.eqb")
-let float64_eqb () = UnivGen.constr_of_monomorphic_global (Global.env ()) (Coqlib.lib_ref "num.float.leibniz.eqb")
+let bb () = UnivGen.constr_of_monomorphic_global (Global.env ()) (Rocqlib.lib_ref "core.bool.type")
+let tt () = UnivGen.constr_of_monomorphic_global (Global.env ()) (Rocqlib.lib_ref "core.bool.true")
+let ff () = UnivGen.constr_of_monomorphic_global (Global.env ()) (Rocqlib.lib_ref "core.bool.false")
+let eq () = UnivGen.constr_of_monomorphic_global (Global.env ()) (Rocqlib.lib_ref "core.eq.type")
+let int63_eqb () = UnivGen.constr_of_monomorphic_global (Global.env ()) (Rocqlib.lib_ref "num.int63.eqb")
+let float64_eqb () = UnivGen.constr_of_monomorphic_global (Global.env ()) (Rocqlib.lib_ref "num.float.leibniz.eqb")
 
-let sumbool () = UnivGen.constr_of_monomorphic_global (Global.env ()) (Coqlib.lib_ref "core.sumbool.type")
-let andb = fun _ -> UnivGen.constr_of_monomorphic_global (Global.env ()) (Coqlib.lib_ref "core.bool.andb")
+let sumbool () = UnivGen.constr_of_monomorphic_global (Global.env ()) (Rocqlib.lib_ref "core.sumbool.type")
+let andb = fun _ -> UnivGen.constr_of_monomorphic_global (Global.env ()) (Rocqlib.lib_ref "core.bool.andb")
 
-let induct_on  c = Tactics.induction false None c None None
-let destruct_on c = Tactics.destruct false None c None None
+let induct_on  c = Induction.induction false None c None None
+let destruct_on c = Induction.destruct false None c None None
 
 let destruct_on_using c id =
   let open Tactypes in
-  Tactics.destruct false None c
+  Induction.destruct false None c
     (Some (CAst.make @@ IntroOrPattern [[CAst.make @@ IntroNaming IntroAnonymous];
                [CAst.make @@ IntroNaming (IntroIdentifier id)]]))
     None
 
 let destruct_on_as c l =
-  Tactics.destruct false None c (Some (CAst.make l)) None
+  Induction.destruct false None c (Some (CAst.make l)) None
 
 let inj_flags = Some {
     Equality.keep_proof_equalities = true; (* necessary *)
@@ -100,7 +100,7 @@ let name_Y = Context.make_annot (Name (Id.of_string "Y")) Sorts.Relevant
 let mk_eqb_over u = mkProd (name_X, u, (mkProd (name_Y, lift 1 u, bb ())))
 
 let check_bool_is_defined () =
-  if not (Coqlib.has_ref "core.bool.type")
+  if not (Rocqlib.has_ref "core.bool.type")
   then raise (UndefinedCst "bool")
 
 let check_no_indices mib =
@@ -142,8 +142,9 @@ let get_inductive_deps ~noprop env kn =
             List.fold_left (aux env) accu a
           else
             let _,mip = Inductive.lookup_mind_specif env ind in
-            (* Types in SProp have trivial equality and are skipped *)
-            if match mip.mind_arity with RegularArity {mind_sort = SProp} -> true | _ -> false then
+            (* Types in SProp have trivial equality and are skipped
+               XXX should be substituting polymorphic universes *)
+            if Sorts.is_sprop mip.mind_sort then
               List.fold_left (aux env) accu a
             else
               List.fold_left (aux env) (kn' :: accu) a
@@ -153,7 +154,7 @@ let get_inductive_deps ~noprop env kn =
         | None -> accu)
       | Rel _ | Var _ | Sort _ | Prod _ | Lambda _ | LetIn _ | Proj _
       | Construct _ | Case _ | CoFix _ | Fix _ | Meta _ | Evar _ | Int _
-      | Float _ | Array _ -> Termops.fold_constr_with_full_binders env sigma EConstr.push_rel aux env (List.fold_left (aux env) accu a) c
+      | Float _ | String _ | Array _ -> Termops.fold_constr_with_full_binders env sigma EConstr.push_rel aux env (List.fold_left (aux env) accu a) c
     in
     let fold i accu (constr_ctx,_) =
       let constr_ctx, _ = List.chop mip.mind_consnrealdecls.(i) constr_ctx in
@@ -271,11 +272,11 @@ let push_rec_env_lift recdef env_lift =
   }
 
 let dest_lam_assum_expand env c =
-  let ctx, c = Reduction.hnf_decompose_lambda_decls env c in
+  let ctx, c = Reduction.whd_decompose_lambda_decls env c in
   if List.is_empty ctx then ctx, c
   else
     let t = EConstr.Unsafe.to_constr (Retyping.get_type_of (Environ.push_rel_context ctx env) (Evd.from_env env) (EConstr.of_constr c)) in
-    let ctx', _ = Reduction.hnf_decompose_prod_decls env t in
+    let ctx', _ = Reduction.whd_decompose_prod_decls env t in
     ctx'@ctx, mkApp (lift (Context.Rel.length ctx') c, Context.Rel.instance mkRel 0 ctx')
 
 let pred_context env ci params u nas =
@@ -285,10 +286,11 @@ let pred_context env ci params u nas =
   let realdecls, _ = List.chop mip.mind_nrealdecls mip.mind_arity_ctxt in
   let self =
     let args = Context.Rel.instance mkRel 0 mip.mind_arity_ctxt in
-    let inst = Univ.(Instance.of_array (Array.init (Instance.length u) Level.var)) in
+    let inst = UVars.Instance.(abstract_instance (length u)) in
     mkApp (mkIndU (ci.ci_ind, inst), args)
   in
-  let realdecls = RelDecl.LocalAssum (Context.anonR, self) :: realdecls in
+  let na = Context.make_annot Anonymous mip.mind_relevance in
+  let realdecls = RelDecl.LocalAssum (na, self) :: realdecls in
   Inductive.instantiate_context u paramsubst nas realdecls
 
 let branch_context env ci params u nas i =
@@ -404,7 +406,7 @@ let build_beq_scheme env handle kn =
   *)
 
   let rec translate_type_eq env_lift na c t =
-    let ctx, t = Reduction.hnf_decompose_prod_decls env t in
+    let ctx, t = Reduction.whd_decompose_prod_decls env t in
     let env_lift', ctx_eq = translate_context_eq env_lift ctx in
     let inst = Array.map (translate_term env_lift') (Context.Rel.instance mkRel 0 ctx) in
     let env_lift'' = shiftn_env_lift (Context.Rel.length ctx_eq) env_lift in
@@ -438,12 +440,12 @@ let build_beq_scheme env handle kn =
     (* The restricted translation translates only types *)
     | Lambda _ | Construct _ -> assert false
 
-    | Case (ci, u, pms, (pnames,p), iv, tm, lbr) ->
+    | Case (ci, u, pms, ((pnames,p),r), iv, tm, lbr) ->
       let env_lift_pred = shiftn_env_lift (Array.length pnames) env_lift in
       let t =
         mkCase (ci, u,
           Array.map (translate_term env_lift_pred) pms,
-          translate_term_with_binders env_lift_pred (pnames,p),
+          (translate_term_with_binders env_lift_pred (pnames,p), r),
           Constr.map_invert (translate_term env_lift_pred) iv,
           mkRel 1,
           Array.map (translate_term_with_binders env_lift_pred) lbr) in
@@ -458,7 +460,7 @@ let build_beq_scheme env handle kn =
         | Some t_eq -> Some (names, mkLambda (na, t, t_eq))) lbr in
       if Array.for_all Option.has_some lbr then
         let lbr = Array.map Option.get lbr in
-        let case = mkCase (ci, u, pms, (pnames, p), iv, translate_term env_lift tm, lbr) in
+        let case = mkCase (ci, u, pms, ((pnames, p), r), iv, translate_term env_lift tm, lbr) in
         Some (mkApp (case, [|c|]))
       else
         None
@@ -468,7 +470,7 @@ let build_beq_scheme env handle kn =
     | Fix _ -> None
 
     (* Not building a type *)
-    | Proj _ | CoFix _ | Int _ | Float _ -> None
+    | Proj _ | CoFix _ | Int _ | Float _ | String _ -> None
 
     | Meta _ | Evar _ -> assert false (* kernel terms *)
     in
@@ -550,14 +552,14 @@ let build_beq_scheme env handle kn =
        translate_type_eq, preserve the types in Construct/CoFix *)
     | Proj _ | Construct _ | CoFix _ -> None
 
-    | Case (ci, u, pms, (pnames,p), iv, tm, lbr) ->
+    | Case (ci, u, pms, ((pnames,p), r), iv, tm, lbr) ->
       let pctx = pred_context env ci pms u pnames in
       let env_lift_pred = List.fold_right push_env_lift pctx env_lift in
       let n = Array.length pnames in
       let c =
         mkCase (ci, u,
           Array.map (lift n) pms,
-          (pnames, liftn n (n+1) p),
+          ((pnames, liftn n (n+1) p), r),
           Constr.map_invert (lift n) iv,
           mkRel 1,
           Array.map (fun (names, br) -> (names, let q = Array.length names in liftn n (n+q+1) br)) lbr) in
@@ -570,7 +572,7 @@ let build_beq_scheme env handle kn =
         | Some t_eq -> Some (names, t_eq)) lbr in
       if Array.for_all Option.has_some lbr && Option.has_some p then
         let lbr = Array.map Option.get lbr in
-        Some (mkCase (ci, u, pms, (pnames, Option.get p), iv, translate_term env_lift tm, lbr))
+        Some (mkCase (ci, u, pms, ((pnames, Option.get p), r), iv, translate_term env_lift tm, lbr))
       else
         None
 
@@ -601,7 +603,7 @@ let build_beq_scheme env handle kn =
     | Prod _ -> raise InductiveWithProduct (* loss of decidable if uncountable domain *)
 
     | Meta _ | Evar _ -> None (* assert false! *)
-    | Int _ | Float _ | Array _ -> None
+    | Int _ | Float _ | String _ | Array _ -> None
     in
     Option.map (fun c -> Term.it_mkLambda_or_LetIn c ctx) c
 
@@ -666,14 +668,15 @@ let build_beq_scheme env handle kn =
 
   (* Setting universes *)
   let auctx = Declareops.universes_context mib.mind_universes in
-  let u, uctx = UnivGen.fresh_instance_from auctx None in
-  let uctx = UState.of_context_set uctx in
+  let u, ctx = UnivGen.fresh_instance_from auctx None in
+  let uctx = UState.from_env env in
+  let uctx = UState.merge_sort_context ~sideff:false UState.univ_rigid uctx ctx in
 
   (* number of inductives in the mutual *)
   let nb_ind = Array.length mib.mind_packets in
   let truly_recursive =
     let open Declarations in
-    let is_rec ra = match Declareops.dest_recarg ra with Mrec _ | Nested _ -> true | Norec -> false in
+    let is_rec ra = match Declareops.dest_recarg ra with Mrec _ -> true | Norec -> false in
     Array.exists
       (fun mip -> Array.exists (List.exists is_rec) (Declareops.dest_subterms mip.mind_recargs))
       mib.mind_packets in
@@ -735,11 +738,11 @@ let build_beq_scheme env handle kn =
     (* do the [| C1 ... =>  match Y with ... end
                ...
                Cn => match Y with ... end |]  part *)
-    let rci = Sorts.Relevant in (* returning a boolean, hence relevant *)
+    let rci = EConstr.ERelevance.relevant in (* returning a boolean, hence relevant *)
     let open Inductiveops in
     let constrs =
-      let params = Context.Rel.instance_list mkRel 0 params_ctx in
-      get_constructors env (make_ind_family (indu, params))
+      let params = Context.Rel.instance_list EConstr.mkRel 0 params_ctx in
+      get_constructors env (make_ind_family (on_snd EConstr.EInstance.make indu, params))
     in
     let make_andb_list = function
       | [] -> tt ()
@@ -751,6 +754,7 @@ let build_beq_scheme env handle kn =
         (* A primitive record *)
         let nb_cstr_args = List.length constrs.(0).cs_args in
         let _,_,eqs = List.fold_right (fun decl (ndx,env_lift,l) ->
+          let decl = EConstr.Unsafe.to_rel_decl decl in
           let env_lift' = push_env_lift decl env_lift in
           match decl with
           | RelDecl.LocalDef (na,b,t) -> (ndx-1,env_lift',l)
@@ -762,8 +766,10 @@ let build_beq_scheme env handle kn =
                   match translate_term_eq env_lift_recparams_fix_nonrecparams_tomatch cc with
                   | None -> raise (EqUnknown "type") (* A supported type should have an eq *)
                   | Some eqA ->
-                     let proj = Projection.make projs.(nb_cstr_args-ndx) true in
-                     (ndx-1,env_lift',mkApp (eqA, [|mkProj (proj,mkRel 2);mkProj (proj,mkRel 1)|])::l)
+                     let proj, relevance = projs.(nb_cstr_args-ndx) in
+                     let proj = Projection.make proj true in
+                     (ndx-1,env_lift',mkApp (eqA, [|mkProj (proj, relevance, mkRel 2);
+                                                    mkProj (proj, relevance, mkRel 1)|])::l)
                 else
                   raise InternalDependencies)
                         constrs.(0).cs_args (nb_cstr_args,env_lift_recparams_fix_nonrecparams_tomatch,[])
@@ -771,7 +777,7 @@ let build_beq_scheme env handle kn =
         make_andb_list eqs
       | None ->
         (* An inductive type *)
-        let ci = make_case_info env ind rci MatchStyle in
+        let ci = make_case_info env ind MatchStyle in
         let nconstr = Array.length constrs in
         let ar =
           Array.init nconstr (fun i ->
@@ -782,6 +788,7 @@ let build_beq_scheme env handle kn =
             let cc =
               if Int.equal i j then
                 let _,_,eqs = List.fold_right (fun decl (ndx,env_lift,l) ->
+                   let decl = EConstr.Unsafe.to_rel_decl decl in
                    let env_lift' = push_env_lift decl env_lift in
                    match decl with
                    | RelDecl.LocalDef (na,b,t) -> (ndx-1,env_lift',l)
@@ -802,22 +809,22 @@ let build_beq_scheme env handle kn =
               else
                 ff ()
             in
-            let cs_argsj = translate_context env_lift_recparams_fix_nonrecparams_tomatch_csargsi constrs.(j).cs_args in
+            let cs_argsj = translate_context env_lift_recparams_fix_nonrecparams_tomatch_csargsi (EConstr.Unsafe.to_rel_context constrs.(j).cs_args) in
             Term.it_mkLambda_or_LetIn cc cs_argsj)
           in
           let predj = EConstr.of_constr (translate_term env_lift_recparams_fix_nonrecparams_tomatch_csargsi pred) in
           let case =
             simple_make_case_or_project env (Evd.from_env env)
-              ci predj NoInvert (EConstr.mkRel (nb_cstr_args + 1))
+              ci (predj,rci) NoInvert (EConstr.mkRel (nb_cstr_args + 1))
               (EConstr.of_constr_array ar2)
           in
-          let cs_argsi = translate_context env_lift_recparams_fix_nonrecparams_tomatch constrs.(i).cs_args in
+          let cs_argsi = translate_context env_lift_recparams_fix_nonrecparams_tomatch (EConstr.Unsafe.to_rel_context constrs.(i).cs_args) in
           Term.it_mkLambda_or_LetIn (EConstr.Unsafe.to_constr case) cs_argsi)
         in
         let predi = EConstr.of_constr (translate_term env_lift_recparams_fix_nonrecparams_tomatch pred) in
         let case =
           simple_make_case_or_project env (Evd.from_env env)
-            ci predi NoInvert (EConstr.mkRel 2)
+            ci (predi,rci) NoInvert (EConstr.mkRel 2)
             (EConstr.of_constr_array ar) in
         EConstr.Unsafe.to_constr case
     in
@@ -833,7 +840,7 @@ let build_beq_scheme env handle kn =
       | Finite when truly_recursive || nb_ind > 1 (* Hum... *) ->
          let cores = Array.init nb_ind make_one_eq in
          Array.init nb_ind (fun i ->
-            let kelim = Inductive.elim_sort (mib,mib.mind_packets.(i)) in
+            let kelim = Inductiveops.elim_sort (mib,mib.mind_packets.(i)) in
             if not (Sorts.family_leq InSet kelim) then
               raise (NonSingletonProp (kn,i));
             let decrArg = Context.Rel.length nonrecparams_ctx_with_eqs in
@@ -843,14 +850,29 @@ let build_beq_scheme env handle kn =
          assert (Int.equal nb_ind 1);
          (* If the inductive type is not recursive, the fixpoint is
              not used, so let's replace it with garbage *)
-         let kelim = Inductive.elim_sort (mib,mib.mind_packets.(0)) in
+         let kelim = Inductiveops.elim_sort (mib,mib.mind_packets.(0)) in
          if not (Sorts.family_leq InSet kelim) then raise (NonSingletonProp (kn,0));
          [|Term.it_mkLambda_or_LetIn (make_one_eq 0) recparams_ctx_with_eqs|]
   in
+
+  let uctx =
+    (* infer univ constraints
+       For instance template poly inductive produces a univ monomorphic scheme
+       which when applied needs to constrain the universe of its argument
+    *)
+    let sigma = Evd.from_ctx uctx in
+    let sigma = Array.fold_left (fun sigma c ->
+        fst @@ Typing.type_of env sigma (EConstr.of_constr c))
+        sigma
+        res
+    in
+    Evd.ustate sigma
+  in
+
   res, uctx
 
 let beq_scheme_kind =
-  Ind_tables.declare_mutual_scheme_object "_beq"
+  Ind_tables.declare_mutual_scheme_object "beq"
   ~deps:build_beq_scheme_deps
   build_beq_scheme
 
@@ -963,7 +985,7 @@ let do_replace_bl handle (ind,u as indu) aavoid narg lft rgt =
           let (ind',u as indu),v = try destruct_ind env sigma tt1
           (* trick so that the good sequence is returned*)
                 with e when CErrors.noncritical e -> indu,[||]
-          in if Ind.CanOrd.equal ind' ind
+          in if Environ.QInd.equal env ind' ind
              then Tacticals.tclTHENLIST [Equality.replace t1 t2; Auto.default_auto ; aux q1 q2 ]
              else (
                let c = get_scheme handle (!bl_scheme_kind_aux ()) ind' in
@@ -1123,13 +1145,14 @@ repeat ( apply andb_prop in z;let z1:= fresh "Z" in destruct z as [z1 z]).
  replace bi with ai; auto || replace bi with ai by  apply typeofbi_prod ; auto
                *)
               Proofview.Goal.enter begin fun gl ->
+                let env = Proofview.Goal.env gl in
                 let concl = Proofview.Goal.concl gl in
                 let sigma = Tacmach.project gl in
                 match EConstr.kind sigma concl with
                 | App (c,ca) -> (
                   match EConstr.kind sigma c with
                   | Ind (indeq, u) ->
-                     if GlobRef.CanOrd.equal (GlobRef.IndRef indeq) Coqlib.(lib_ref "core.eq.type")
+                     if Environ.QGlobRef.equal env (GlobRef.IndRef indeq) Rocqlib.(lib_ref "core.eq.type")
                      then
                        Tacticals.tclTHEN
                          (do_replace_bl handle ind
@@ -1158,7 +1181,7 @@ let make_bl_scheme env handle mind =
   (* Setting universes *)
   let auctx = Declareops.universes_context mib.mind_universes in
   let u, uctx = UnivGen.fresh_instance_from auctx None in
-  let uctx = UState.merge ~sideff:false UState.univ_rigid (UState.from_env env) uctx in
+  let uctx = UState.merge_sort_context ~sideff:false UState.univ_rigid (UState.from_env env) uctx in
 
   let ind = (mind,0) in
   let nparrec = mib.mind_nparams_rec in
@@ -1167,6 +1190,7 @@ let make_bl_scheme env handle mind =
   let bl_goal = compute_bl_goal env handle (ind,u) lnamesparrec nparrec in
   let bl_goal = EConstr.of_constr bl_goal in
   let poly = Declareops.inductive_is_polymorphic mib in
+  let uctx = if poly then Evd.ustate (fst (Typing.sort_of env (Evd.from_ctx uctx) bl_goal)) else uctx in
   let (ans, _, _, _, uctx) = Declare.build_by_tactic ~poly env ~uctx ~typ:bl_goal
     (compute_bl_tact handle (ind, EConstr.EInstance.make u) lnamesparrec nparrec)
   in
@@ -1178,7 +1202,7 @@ let make_bl_scheme_deps env ind =
   Ind_tables.SchemeMutualDep (ind, beq_scheme_kind) :: List.map map inds
 
 let bl_scheme_kind =
-  Ind_tables.declare_mutual_scheme_object "_dec_bl"
+  Ind_tables.declare_mutual_scheme_object "dec_bl"
   ~deps:make_bl_scheme_deps
   make_bl_scheme
 
@@ -1289,7 +1313,7 @@ let make_lb_scheme env handle mind =
   (* Setting universes *)
   let auctx = Declareops.universes_context mib.mind_universes in
   let u, uctx = UnivGen.fresh_instance_from auctx None in
-  let uctx = UState.merge ~sideff:false UState.univ_rigid (UState.from_env env) uctx in
+  let uctx = UState.merge_sort_context ~sideff:false UState.univ_rigid (UState.from_env env) uctx in
 
   let nparrec = mib.mind_nparams_rec in
   let lnonparrec,lnamesparrec =
@@ -1297,6 +1321,7 @@ let make_lb_scheme env handle mind =
   let lb_goal = compute_lb_goal env handle (ind,u) lnamesparrec nparrec in
   let lb_goal = EConstr.of_constr lb_goal in
   let poly = Declareops.inductive_is_polymorphic mib in
+  let uctx = if poly then Evd.ustate (fst (Typing.sort_of env (Evd.from_ctx uctx) lb_goal)) else uctx in
   let (ans, _, _, _, ctx) = Declare.build_by_tactic ~poly env ~uctx ~typ:lb_goal
     (compute_lb_tact handle ind lnamesparrec nparrec)
   in
@@ -1308,7 +1333,7 @@ let make_lb_scheme_deps env ind =
   Ind_tables.SchemeMutualDep (ind, beq_scheme_kind) :: List.map map inds
 
 let lb_scheme_kind =
-  Ind_tables.declare_mutual_scheme_object "_dec_lb"
+  Ind_tables.declare_mutual_scheme_object "dec_lb"
   ~deps:make_lb_scheme_deps
   make_lb_scheme
 
@@ -1318,7 +1343,7 @@ let _ = lb_scheme_kind_aux := fun () -> lb_scheme_kind
 (* Decidable equality *)
 
 let check_not_is_defined () =
-  if not (Coqlib.has_ref "core.not.type")
+  if not (Rocqlib.has_ref "core.not.type")
   then raise (UndefinedCst "not")
 
 (* {n=m}+{n<>m}  part  *)
@@ -1375,7 +1400,7 @@ let compute_dec_goal env ind lnamesparrec nparrec =
         create_input (
           mkNamedProd (Context.make_annot x Sorts.Relevant) (mkFullInd env ind (3*nparrec)) (
             mkNamedProd (Context.make_annot y Sorts.Relevant) (mkFullInd env ind (3*nparrec+1)) (
-              mkApp(sumbool(),[|eqnm;mkApp (UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Coqlib.lib_ref "core.not.type",[|eqnm|])|])
+              mkApp(sumbool(),[|eqnm;mkApp (UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Rocqlib.lib_ref "core.not.type",[|eqnm|])|])
           )
         )
       )
@@ -1417,7 +1442,14 @@ let compute_dec_tact handle (ind,u) lnamesparrec nparrec =
           let blI = mkConstU (c,u) in
           let c = get_scheme handle lb_scheme_kind ind in
           let lbI = mkConstU (c,u) in
+          (* univ polymorphic schemes may have extra constraints
+             from using univ monomorphic f_equal and the like *)
+          let env, sigma = Proofview.Goal.(env gl, sigma gl) in
+          let sigma, _ = Typing.type_of env sigma (EConstr.of_constr blI) in
+          let sigma, _ = Typing.type_of env sigma (EConstr.of_constr lbI) in
           Tacticals.tclTHENLIST [
+              Proofview.Unsafe.tclEVARS sigma;
+
               (*we do this so we don't have to prove the same goal twice *)
               assert_by (Name freshH) (EConstr.of_constr (
                                            mkApp(sumbool(),[|eqtrue eqbnm; eqfalse eqbnm|])
@@ -1440,7 +1472,7 @@ let compute_dec_tact handle (ind,u) lnamesparrec nparrec =
                       let freshH3 = fresh_id (Id.of_string "H") gl in
                       Tacticals.tclTHENLIST [
                           simplest_right ;
-                          unfold_constr (Coqlib.lib_ref "core.not.type");
+                          unfold_constr (Rocqlib.lib_ref "core.not.type");
                           intro;
                           Equality.subst_all ();
                           assert_by (Name freshH3)
@@ -1476,20 +1508,21 @@ let make_eq_decidability env handle mind =
   (* Setting universes *)
   let auctx = Declareops.universes_context mib.mind_universes in
   let u, uctx = UnivGen.fresh_instance_from auctx None in
-  let uctx = UState.merge ~sideff:false UState.univ_rigid (UState.from_env env) uctx in
+  let uctx = UState.merge_sort_context ~sideff:false UState.univ_rigid (UState.from_env env) uctx in
 
   let lnonparrec,lnamesparrec =
     Inductive.inductive_nonrec_rec_paramdecls (mib,u) in
+  let dec_goal = EConstr.of_constr (compute_dec_goal env (ind,u) lnamesparrec nparrec) in
   let poly = Declareops.inductive_is_polymorphic mib in
+  let uctx = if poly then Evd.ustate (fst (Typing.sort_of env (Evd.from_ctx uctx) dec_goal)) else uctx in
   let (ans, _, _, _, ctx) = Declare.build_by_tactic ~poly env ~uctx
-      ~typ:(EConstr.of_constr (compute_dec_goal env (ind,u) lnamesparrec nparrec))
-      (compute_dec_tact handle (ind,u) lnamesparrec nparrec)
+      ~typ:dec_goal (compute_dec_tact handle (ind,u) lnamesparrec nparrec)
   in
   ([|ans|], ctx)
 
 let eq_dec_scheme_kind =
-  Ind_tables.declare_mutual_scheme_object "_eq_dec"
-  ~deps:(fun _ ind -> [SchemeMutualDep (ind, bl_scheme_kind); SchemeMutualDep (ind, lb_scheme_kind)])
+  Ind_tables.declare_mutual_scheme_object "eq_dec"
+  ~deps:(fun _ ind -> [SchemeMutualDep (ind, beq_scheme_kind); SchemeMutualDep (ind, bl_scheme_kind); SchemeMutualDep (ind, lb_scheme_kind)])
   make_eq_decidability
 
 (* The eq_dec_scheme proofs depend on the equality and discr tactics

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -30,7 +30,7 @@ let ensure_ext ext f =
   end
 
 let safe_chop_extension f =
-  try Filename.chop_extension f with _ -> f
+  try Filename.chop_extension f with Invalid_argument _ -> f
 
 let ensure_bname src tgt =
   let src, tgt = Filename.basename src, Filename.basename tgt in

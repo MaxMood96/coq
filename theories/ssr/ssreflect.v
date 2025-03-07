@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,9 +12,8 @@
 
 (** #<style> .doc { font-family: monospace; white-space: pre; } </style># **)
 
-Require Import Bool. (* For bool_scope delimiter 'bool'. *)
 Require Import ssrmatching.
-Declare ML Module "ssreflect_plugin:coq-core.plugins.ssreflect".
+Declare ML Module "rocq-runtime.plugins.ssreflect".
 
 (**
  This file is the Gallina part of the ssreflect plugin implementation.
@@ -42,7 +41,7 @@ Declare ML Module "ssreflect_plugin:coq-core.plugins.ssreflect".
                           nosimpl disables expansion of C by /=.
               locked t == t, but locked t is not convertible to t.
        locked_with k t == t, but not convertible to t or locked_with k' t
-                          unless k = k' (with k : unit). Coq type-checking
+                          unless k = k' (with k : unit). Rocq type-checking
                           will be much more efficient if locked_with with a
                           bespoke k is used for sealed definitions.
           unlockable v == interface for sealed constant definitions of v.
@@ -59,13 +58,20 @@ Declare ML Module "ssreflect_plugin:coq-core.plugins.ssreflect".
      This minimizes the comparison overhead for foo, while still allowing
      rewrite unlock to expose big_foo_expression.
 
+         #[#elaborate x#]# == triggers Rocq elaboration to fill the holes of the term x
+                          The main use case is to trigger typeclass inference in
+                          the body of a ssreflect have := #[#elaborate body#]#.
+
   Additionally we provide default intro pattern ltac views:
   - top of the stack actions:
-    => /[apply]     := => hyp {}/hyp
-    => /[swap]      := => x y; move: y x
+    => /#[#apply#]#     := => hyp {}/hyp
+    => /#[#swap#]#      := => x y; move: y x
                       (also swap and preserves let bindings)
-    => /[dup]       := => x; have copy := x; move: copy x
+    => /#[#dup#]#       := => x; have copy := x; move: copy x
                       (also copies and preserves let bindings)
+  - calling rewrite from an intro pattern, use with parsimony:
+    => /#[#1! rules#]#  := rewrite rules
+    => /#[#! rules#]#   := rewrite !rules
 
  More information about these definitions and their use can be found in the
  ssreflect manual, and in specific comments below.                           **)
@@ -76,20 +82,16 @@ Unset Printing Implicit Defensive.
 
 Module SsrSyntax.
 
-(**
- Declare Ssr keywords: 'is' 'of' '//' '/=' and '//='. We also declare the
- parsing level 8, as a workaround for a notation grammar factoring problem.
- Arguments of application-style notations (at level 10) should be declared
- at level 8 rather than 9 or the camlp5 grammar will not factor properly.    **)
+(** Declare Ssr keywords: "is" "isn't" "of" "//" "/=" and "//=". **)
 
-Reserved Notation "(* x 'is' y 'of' z 'isn't' // /= //= *)" (at level 8).
-Reserved Notation "(* 69 *)" (at level 69).
+Reserved Notation "(* x 'is' y 'of' z 'isn't' // /= //= *)".
 
 (**  Non ambiguous keyword to check if the SsrSyntax module is imported  **)
-Reserved Notation "(* Use to test if 'SsrSyntax_is_Imported' *)" (at level 8).
+Reserved Notation "(* Use to test if 'SsrSyntax_is_Imported' *)".
 
 Reserved Notation "<hidden n >" (at level 0, n at level 0,
   format "<hidden  n >").
+#[warning="-postfix-notation-not-level-1"]
 Reserved Notation "T (* n *)" (at level 200, format "T  (* n *)").
 
 End SsrSyntax.
@@ -98,10 +100,9 @@ Export SsrMatchingSyntax.
 Export SsrSyntax.
 
 (** Save primitive notation that will be overloaded. **)
-Local Notation CoqGenericIf c vT vF := (if c then vT else vF) (only parsing).
-Local Notation CoqGenericDependentIf c x R vT vF :=
+Local Notation RocqGenericIf c vT vF := (if c then vT else vF) (only parsing).
+Local Notation RocqGenericDependentIf c x R vT vF :=
   (if c as x return R then vT else vF) (only parsing).
-Local Notation CoqCast x T := (x : T) (only parsing).
 
 (** Reserve notation that introduced in this file. **)
 Reserved Notation "'if' c 'then' vT 'else' vF" (at level 200,
@@ -110,11 +111,6 @@ Reserved Notation "'if' c 'return' R 'then' vT 'else' vF" (at level 200,
   c, R, vT, vF at level 200).
 Reserved Notation "'if' c 'as' x 'return' R 'then' vT 'else' vF" (at level 200,
   c, R, vT, vF at level 200, x name).
-
-Reserved Notation "x : T" (at level 100, right associativity,
-  format "'[hv' x '/ '  :  T ']'").
-Reserved Notation "T : 'Type'" (at level 100, format "T  :  'Type'").
-Reserved Notation "P : 'Prop'" (at level 100, format "P  :  'Prop'").
 
 Reserved Notation "[ 'the' sT 'of' v 'by' f ]" (at level 0,
   format "[ 'the'  sT  'of'  v  'by'  f ]").
@@ -130,6 +126,8 @@ Reserved Notation "[ 'unlockable' 'of' C ]" (at level 0,
 Reserved Notation "[ 'unlockable' 'fun' C ]" (at level 0,
   format "[ 'unlockable'  'fun'  C ]").
 
+Reserved Notation "[ 'elaborate' x ]" (at level 0).
+
 (**
  To define notations for tactic in intro patterns.
  When "=> /t" is parsed, "t:%ssripat" is actually interpreted. **)
@@ -138,7 +136,7 @@ Delimit Scope ssripat_scope with ssripat.
 
 (**
  Make the general "if" into a notation, so that we can override it below.
- The notations are "only parsing" because the Coq decompiler will not
+ The notations are "only parsing" because the Rocq decompiler will not
  recognize the expansion of the boolean if; using the default printer
  avoids a spurious trailing %%GEN_IF. **)
 
@@ -146,13 +144,13 @@ Declare Scope general_if_scope.
 Delimit Scope general_if_scope with GEN_IF.
 
 Notation "'if' c 'then' vT 'else' vF" :=
-  (CoqGenericIf c vT vF) (only parsing) : general_if_scope.
+  (RocqGenericIf c vT vF) (only parsing) : general_if_scope.
 
 Notation "'if' c 'return' R 'then' vT 'else' vF" :=
-  (CoqGenericDependentIf c c R vT vF) (only parsing) : general_if_scope.
+  (RocqGenericDependentIf c c R vT vF) (only parsing) : general_if_scope.
 
 Notation "'if' c 'as' x 'return' R 'then' vT 'else' vF" :=
-  (CoqGenericDependentIf c x R vT vF) (only parsing) : general_if_scope.
+  (RocqGenericDependentIf c x R vT vF) (only parsing) : general_if_scope.
 
 (**  Force boolean interpretation of simple if expressions.  **)
 
@@ -177,28 +175,12 @@ Open Scope boolean_if_scope.
  enclosed in square brackets and introduced by a keyword:
       #[#keyword ... #]#
  Because the keyword follows a bracket it does not need to be reserved.
- Non-ssreflect libraries that do not respect the form syntax (e.g., the Coq
+ Non-ssreflect libraries that do not respect the form syntax (e.g., the Rocq
  Lists library) should be loaded before ssreflect so that their notations
  do not mask all ssreflect forms.                                            **)
 Declare Scope form_scope.
 Delimit Scope form_scope with FORM.
 Open Scope form_scope.
-
-(**
- Allow overloading of the cast (x : T) syntax, put whitespace around the
- ":" symbol to avoid lexical clashes (and for consistency with the parsing
- precedence of the notation, which binds less tightly than application),
- and put printing boxes that print the type of a long definition on a
- separate line rather than force-fit it at the right margin.                 **)
-Notation "x : T" := (CoqCast x T) : core_scope.
-
-(**
- Allow the casual use of notations like nat * nat for explicit Type
- declarations. Note that (nat * nat : Type) is NOT equivalent to
- (nat * nat)%%type, whose inferred type is legacy type "Set".                **)
-Notation "T : 'Type'" := (CoqCast T%type Type) (only parsing) : core_scope.
-(**  Allow similarly Prop annotation for, e.g., rewrite multirules. **)
-Notation "P : 'Prop'" := (CoqCast P%type Prop) (only parsing) : core_scope.
 
 (**  Constants for abstract: and #[#: name #]# intro pattern  **)
 Definition abstract_lock := unit.
@@ -239,7 +221,7 @@ Inductive external_view : Type := tactic_view of Type.
    Note when using the #[#the _ of _ #]# form to generate a substructure from a
  telescopes-style canonical hierarchy (implementing inheritance with
  coercions), one should always project or coerce the value to the BASE
- structure, because Coq will only find a Canonical derived structure for
+ structure, because Rocq will only find a Canonical derived structure for
  the Canonical base structure -- not for a base structure that is specific
  to proj_value.                                                              **)
 
@@ -255,7 +237,7 @@ End TheCanonical.
 
 Import TheCanonical. (* Note: no export. *)
 
-Local Arguments get_by _%type_scope _%type_scope _ _ _ _.
+Local Arguments get_by _%_type_scope _%_type_scope _ _ _ _.
 
 Notation "[ 'the' sT 'of' v 'by' f ]" :=
   (@get_by _ sT f _ _ ((fun v' (s : sT) => Put v' (f s) s) v _))
@@ -285,7 +267,7 @@ Notation " #[# 'the' sT 'of' v : 'Type' #]#" := (@get Type sT v _ _)
 (**
  Helper notation for canonical structure inheritance support.
  This is a workaround for the poor interaction between delta reduction and
- canonical projections in Coq's unification algorithm, by which transparent
+ canonical projections in Rocq's unification algorithm, by which transparent
  definitions hide canonical instances, i.e., in
    Canonical a_type_struct := @Struct a_type ...
    Definition my_type := a_type.
@@ -319,7 +301,7 @@ Notation "{ 'type' 'of' c 'for' s }" := (dependentReturnType c s) : type_scope.
 (**
  A generic "phantom" type (actually, a unit type with a phantom parameter).
  This type can be used for type definitions that require some Structure
- on one of their parameters, to allow Coq to infer said structure so it
+ on one of their parameters, to allow Rocq to infer said structure so it
  does not have to be supplied explicitly or via the " #[#the _ of _ #]#" notation
  (the latter interacts poorly with other Notation).
    The definition of a (co)inductive type with a parameter p : p_type, that
@@ -354,7 +336,7 @@ Register protect_term as plugins.ssreflect.protect_term.
   - unkeyed t will match any subterm that unifies with t, regardless of
     whether it displays the same head symbol as t.
   - unkeyed t a b will match any application of a term f unifying with t,
-    to two arguments unifying with with a and b, respectively, regardless of
+    to two arguments unifying with a and b, respectively, regardless of
     apparent head symbols.
   - unkeyed x where x is a variable will match any subterm with the same
     type as x (when x would raise the 'indeterminate pattern' error).        **)
@@ -383,7 +365,7 @@ Notation "=^~ r" := (ssr_converse r) : form_scope.
     Lemma, and the ssreflect unlock tactic.
   locked_with k t is equal but not convertible to t, much like locked t,
     but supports explicit tagging with a value k : unit. This is used to
-    mitigate a flaw in the term comparison heuristic of the Coq kernel,
+    mitigate a flaw in the term comparison heuristic of the Rocq kernel,
     which treats all terms of the form locked t as equal and compares their
     arguments recursively, leading to an exponential blowup of comparison.
     For this reason locked_with should be used rather than locked when
@@ -405,16 +387,11 @@ Register locked as plugins.ssreflect.locked.
 
 Lemma lock A x : x = locked x :> A. Proof. unlock; reflexivity. Qed.
 
-(**  Needed for locked predicates, in particular for eqType's.  **)
-Lemma not_locked_false_eq_true : locked false <> true.
-Proof. unlock; discriminate. Qed.
-
 (**  The basic closing tactic "done".  **)
 Ltac done :=
   trivial; hnf; intros; solve
-   [ do ![solve [trivial | apply: sym_equal; trivial]
+   [ do ![solve [trivial | simple refine (@sym_equal _ _ _ _); trivial]
          | discriminate | contradiction | split]
-   | case not_locked_false_eq_true; assumption
    | match goal with H : ~ _ |- _ => solve [case H; trivial] end ].
 
 (**  Quicker done tactic not including split, syntax: /0/  **)
@@ -422,7 +399,6 @@ Ltac ssrdone0 :=
   trivial; hnf; intros; solve
    [ do ![solve [trivial | apply: sym_equal; trivial]
          | discriminate | contradiction ]
-   | case not_locked_false_eq_true; assumption
    | match goal with H : ~ _ |- _ => solve [case H; trivial] end ].
 
 (**  To unlock opaque constants.  **)
@@ -454,6 +430,25 @@ Canonical locked_with_unlockable T k x :=
 (**  More accurate variant of unlock, and safer alternative to locked_withE. **)
 Lemma unlock_with T k x : unlocked (locked_with_unlockable k x) = x :> T.
 Proof. exact: unlock. Qed.
+
+(**  Notation to trigger Rocq elaboration to fill the holes **)
+Notation "[ 'elaborate' x ]" := (ltac:(refine x)) (only parsing).
+
+(**  The internal lemmas for the have tactics.  **)
+
+Lemma ssr_have
+  (Plemma : Prop)  (Pgoal : Prop)
+  (step : Plemma) (rest : Plemma -> Pgoal) : Pgoal.
+Proof. exact: rest step. Qed.
+
+Register ssr_have as plugins.ssreflect.ssr_have.
+
+Polymorphic Lemma ssr_have_upoly@{s1 s2|u1 u2|}
+  (Plemma : Type@{s1|u1})  (Pgoal : Type@{s2|u2})
+  (step : Plemma) (rest : Plemma -> Pgoal) : Pgoal.
+Proof. exact: rest step. Qed.
+
+Register ssr_have_upoly as plugins.ssreflect.ssr_have_upoly.
 
 (**  Internal N-ary congruence lemmas for the congr tactic.  **)
 
@@ -675,4 +670,21 @@ Notation "'[' 'dup' ']'" := (ltac:(move;
   end))
   (at level 0, only parsing) : ssripat_scope.
 
+Notation "'[' '1' '!' rules ']'"     := (ltac:(rewrite rules))
+  (at level 0, rules at level 200, only parsing) : ssripat_scope.
+Notation "'[' '!' rules ']'"         := (ltac:(rewrite !rules))
+  (at level 0, rules at level 200, only parsing) : ssripat_scope.
+
 End ipat.
+
+(* A class to trigger reduction by rewriting.                           *)
+(* Usage: rewrite [pattern]vm_compute.                                  *)
+(* Alternatively one may redefine a lemma as in algebra/rat.v :         *)
+(* Lemma rat_vm_compute n (x : rat) : vm_compute_eq n%:Q x -> n%:Q = x. *)
+(* Proof. exact. Qed.                                                   *)
+
+Class vm_compute_eq {T : Type} (x y : T) := vm_compute : x = y.
+
+#[global]
+Hint Extern 0 (@vm_compute_eq _ _ _) =>
+       vm_compute; reflexivity : typeclass_instances.

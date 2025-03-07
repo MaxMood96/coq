@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -42,7 +42,7 @@ let compare_gr id1 id2 = match id1, id2 with
 | AnyId GoalId, AnyId GoalId -> 0
 | AnyId GoalId, AnyId (FormulaId _) -> 1
 | AnyId (FormulaId _), AnyId GoalId -> -1
-| AnyId (FormulaId id1), AnyId (FormulaId id2) -> GlobRef.CanOrd.compare id1 id2
+| AnyId (FormulaId id1), AnyId (FormulaId id2) -> GlobRef.UserOrd.compare id1 id2
 
 module OrderedInstance=
 struct
@@ -59,13 +59,13 @@ let do_sequent env sigma setref triv id seq i dom atoms=
   let phref=ref triv in
   let do_atoms a1 a2 =
     let do_pair t1 t2 =
-      match unif_atoms env sigma i dom t1 t2 with
-          None->()
+      match unif_atoms ~check:(not !phref) (Sequent.state seq) env sigma i dom t1 t2 with
+        | None-> ()
         | Some (Phantom _) ->phref:=true
         | Some c ->flag:=false;setref:=IS.add (c,id) !setref in
       List.iter (fun t->List.iter (do_pair t) a2.negative) a1.positive;
       List.iter (fun t->List.iter (do_pair t) a2.positive) a1.negative in
-    Sequent.iter_redexes (function AnyFormula lf->do_atoms atoms lf.atoms) seq;
+    Sequent.iter_redexes (function lf -> do_atoms atoms lf) seq;
     do_atoms atoms (Sequent.make_simple_atoms seq);
     !flag && !phref
 
@@ -83,13 +83,15 @@ let give_instances env sigma lf seq=
 
 (* collector for the engine *)
 
-let rec collect_quantified sigma seq=
+let rec collect_quantified env sigma seq =
   try
-    let hd,seq1=take_formula sigma seq in
+    (* This works because the only caller of this function ensures that at this
+       point we only have formulae with priority lower than forall / exists. *)
+    let hd, seq1 = take_formula env sigma seq in
     let AnyFormula hd0 = hd in
       (match hd0.pat with
            LeftPattern(Lforall(_,_,_)) | RightPattern(Rexists(_,_,_)) ->
-             let (q,seq2)=collect_quantified sigma seq1 in
+             let (q, seq2) = collect_quantified env sigma seq1 in
                ((hd::q),seq2)
          | _->[],seq)
   with Heap.EmptyHeap -> [],seq
@@ -114,7 +116,7 @@ let mk_open_instance env sigma id idc c =
     if Int.equal n 0 then sigma, decls else
       let nid = fresh_id_in_env avoid var_id env in
       let (sigma, (c, s)) = Evarutil.new_type_evar env sigma Evd.univ_flexible in
-      let decl = LocalAssum (Context.make_annot (Name nid) (ESorts.relevance_of_sort sigma s), c) in
+      let decl = LocalAssum (Context.make_annot (Name nid) (ESorts.relevance_of_sort s), c) in
       aux (n-1) (Id.Set.add nid avoid) (EConstr.push_rel decl env) sigma (decl::decls)
   in
   let sigma, decls = aux m Id.Set.empty env sigma [] in
@@ -138,11 +140,11 @@ let left_instance_tac ~flags (inst,id) continue seq=
                 (pf_constr_of_global id >>= fun idc ->
                 Proofview.Goal.enter begin fun gl ->
                   let id0 = List.nth (pf_ids_of_hyps gl) 0 in
-                  generalize [mkApp(idc, [|mkVar id0|])]
+                  Generalize.generalize [mkApp(idc, [|mkVar id0|])]
                 end);
                 introf;
                 tclSOLVE [wrap ~flags 1 false continue
-                            (deepen (record (id,None) seq))]];
+                            (deepen (record env (id,None) seq))]];
             tclTRY assumption]
     | Real (c, _)->
         if lookup env sigma (id,Some c) seq then
@@ -161,16 +163,16 @@ let left_instance_tac ~flags (inst,id) continue seq=
                     with e when CErrors.noncritical e ->
                       user_err Pp.(str "Untypable instance, maybe higher-order non-prenex quantification") in
                   Proofview.tclTHEN (Proofview.Unsafe.tclEVARS evmap)
-                    (generalize [gt])
+                    (Generalize.generalize [gt])
                 end)
             else
-              pf_constr_of_global id >>= fun idc -> generalize [mkApp(idc,[|snd @@ Item.repr c|])]
+              pf_constr_of_global id >>= fun idc -> Generalize.generalize [mkApp(idc,[|snd @@ Item.repr c|])]
           in
             tclTHENLIST
               [special_generalize;
                introf;
                tclSOLVE
-                 [wrap ~flags 1 false continue (deepen (record (id,Some c) seq))]]
+                 [wrap ~flags 1 false continue (deepen (record env (id,Some c) seq))]]
   end
 
 let right_instance_tac ~flags inst continue seq=

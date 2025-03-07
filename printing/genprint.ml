@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -42,11 +42,13 @@ module ValMap = ValTMap (struct type 'a t = 'a -> top_printer_result end)
 
 let print0_val_map = ref ValMap.empty
 
-let find_print_val_fun tag =
-  try ValMap.find tag !print0_val_map
-  with Not_found ->
-    let msg s = Pp.(str "print function not found for a value interpreted as " ++ str s ++ str ".") in
-    CErrors.anomaly (msg (Val.repr tag))
+let find_print_val_fun tag v =
+  match ValMap.find tag !print0_val_map with
+  | f -> f v
+  | exception Not_found ->
+    (* opening Pp shadows "tag" *)
+    let the_tag = tag in
+    TopPrinterBasic Pp.(fun () -> str "<no printer for " ++ str (Val.repr the_tag) ++ str ">")
 
 let generic_val_print v =
   let Val.Dyn (tag,v) = v in
@@ -116,16 +118,14 @@ module PrintObj =
 struct
   type ('raw, 'glb, 'top) obj = ('raw, 'glb, 'top) genprinter
   let name = "printer"
-  let default wit = match wit with
-  | ExtraArg tag ->
-    let name = ArgT.repr tag in
+  let default tag =
+    let name = try ArgT.repr tag with Assert_failure _ when !Flags.in_debugger -> "UNKNOWN" in
     let printer = {
       raw = (fun _ -> PrinterBasic (fun env sigma -> str "<genarg:" ++ str name ++ str ">"));
       glb = (fun _ -> PrinterBasic (fun env sigma -> str "<genarg:" ++ str name ++ str ">"));
       top = (fun _ -> TopPrinterBasic (fun () -> str "<genarg:" ++ str name ++ str ">"));
     } in
     Some printer
-  | _ -> assert false
 end
 
 module Print = Register (PrintObj)
@@ -140,9 +140,14 @@ let register_print0 wit raw glb top =
      (* An alias, thus no primitive printer attached *)
      ()
 
+let register_noval_print0 wit raw glb =
+  let top = Util.Empty.abort in
+  let printer = { raw; glb; top; } in
+  Print.register0 wit printer
+
 let register_vernac_print0 wit raw =
-  let glb _ = CErrors.anomaly (Pp.str "vernac argument needs not globwit printer.") in
-  let top _ = CErrors.anomaly (Pp.str "vernac argument needs not wit printer.") in
+  let glb = Util.Empty.abort in
+  let top = Util.Empty.abort in
   let printer = { raw; glb; top; } in
   Print.register0 wit printer
 

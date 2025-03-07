@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,18 +8,20 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-type 'a pervasives_ref = 'a ref
-let pervasives_ref = ref
-let pervasives_compare = compare
-let (!) = (!)
-let (+) = (+)
-let (-) = (-)
-
 (* Mapping under pairs *)
 
 let on_fst f (a,b) = (f a,b)
 let on_snd f (a,b) = (a,f b)
 let map_pair f (a,b) = (f a,f b)
+
+(* Folding under pairs *)
+
+let fold_fst f acc (a,b) = let acc, a = f acc a in acc, (a, b)
+let fold_snd f acc (a,b) = let acc, b = f acc b in acc, (a, b)
+
+(* Equality on pairs *)
+
+let eq_pair eq1 eq2 (a,b) (a',b') = eq1 a a' && eq2 b b'
 
 (* Mapping under triplets *)
 
@@ -160,6 +162,18 @@ struct
   let fold_left f g a = function
     | Inl y -> f a y
     | Inr y -> g a y
+end
+
+module Compare = struct
+  type list = [] | (::) : (('a -> 'a -> int) * 'a * 'a) * list -> list
+
+  let rec compare = function
+    | [] -> 0
+    | (cmp,x,y) :: rest ->
+      let c = cmp x y in
+      if c <> 0 then c
+      else compare rest
+
 end
 
 let map_union = Union.map

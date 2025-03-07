@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -28,8 +28,8 @@ Require Import ssrunder.
 Require Import RelationClasses.
 Require Import Relation_Definitions.
 
-(** Reconcile [Coq.Classes.RelationClasses.Reflexive] with
-    [Coq.ssr.ssrclasses.Reflexive] *)
+(** Reconcile [Corelib.Classes.RelationClasses.Reflexive] with
+    [Corelib.ssr.ssrclasses.Reflexive] *)
 
 #[global]
 Instance compat_Reflexive :
