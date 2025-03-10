@@ -80,6 +80,9 @@ neg_infinity
      : float
 t = 2%flt
      : float
+File "./output/FloatNumberSyntax.v", line 50, characters 0-35:
+Warning: Hiding binding of key float to float_scope
+[hiding-delimiting-key,parsing,default]
 t = 2%flt
      : float
 2

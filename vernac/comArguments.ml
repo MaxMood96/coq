@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -57,6 +57,16 @@ let warn_arguments_assert =
         strbrk "to clear implicit arguments, add ': clear implicits'. " ++
         strbrk "If you want to clear notation scopes, add ': clear scopes'")
 
+let warn_scope_delimiter_depth =
+  CWarnings.create ~name:"argument-scope-delimiter" ~category:Deprecation.Version.v8_19
+    Pp.(fun () ->
+        strbrk "The '%' scope delimiter in 'Arguments' commands is deprecated, " ++
+        strbrk "use '%_' instead (available since 8.19). The '%' syntax will be " ++
+        strbrk "reused in a future version with the same semantics as in terms, " ++
+        strbrk "that is adding scope to the stack for all subterms. " ++
+        strbrk "Code can be adapted with a script like: " ++
+        strbrk "for f in $(find . -name '*.v'); do sed '/Arguments/ s/%/%_/g' -i $f ; done")
+
 (* [nargs_for_red] is the number of arguments required to trigger reduction,
    [args] is the main list of arguments statuses,
    [more_implicits] is a list of extra lists of implicit statuses  *)
@@ -69,8 +79,9 @@ let vernac_arguments ~section_local reference args more_implicits flags =
   let extra_scopes_flag = List.mem `ExtraScopes flags in
   let clear_implicits_flag = List.mem `ClearImplicits flags in
   let default_implicits_flag = List.mem `DefaultImplicits flags in
-  let never_unfold_flag = List.mem `ReductionNeverUnfold flags in
-  let nomatch_flag = List.mem `ReductionDontExposeCase flags in
+  let never_unfold_flag = List.mem `SimplNeverUnfold flags in
+  let nomatch_flag = List.mem `SimplDontExposeCase flags in
+  let clear_red_flag = List.mem `ClearReduction flags in
   let clear_bidi_hint = List.mem `ClearBidiHint flags in
 
   let err_incompat x y =
@@ -235,18 +246,22 @@ let vernac_arguments ~section_local reference args more_implicits flags =
 
   let red_behavior =
     let open Reductionops.ReductionBehaviour in
-    match never_unfold_flag, nomatch_flag, rargs, nargs_for_red with
-    | true, false, [], None -> Some NeverUnfold
-    | true, true, _, _ -> err_incompat "simpl never" "simpl nomatch"
-    | true, _, _::_, _ -> err_incompat "simpl never" "!"
-    | true, _, _, Some _ -> err_incompat "simpl never" "/"
-    | false, false, [], None  -> None
-    | false, false, _, _ -> Some (UnfoldWhen { nargs = nargs_for_red;
-                                               recargs = rargs;
-                                             })
-    | false, true, _, _ -> Some (UnfoldWhenNoMatch { nargs = nargs_for_red;
-                                                     recargs = rargs;
-                                                   })
+    match clear_red_flag, never_unfold_flag, nomatch_flag, rargs, nargs_for_red with
+    | true, true, _, _, _ -> err_incompat "clear simpl" "simpl never"
+    | true, false, true, _, _ -> err_incompat "clear simpl" "simpl nomatch"
+    | true, false, false, _ :: _, _ -> err_incompat "clear simpl" "!"
+    | true, false, false, [], Some _ -> err_incompat "clear simpl" "/"
+    | false, true, false, [], None -> Some NeverUnfold
+    | false, true, true, _, _ -> err_incompat "simpl never" "simpl nomatch"
+    | false, true, _, _::_, _ -> err_incompat "simpl never" "!"
+    | false, true, _, _, Some _ -> err_incompat "simpl never" "/"
+    | _, false, false, [], None  -> None
+    | false, false, false, _, _ -> Some (UnfoldWhen { nargs = nargs_for_red;
+                                                      recargs = rargs;
+                                                    })
+    | false, false, true, _, _ -> Some (UnfoldWhenNoMatch { nargs = nargs_for_red;
+                                                            recargs = rargs;
+                                                          })
   in
 
 
@@ -265,7 +280,9 @@ let vernac_arguments ~section_local reference args more_implicits flags =
   end;
 
   if scopes_specified || clear_scopes_flag then begin
-    let scopes = List.map (List.map (fun {loc;v=k} ->
+    if List.exists (fun {v=d,_} -> d = Constrexpr.DelimUnboundedScope) (List.flatten scopes) then
+      warn_scope_delimiter_depth ();
+    let scopes = List.map (List.map (fun {loc;v=_d,k} ->
         try ignore (Notation.find_scope k); k
         with CErrors.UserError _ ->
           Notation.find_delimiters_scope ?loc k)) scopes
@@ -279,11 +296,11 @@ let vernac_arguments ~section_local reference args more_implicits flags =
   if default_implicits_flag then
     Impargs.declare_implicits section_local (smart_global reference);
 
-  if red_modifiers_specified then begin
+  if red_modifiers_specified || clear_red_flag then begin
     match sr with
-    | GlobRef.ConstRef _ ->
+    | GlobRef.ConstRef c ->
       Reductionops.ReductionBehaviour.set
-        ~local:section_local sr (Option.get red_behavior)
+        ~local:section_local c red_behavior
 
     | _ ->
       CErrors.user_err

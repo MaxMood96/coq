@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -21,7 +21,7 @@ let printf s = Printf.fprintf !out_channel s
 
 let sprintf = Printf.sprintf
 
-(*s Coq keywords *)
+(*s Rocq keywords *)
 
 let build_table l =
   let h = Hashtbl.create 101 in
@@ -56,7 +56,7 @@ let is_keyword =
       "Program Definition"; "Program Example"; "Program Fixpoint"; "Program Lemma";
       "Obligation"; "Obligations"; "Solve"; "using"; "Next Obligation"; "Next";
       "Program Instance"; "Equations"; "Equations_nocomp";
-      (*i (* coq terms *) *)
+      (*i (* rocq terms *) *)
       "forall"; "match"; "as"; "in"; "return"; "with"; "end"; "let"; "fun";
       "if"; "then"; "else"; "Prop"; "Set"; "Type"; ":="; "where"; "struct"; "wf"; "measure";
       "fix"; "cofix"; "is";
@@ -69,7 +69,7 @@ let is_keyword =
 let is_tactic =
   build_table
     [ "intro"; "intros"; "apply"; "rewrite"; "refine"; "case"; "clear"; "injection";
-      "elimtype"; "progress"; "setoid_rewrite"; "left"; "right"; "constructor";
+      "progress"; "setoid_rewrite"; "left"; "right"; "constructor";
       "econstructor"; "decide equality"; "abstract"; "exists"; "cbv"; "simple destruct";
       "info"; "field"; "specialize"; "evar"; "solve"; "instantiate"; "info_auto"; "info_eauto";
       "quote"; "eexact"; "autorewrite";
@@ -86,7 +86,7 @@ let is_tactic =
       "change"; "fold"; "hnf"; "lazy"; "simple"; "eexists"; "debug"; "idtac"; "first"; "type of"; "pose";
       "eval"; "instantiate"; "until" ]
 
-(*s Current Coq module *)
+(*s Current Rocq module *)
 
 let current_module : (string * string option) ref = ref ("",None)
 

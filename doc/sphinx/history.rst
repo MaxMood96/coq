@@ -4,6 +4,8 @@
 Early history of Coq
 ----------------------
 
+The Rocq Prover is the successor of Coq, whose history, up to version 7, is presented here.
+
 Historical roots
 ----------------
 
@@ -673,7 +675,7 @@ new extraction procedure, unlike the one implemented in previous version
 of Coq is able to handle all terms in the Calculus of Inductive
 Constructions, even involving universes and strong elimination. P.
 Letouzey adapted user contributions to extract ML programs when it was
-sensible. Jean-Christophe Filliâtre wrote ``coqdoc``, a documentation
+sensible. Jean-Christophe Filliâtre wrote ``coqdoc`` (now ``rocq doc``), a documentation
 tool for Coq libraries usable from version 7.2.
 
 Bruno Barras improved the efficiency of the reduction algorithm and the

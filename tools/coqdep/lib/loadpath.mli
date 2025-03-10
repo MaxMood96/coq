@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -26,17 +26,15 @@ type result =
 module State : sig
   type t
 
-  val make : boot:bool -> t
+  val make : worker:string option -> boot:bool -> t
 end
+
+val get_worker_path : State.t -> string
 
 val search_v_known : State.t -> ?from:dirpath -> dirpath -> result option
 val search_other_known : State.t -> ?from:dirpath -> dirpath -> result option
-val search_mllib_known : State.t -> string -> dir option
-val search_mlpack_known : State.t -> string -> dir option
 
 val is_in_coqlib : State.t -> ?from:dirpath -> dirpath -> bool
-
-val add_caml_dir : State.t -> System.unix_path -> unit
 
 val add_current_dir : State.t -> System.unix_path -> unit
 val add_q_include : State.t -> System.unix_path -> string -> unit

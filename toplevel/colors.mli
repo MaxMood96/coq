@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -13,5 +13,5 @@
 type color = [`ON | `AUTO | `EMACS | `OFF]
 
 val init_color : color -> unit
-val parse_extra_colors : string list -> color * string list
+val parse_extra_colors : emacs:bool -> string list -> color * string list
 val print_style_tags : color -> unit

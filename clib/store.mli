@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -19,8 +19,8 @@ sig
   type 'a field
   (** Type of field of such stores *)
 
-  val field : unit -> 'a field
-  (** Create a new field *)
+  val field : string -> 'a field
+  (** Create a new field. See also [Dyn.create]. *)
 
   val empty : t
   (** Empty store *)

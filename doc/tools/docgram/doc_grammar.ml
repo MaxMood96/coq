@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -1409,7 +1409,7 @@ let finish_with_file old_file args =
   else if args.verify then begin
     if not (files_eq old_file temp_file) then begin
       error "%s is not current\n" old_file;
-      ignore (CUnix.sys_command "diff" [ old_file ; old_file ^ ".new"])
+      ignore (CUnix.sys_command "diff" [ "-u" ; old_file ; old_file ^ ".new"])
     end;
     Sys.remove temp_file
   end else if args.update then
@@ -1502,7 +1502,7 @@ let process_rst g file args seen tac_prods cmd_prods =
   let linenum = ref 0 in
   let dir_regex = Str.regexp "^\\([ \t]*\\)\\.\\.[ \t]*\\([a-zA-Z0-9:]* *\\)\\(.*\\)" in
   let contin_regex = Str.regexp "^\\([ \t]*\\)\\(.*\\)" in
-  let ip_args_regex = Str.regexp "^[ \t]*\\([a-zA-Z0-9_\\.]*\\)[ \t]*\\([a-zA-Z0-9_\\.]*\\)" in
+  let ip_args_regex = Str.regexp "^[ \t]*\\([a-zA-Z0-9_\\.]+\\)[ \t]+\\([a-zA-Z0-9_\\.]+\\)" in
   let blank_regex = Str.regexp "^[ \t]*$" in
   let end_prodlist_regex = Str.regexp "^[ \t]*$" in
   let getline () =

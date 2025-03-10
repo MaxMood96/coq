@@ -114,7 +114,13 @@ Axiom cast_coalesce :
 
 #[export] Hint Rewrite cast_coalesce : ltamer.
 
-Require Import Program.
+Definition id := fun {A : Type} (x : A) => x.
+
+Definition compose :=
+  fun {A B C : Type} (g : B -> C) (f : A -> B) (x : A) => g (f x).
+
+Notation "g ∘ f " := (compose g f) (at level 10).
+
 Module HintCut.
 Class A (f : nat -> nat) := a : True.
 Class B (f : nat -> nat) := b : True.
@@ -196,3 +202,29 @@ Section HintTransparent.
   Qed.
 
 End HintTransparent.
+
+Module RepeatCreat.
+  Axiom T : Type.
+  Axiom v : T.
+
+  Set Warnings "+mismatched-hint-db".
+
+  (* if this fails it means the db already exists as a discriminated db *)
+  Succeed Create HintDb repeated.
+
+  Create HintDb repeated discriminated.
+
+  Fail Definition foo : T := ltac:(eauto with foo).
+
+  Hint Resolve v : foo.
+  Definition foo : T := ltac:(eauto with foo).
+
+  Create HintDb repeated discriminated.
+  (* hint is still there *)
+  Definition foo' : T := ltac:(eauto with foo).
+
+  Fail Create HintDb repeated.
+
+  (* implicit hint db *)
+  Fail Create HintDb foo discriminated.
+End RepeatCreat.

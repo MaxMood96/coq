@@ -1,9 +1,13 @@
 ; This library must have no dependencies except config, as it is a
-; dependency for most Coq command line tools.
+; dependency for most Rocq command line tools.
 (library
  (name boot)
- (public_name coq-core.boot)
- (synopsis "Coq Enviroment and Paths facilities")
+ (public_name rocq-runtime.boot)
+ (synopsis "Rocq Enviroment and Paths facilities")
  ; until ocaml/dune#4892 fixed
  ; (private_modules util)
- (libraries coq-core.config))
+ (libraries rocq-runtime.config))
+
+(deprecated_library_name
+ (old_public_name coq-core.boot)
+ (new_public_name rocq-runtime.boot))

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -60,7 +60,6 @@ let classify_vernac e =
         options_affecting_stm_scheduling ->
        VtSideff ([], VtNow)
     | VernacBeginSection {v=id} -> VtSideff ([id], VtLater)
-    | VernacAddLoadPath _ | VernacRemoveLoadPath _ | VernacAddMLPath _
     | VernacChdir _ | VernacExtraDependency _
     | VernacSetOption _ -> VtSideff ([], VtLater)
     (* (Local) Notations have to disappear *)
@@ -85,7 +84,7 @@ let classify_vernac e =
     | VernacLoad _ -> VtSideff ([], VtNow)
     | VernacExtend (s,l) ->
         try Vernacextend.get_vernac_classifier s l
-        with Not_found -> anomaly(str"No classifier for"++spc()++str (fst s)++str".")
+        with Not_found -> anomaly(str"No classifier for"++spc()++str s.ext_entry ++str".")
   in
   let static_pure_classifier ~atts e = match e with
     (* Qed *)
@@ -95,12 +94,12 @@ let classify_vernac e =
     | VernacExactProof _ -> VtQed (VtKeep VtKeepOpaque)
     (* Query *)
     | VernacShow _ | VernacPrint _ | VernacSearch _ | VernacLocate _
+    | VernacCheckGuard | VernacValidateProof
     | VernacGlobalCheck _ | VernacCheckMayEval _ -> VtQuery
     (* ProofStep *)
     | VernacProof _
     | VernacFocus _ | VernacUnfocus
     | VernacSubproof _
-    | VernacCheckGuard | VernacValidateProof
     | VernacUnfocused
     | VernacBullet _ ->
         VtProofStep { proof_block_detection = Some "bullet" }
@@ -119,7 +118,7 @@ let classify_vernac e =
       let ids = List.map (fun (({v=i}, _), _) -> i) l in
       let guarantee = if polymorphic then Doesn'tGuaranteeOpacity else GuaranteesOpacity in
       VtStartProof (guarantee,ids)
-    | VernacFixpoint (discharge,l) ->
+    | VernacFixpoint (discharge,(_,l)) ->
       let polymorphic = Attributes.(parse_drop_extra polymorphic atts) in
        let guarantee =
          if discharge = DoDischarge || polymorphic then Doesn'tGuaranteeOpacity
@@ -145,6 +144,9 @@ let classify_vernac e =
         else VtSideff (ids, VtLater)
     (* Sideff: apply to all open branches. usually run on master only *)
     | VernacAssumption (_,_,l) ->
+        let ids = List.flatten (List.map (fun (_,(l,_)) -> List.map (fun (id, _) -> id.v) l) l) in
+        VtSideff (ids, VtLater)
+    | VernacSymbol l ->
         let ids = List.flatten (List.map (fun (_,(l,_)) -> List.map (fun (id, _) -> id.v) l) l) in
         VtSideff (ids, VtLater)
     | VernacPrimitive ((id,_),_,_) ->
@@ -177,7 +179,9 @@ let classify_vernac e =
     | VernacRegister _
     | VernacNameSectionHypSet _
     | VernacComments _
+    | VernacAttributes _
     | VernacSchemeEquality _
+    | VernacAddRewRule _
     | VernacDeclareInstance _ -> VtSideff ([], VtLater)
     (* Who knows *)
     | VernacOpenCloseScope _ | VernacDeclareScope _

@@ -47,17 +47,9 @@ Module No.
   Fail Definition box_lti A := Box A : Type@{i}.
 End No.
 
-Module DefaultProp.
-  Inductive identity (A : Type) (a : A) : A -> Type := id_refl : identity A a a.
-
-  (* By default template polymorphism does not interact with inductives
-     which naturally fall in Prop *)
-  Check (identity nat 0 0 : Prop).
-End DefaultProp.
-
 Module ExplicitTemplate.
   #[universes(template)]
-  Inductive identity@{i} (A : Type@{i}) (a : A) : A -> Type@{i} := id_refl : identity A a a.
+  Inductive identity@{i} (A : Type@{i}) (a : A) : A -> Type@{i} := id_refl (_:A) : identity A a a.
 
   (* There used to be a weird interaction of template polymorphism and inductive
      types which fall in Prop due to kernel sort inference. This inductive is
@@ -67,7 +59,24 @@ Module ExplicitTemplate.
      from the kernel. Now the universe annotation is respected by the kernel. *)
   Fail Check (identity Type nat nat : Prop).
   Check (identity True I I : Prop).
+  Check identity nat 0 0 : Set.
+  Fail Check identity Type nat nat : Set.
+  Check identity Type nat nat : Type.
 End ExplicitTemplate.
+
+Module ExplicitTemplate2.
+  #[universes(template)]
+  Inductive identity@{i} (A : Type@{i}) (a : A) : A -> Type@{i} := id_refl : identity A a a.
+  (* we generate fresh qualities for A and the conclusion, and they end up unrelated
+     therefore the conclusion quality has no binders,
+     we can't make it a template poly quality and instead collapse to Type *)
+
+  Fail Check (identity Type nat nat : Prop).
+  Fail Check (identity True I I : Prop).
+  Check identity nat 0 0 : Set.
+  Fail Check identity Type nat nat : Set.
+  Check identity Type nat nat : Type.
+End ExplicitTemplate2.
 
 Polymorphic Definition f@{i} : Type@{i} := nat.
 Polymorphic Definition baz@{i} : Type@{i} -> Type@{i} := fun x => x.
@@ -200,13 +209,121 @@ End TemplateUnit.
 
 Module TemplateParamUnit.
 
-(* In theory, A could be template but the upper layers don't mark it as such *)
+(* template where the univ doesn't appear in the conclusion (here Prop) *)
 Set Warnings "+no-template-universe".
-Fail #[universes(template)] Inductive foo (A : Type) := Foo.
+Inductive foo (A : Type) := Foo.
 
-Set Warnings "-no-template-universe".
-#[universes(template)] Inductive foo (A : Type) := Foo.
+Polymorphic Definition foo'@{u|} (A:Type@{u}) : Prop := foo A.
 
 Check (foo unit : Prop).
 
 End TemplateParamUnit.
+
+Module TemplateAlg.
+
+  Inductive foo (A:Type) (B :Type) := C (_:A).
+
+  Check foo True nat : Prop.
+
+  Check fun A => foo A nat : Prop.
+  Fail Check fun A:Set => foo A nat : Prop.
+
+  Goal Prop.
+    let c := constr:(forall A, prod A A) in
+    exact c.
+  Defined.
+
+  Universes u v.
+
+  Axiom U : Type@{u}.
+  Axiom V : Type@{v}.
+
+  Check foo (U * V) True : Type@{max(u,v)}.
+
+End TemplateAlg.
+
+Module TemplateNoExtraCsts.
+
+  Polymorphic Definition opt'@{u|} (A:Type@{u}) := option A.
+  Polymorphic Definition some@{u|} (A:Type@{u}) (x:A) : opt' A := Some x.
+
+End TemplateNoExtraCsts.
+
+Module BoundedQuality.
+  Inductive dumb' (b:bool) (B : Type) := cons' : B -> (b = true -> dumb' false nat) -> dumb' b B.
+
+  (* dumb' true _ contains a nat *)
+  Fail Check dumb' true True : Prop.
+
+  Check dumb' true nat : Set.
+  Fail Check dumb' true Set : Set.
+  Check dumb' true Set.
+End BoundedQuality.
+
+Module BoundedQuality2.
+  Inductive dumb' (A:Type) (b:bool) (B : Type) := cons' : A -> (b = true -> dumb' A false nat) -> dumb' A b B.
+
+  Check dumb' True true Set : Prop.
+  Fail Check dumb' nat true Set : Prop.
+  Check dumb' nat true Set : Set.
+  Fail Check dumb' Set true Set : Set.
+  Check dumb' Set true Set.
+End BoundedQuality2.
+
+Module UnminimizedOption.
+  Unset Universe Minimization ToSet.
+  Inductive option A := None | Some (_:A).
+
+  Fail Check option True : Prop.
+  Check option nat : Set.
+  Fail Check option Set : Set.
+  Check option Set : Type.
+End UnminimizedOption.
+
+Module UnminimizedFunction.
+  Unset Universe Minimization ToSet.
+  Inductive Foo (T:Type) := foo (_:nat -> T).
+
+  Check Foo True : Prop.
+  Fail Check Foo nat : Prop.
+  Check Foo nat : Set.
+  Fail Check Foo Set : Set.
+  Check Foo Set : Type.
+End UnminimizedFunction.
+
+Module ExplicitOption.
+  Inductive option@{u} (A:Type@{u}) : Type@{u} := None | Some (_:A).
+
+  Fail Check option True : Prop.
+  Check option nat : Set.
+  Fail Check option Set : Set.
+  Check option Set : Type.
+End ExplicitOption.
+
+Module QvarInCtor.
+  (* this could be sort polymorphic:
+  Record Foo@{q|u v|} (A:Type@{q|u}) : Type@{q|max(u,v+1)}
+    := { foo1 : A; foo2 : forall P : Type@{q|v}, P }.
+
+  but qvar "q" (and univ "v") cannot be template poly due to appearing in the constructor
+  (even if we generalized template poly to allow conversion-irrelevant appearances,
+  this one isn't irrelevant)
+
+  so we need to collapse q := Type and can be template poly on u *)
+  Record Foo A := { foo1 : A ; foo2 : forall P, P }.
+
+  Fail Check Foo True : Prop.
+  Fail Check Foo nat : Set.
+  Polymorphic Definition test@{|} : Type@{Foo.u1+1} := Foo nat.
+  Polymorphic Definition test'@{u|} (A:Type@{u}) : Type@{max(u,Foo.u1+1)} := Foo A.
+End QvarInCtor.
+
+Module SemiPoly.
+  Universe u.
+
+  (* u cannot be template poly (it's global) but we could be template sort polymorphic *)
+  Inductive foo (A:Type@{u}) (B:Type@{u}) C := pair (_:A) (_:B) (_:C).
+
+  Fail Check foo True True True : Prop. (* maybe will be allowed someday *)
+  Fail Check foo nat nat nat : Set. (* must not be allowed *)
+End SemiPoly.

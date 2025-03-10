@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -45,8 +45,9 @@ val make_path : DirPath.t -> Id.t -> full_path
 val repr_path : full_path -> DirPath.t * Id.t
 val dirpath : full_path -> DirPath.t
 val basename : full_path -> Id.t
+val full_path_is_ident : full_path -> bool
 
-(** Parsing and printing of section path as ["coq_root.module.id"] *)
+(** Parsing and printing of section path as ["root.module.id"] *)
 val path_of_string : string -> full_path
 val string_of_path : full_path -> string
 val pr_path : full_path -> Pp.t
@@ -89,9 +90,9 @@ val idset_mem_qualid : qualid -> Id.Set.t -> bool
 
 (** {6 ... } *)
 
-(** This is the root of the standard library of Coq *)
-val coq_root : module_ident (* "Coq" *)
-val coq_string : string (* "Coq" *)
+(** This is the root of the rocq-core library *)
+val rocq_init_root : module_ident (* "Corelib" *)
+val rocq_init_string : string (* "Corelib" *)
 
 (** This is the default root prefix for developments which doesn't
    mention a root *)

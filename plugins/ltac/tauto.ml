@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -22,7 +22,7 @@ open Proofview.Notations
 
 module NamedDecl = Context.Named.Declaration
 
-let tauto_plugin = "coq-core.plugins.tauto"
+let tauto_plugin = "rocq-runtime.plugins.tauto"
 let () = Mltop.add_known_module tauto_plugin
 
 let assoc_var s ist =
@@ -38,9 +38,6 @@ type tauto_flags = {
 (* Whether conjunction and disjunction are restricted to binary connectives *)
   binary_mode : bool;
 
-(* Whether compatibility for buggy detection of binary connective is on *)
-  binary_mode_bugged_detection : bool;
-
 (* Whether conjunction and disjunction are restricted to the connectives *)
 (* having the structure of "and" and "or" (up to the choice of sorts) in *)
 (* contravariant position in an hypothesis *)
@@ -52,7 +49,6 @@ type tauto_flags = {
   strict_in_hyp_and_ccl : bool;
 
 (* Whether unit type includes equality types *)
-  strict_unit : bool;
 }
 
 let tag_tauto_flags : tauto_flags Val.typ = Val.create "tauto_flags"
@@ -70,7 +66,7 @@ open Goptions
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Intuition";"Negation";"Unfolding"];
       optread  = (fun () -> !negation_unfolding);
       optwrite = (:=) negation_unfolding }
@@ -109,18 +105,7 @@ let is_empty _ ist =
 let is_unit_or_eq _ ist =
   Proofview.tclENV >>= fun genv ->
   Proofview.tclEVARMAP >>= fun sigma ->
-  let flags = assoc_flags ist in
-  let test = if flags.strict_unit then is_unit_type else is_unit_or_eq_type in
-  if test genv sigma (assoc_var "X1" ist) then idtac else fail
-
-let bugged_is_binary sigma t =
-  isApp sigma t &&
-  let (hdapp,args) = decompose_app sigma t in
-    match EConstr.kind sigma hdapp with
-    | Ind (ind,u)  ->
-        let (mib,mip) = Global.lookup_inductive ind in
-         Int.equal mib.Declarations.mind_nparams 2
-    | _ -> false
+  if is_unit_or_eq_type genv sigma (assoc_var "X1" ist) then idtac else fail
 
 (** Dealing with conjunction *)
 
@@ -129,8 +114,7 @@ let is_conj _ ist =
   Proofview.tclEVARMAP >>= fun sigma ->
   let flags = assoc_flags ist in
   let ind = assoc_var "X1" ist in
-    if (not flags.binary_mode_bugged_detection || bugged_is_binary sigma ind) &&
-       is_conjunction genv sigma
+    if is_conjunction genv sigma
          ~strict:flags.strict_in_hyp_and_ccl
          ~onlybinary:flags.binary_mode ind
     then idtac
@@ -148,7 +132,7 @@ let flatten_contravariant_conj _ ist =
           ~onlybinary:flags.binary_mode typ
   with
   | Some (_,args) ->
-    let newtyp = List.fold_right (fun a b -> mkArrow a Sorts.Relevant b) args c in
+    let newtyp = List.fold_right (fun a b -> mkArrow a ERelevance.relevant b) args c in
     let intros = tclMAP (fun _ -> intro) args in
     let by = tclTHENLIST [intros; apply hyp; split; assumption] in
     tclTHENLIST [assert_ ~by newtyp; clear (destVar sigma hyp)]
@@ -161,8 +145,7 @@ let is_disj _ ist =
   Proofview.tclEVARMAP >>= fun sigma ->
   let flags = assoc_flags ist in
   let t = assoc_var "X1" ist in
-  if (not flags.binary_mode_bugged_detection || bugged_is_binary sigma t) &&
-     is_disjunction genv sigma
+  if is_disjunction genv sigma
        ~strict:flags.strict_in_hyp_and_ccl
        ~onlybinary:flags.binary_mode t
   then idtac
@@ -181,7 +164,7 @@ let flatten_contravariant_disj _ ist =
           typ with
   | Some (_,args) ->
       let map i arg =
-        let typ = mkArrow arg Sorts.Relevant c in
+        let typ = mkArrow arg ERelevance.relevant c in
         let ci = Tactics.constructor_tac false None (succ i) Tactypes.NoBindings in
         let by = tclTHENLIST [intro; apply hyp; ci; assumption] in
         assert_ ~by typ
@@ -192,14 +175,13 @@ let flatten_contravariant_disj _ ist =
   | _ -> fail
 
 let evalglobref_of_globref =
-  let open Tacred in
   function
-  | GlobRef.VarRef v -> EvalVarRef v
-  | GlobRef.ConstRef c -> EvalConstRef c
+  | GlobRef.VarRef v -> Evaluable.EvalVarRef v
+  | GlobRef.ConstRef c -> Evaluable.EvalConstRef c
   | GlobRef.IndRef _ | GlobRef.ConstructRef _ -> assert false
 
 let make_unfold name =
-  let const = evalglobref_of_globref (Coqlib.lib_ref name) in
+  let const = evalglobref_of_globref (Rocqlib.lib_ref name) in
   Locus.(AllOccurrences, ArgArg (const, None))
 
 let reduction_not_iff _ ist =
@@ -215,8 +197,8 @@ let apply_nnpp _ ist =
   Proofview.tclBIND
     (Proofview.tclUNIT ())
     begin fun () ->
-      if Coqlib.has_ref nnpp
-      then Tacticals.pf_constr_of_global (Coqlib.lib_ref nnpp) >>= apply
+      if Rocqlib.has_ref nnpp
+      then Tacticals.pf_constr_of_global (Rocqlib.lib_ref nnpp) >>= apply
       else tclFAIL (Pp.mt ())
     end
 
@@ -225,28 +207,15 @@ let apply_nnpp _ ist =
    For the moment not and iff are still always unfolded. *)
 let tauto_uniform_unit_flags = {
   binary_mode = true;
-  binary_mode_bugged_detection = false;
   strict_in_contravariant_hyp = true;
   strict_in_hyp_and_ccl = true;
-  strict_unit = false
-}
-
-(* This is the compatibility mode (not used) *)
-let _tauto_legacy_flags = {
-  binary_mode = true;
-  binary_mode_bugged_detection = true;
-  strict_in_contravariant_hyp = true;
-  strict_in_hyp_and_ccl = false;
-  strict_unit = false
 }
 
 (* This is the improved mode *)
 let tauto_power_flags = {
   binary_mode = false; (* support n-ary connectives *)
-  binary_mode_bugged_detection = false;
   strict_in_contravariant_hyp = false; (* supports non-regular connectives *)
   strict_in_hyp_and_ccl = false;
-  strict_unit = false
 }
 
 let with_flags flags _ ist =
@@ -256,7 +225,7 @@ let with_flags flags _ ist =
   let ist = { ist with lfun = Id.Map.add x.CAst.v arg ist.lfun } in
   eval_tactic_ist ist (CAst.make @@ TacArg (TacCall (CAst.make (Locus.ArgVar f, [Reference (Locus.ArgVar x)]))))
 
-let warn_auto_with_star = CWarnings.create ~name:"intuition-auto-with-star" ~category:CWarnings.CoreCategories.deprecated
+let warn_auto_with_star = CWarnings.create ~name:"intuition-auto-with-star" ~category:Deprecation.Version.v8_17
     Pp.(fun () ->
         str "\"auto with *\" was used through the default \"intuition_solver\" tactic."
         ++ spc() ++ str "This will be replaced by just \"auto\" in the future.")

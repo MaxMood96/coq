@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -285,7 +285,7 @@ let matches_core env sigma allow_bound_rels
     | ConstructRef c, Construct (c',u) -> Environ.QConstruct.equal env c c'
     | _, _ -> false
   in
-  let rec sorec ctx env subst p t =
+  let rec sorec ctx env subst (p:constr_pattern) t =
     let cT = strip_outer_cast sigma t in
     match p, EConstr.kind sigma cT with
       | PSoApp (n,args),m ->
@@ -335,7 +335,7 @@ let matches_core env sigma allow_bound_rels
             Array.fold_left2 (sorec ctx env) subst args1 args22
           else (* Might be a projection on the right *)
             match EConstr.kind sigma c2 with
-            | Proj (pr, c) ->
+            | Proj (pr, _, c) ->
               (try let term = Retyping.expand_projection env sigma pr c (Array.to_list args2) in
                      sorec ctx env subst p term
                with Retyping.RetypeError _ -> raise PatternMatchingFailure)
@@ -343,15 +343,15 @@ let matches_core env sigma allow_bound_rels
 
       | PApp (c1,arg1), App (c2,arg2) ->
         (match c1, EConstr.kind sigma c2 with
-         | PRef (GlobRef.ConstRef r), Proj (pr,c)
+         | PRef (GlobRef.ConstRef r), Proj (pr,_,c)
            when not (Environ.QConstant.equal env r (Projection.constant pr)) ->
            raise PatternMatchingFailure
-        | PProj (pr1,c1), Proj (pr,c) ->
+        | PProj (pr1,c1), Proj (pr,_,c) ->
           if Environ.QProjection.equal env pr1 pr then
             try Array.fold_left2 (sorec ctx env) (sorec ctx env subst c1 c) arg1 arg2
             with Invalid_argument _ -> raise PatternMatchingFailure
           else raise PatternMatchingFailure
-        | _, Proj (pr,c) ->
+        | _, Proj (pr,_,c) ->
           (try let term = Retyping.expand_projection env sigma pr c (Array.to_list arg2) in
                  sorec ctx env subst p term
            with Retyping.RetypeError _ -> raise PatternMatchingFailure)
@@ -359,16 +359,16 @@ let matches_core env sigma allow_bound_rels
           try Array.fold_left2 (sorec ctx env) (sorec ctx env subst c1 c2) arg1 arg2
           with Invalid_argument _ -> raise PatternMatchingFailure)
 
-      | PApp (PRef (GlobRef.ConstRef c1), _), Proj (pr, c2)
+      | PApp (PRef (GlobRef.ConstRef c1), _), Proj (pr, _, c2)
         when not (Environ.QConstant.equal env c1 (Projection.constant pr)) ->
         raise PatternMatchingFailure
 
-      | PApp (c, args), Proj (pr, c2) ->
+      | PApp (c, args), Proj (pr, _, c2) ->
         (try let term = Retyping.expand_projection env sigma pr c2 [] in
                sorec ctx env subst p term
          with Retyping.RetypeError _ -> raise PatternMatchingFailure)
 
-      | PProj (p1,c1), Proj (p2,c2) when Environ.QProjection.equal env p1 p2 ->
+      | PProj (p1,c1), Proj (p2,_,c2) when Environ.QProjection.equal env p1 p2 ->
           sorec ctx env subst c1 c2
 
       | PProd (na1,c1,d1), Prod(na2,c2,d2) ->
@@ -405,7 +405,7 @@ let matches_core env sigma allow_bound_rels
             raise PatternMatchingFailure
 
       | PCase (ci1, p1, a1, br1), Case (ci2, u2, pms2, p2, iv, a2, br2) ->
-          let (_, _, _, p2, _, _, br2) = EConstr.annotate_case env sigma (ci2, u2, pms2, p2, iv, a2, br2) in
+          let (_, _, _, (p2,_), _, _, br2) = EConstr.annotate_case env sigma (ci2, u2, pms2, p2, iv, a2, br2) in
           let n2 = Array.length br2 in
           let () = match ci1.cip_ind with
           | None -> ()
@@ -471,13 +471,18 @@ let matches_core env sigma allow_bound_rels
 
       | PFloat f1, Float f2 when Float64.equal f1 f2 -> subst
 
+      | PString s1, String s2 when Pstring.equal s1 s2 -> subst
+
       | PArray(pt,pdef,pty), Array(_u,t,def,ty)
              when Array.length pt = Array.length t ->
          sorec ctx env (sorec ctx env (Array.fold_left2 (sorec ctx env) subst pt t) pdef def) pty ty
 
       | (PRef _ | PVar _ | PRel _ | PApp _ | PProj _ | PLambda _
          | PProd _ | PLetIn _ | PSort _ | PIf _ | PCase _
-         | PFix _ | PCoFix _| PEvar _ | PInt _ | PFloat _ | PArray _), _ -> raise PatternMatchingFailure
+         | PFix _ | PCoFix _| PEvar _ | PInt _ | PFloat _
+         | PString _ | PArray _), _ -> raise PatternMatchingFailure
+
+      | PUninstantiated _, _ -> .
 
   in
   sorec [] env ((Id.Map.empty,Id.Set.empty), Id.Map.empty) pat c
@@ -577,7 +582,7 @@ let sub_match ?(closed=true) env sigma pat c =
      try_aux [(env, app); (env, Array.last lc)] mk_ctx next
   | Case (ci,u,pms,hd0,iv,c1,lc0) ->
       let (mib, mip) = Inductive.lookup_mind_specif env ci.ci_ind in
-      let (_, hd, _, _, br) = expand_case env sigma (ci, u, pms, hd0, iv, c1, lc0) in
+      let (_, (hd,hdr), _, _, br) = expand_case env sigma (ci, u, pms, hd0, iv, c1, lc0) in
       let hd =
         let (ctx, hd) = decompose_lambda_decls sigma hd in
         (push_rel_context ctx env, hd)
@@ -593,9 +598,9 @@ let sub_match ?(closed=true) env sigma pat c =
         let pms, rem = List.chop (Array.length pms) rem in
         let pms = Array.of_list pms in
         let hd, lc = match rem with [] -> assert false | x :: l -> (x, l) in
-        let hd = (fst hd0, hd) in
+        let hd = (fst (fst hd0), hd) in
         let map_br (nas, _) br = (nas, br) in
-        mk_ctx (mkCase (ci,u,pms,hd,iv,c1,Array.map2 map_br lc0 (Array.of_list lc)))
+        mk_ctx (mkCase (ci,u,pms,(hd,hdr),iv,c1,Array.map2 map_br lc0 (Array.of_list lc)))
       | _ -> assert false
       in
       let sub = (env, c1) :: Array.fold_right (fun c accu -> (env, c) :: accu) pms (hd :: lc) in
@@ -616,7 +621,7 @@ let sub_match ?(closed=true) env sigma pat c =
     let env' = push_rec_types recdefs env in
     let sub = subargs env types @ subargs env' bodies in
     try_aux sub next_mk_ctx next
-  | Proj (p,c') ->
+  | Proj (p,_,c') ->
     begin match Retyping.expand_projection env sigma p c' [] with
     | term -> aux env term mk_ctx next
     | exception Retyping.RetypeError _ -> next ()
@@ -628,7 +633,7 @@ let sub_match ?(closed=true) env sigma pat c =
     in
     let sub = (env,def) :: (env,ty) :: subargs env t in
     try_aux sub next_mk_ctx next
-  | Construct _|Ind _|Evar _|Const _|Rel _|Meta _|Var _|Sort _|Int _|Float _ ->
+  | Construct _|Ind _|Evar _|Const _|Rel _|Meta _|Var _|Sort _|Int _|Float _|String _ ->
     next ()
   in
   here next

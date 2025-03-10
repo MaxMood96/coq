@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -14,8 +14,8 @@ Require Import ssreflect.
 Require Import ssrbool.
 Require Import TestSuite.ssr_mini_mathcomp.
 
-Variable T : Type.
-Variables P : T -> Prop.
+Parameter T : Type.
+Parameters P : T -> Prop.
 
 Definition f := fun x y : T => x.
 

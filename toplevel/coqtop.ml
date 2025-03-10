@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,8 +11,8 @@
 open Pp
 open Coqargs
 
-(** This file provides generic support for Coq executables + specific
-    support for the coqtop executable *)
+(** This file provides generic support for Rocq executables + specific
+    support for the rocq repl executable *)
 
 let () = at_exit flush_all
 
@@ -26,10 +26,10 @@ let get_version ~boot =
     let rev = input_line ch in
     let () = close_in ch in
     Printf.sprintf "%s (%s)" ver rev
-  with _ -> Coq_config.version
+  with Sys_error _ | End_of_file -> Coq_config.version
 
 let print_header ~boot () =
-  Feedback.msg_info (str "Welcome to Coq " ++ str (get_version ~boot));
+  Feedback.msg_info (str "Welcome to Rocq " ++ str (get_version ~boot));
   flush_all ()
 
 
@@ -48,7 +48,7 @@ let fatal_error_exn exn =
   exit exit_code
 
 type ('a,'b) custom_toplevel =
-  { parse_extra : string list -> 'a * string list
+  { parse_extra : Coqargs.t -> string list -> 'a * string list
   ; usage : Boot.Usage.specific_usage
   ; init_extra : 'a -> Coqargs.injection_command list -> opts:Coqargs.t -> 'b
   ; initial_args : Coqargs.t
@@ -56,21 +56,22 @@ type ('a,'b) custom_toplevel =
   }
 
 (** Main init routine *)
-let init_toplevel { parse_extra; init_extra; usage; initial_args } =
+let init_toplevel { parse_extra; init_extra; usage; initial_args } args =
   Coqinit.init_ocaml ();
-  let opts, customopts = Coqinit.parse_arguments ~parse_extra ~usage ~initial_args () in
+  let opts, customopts = Coqinit.parse_arguments ~parse_extra ~initial_args args in
   Stm.init_process (snd customopts);
-  let injections = Coqinit.init_runtime opts in
+  let () = Coqinit.init_runtime ~usage opts in
+  let () = Coqinit.init_document opts in
   (* This state will be shared by all the documents *)
   Stm.init_core ();
-  let customstate = init_extra ~opts customopts injections in
+  let customstate = init_extra ~opts customopts (Coqargs.injection_commands opts) in
   opts, customopts, customstate
 
-let start_coq custom =
+let start_coq custom args =
   let init_feeder = Feedback.add_feeder Coqloop.coqloop_feed in
   (* Init phase *)
   let opts, custom_opts, state =
-    try init_toplevel custom
+    try init_toplevel custom args
     with any ->
       flush_all();
       fatal_error_exn any in
@@ -79,7 +80,7 @@ let start_coq custom =
   custom.run ~opts custom_opts state
 
 (** ****************************************)
-(** Specific support for coqtop executable *)
+(** Specific support for rocq repl executable *)
 
 let ltac_debug_answer = let open DebugHook.Answer in function
     | Prompt prompt ->
@@ -113,7 +114,7 @@ type toplevel_options = {
 }
 
 let init_document opts stm_options injections =
-  (* Coq init process, phase 3: Stm initialization, backtracking state.
+  (* Rocq init process, phase 3: Stm initialization, backtracking state.
 
      It is essential that the module system is in a consistent
      state before we take the first snapshot. This was not
@@ -136,7 +137,7 @@ let init_toploop opts stm_opts injections =
 
 let coqtop_init ({ run_mode; color_mode }, async_opts) injections ~opts =
   if run_mode != Interactive then Flags.quiet := true;
-  Colors.init_color (if opts.config.print_emacs then `EMACS else color_mode);
+  Colors.init_color color_mode;
   Flags.if_verbose (print_header ~boot:opts.pre.boot) ();
   DebugHook.Intf.(set
     { read_cmd = ltac_debug_parse
@@ -145,16 +146,17 @@ let coqtop_init ({ run_mode; color_mode }, async_opts) injections ~opts =
     });
   init_toploop opts async_opts injections
 
-let coqtop_parse_extra extras =
+let coqtop_parse_extra opts extras =
   let rec parse_extra run_mode  = function
   | "-batch" :: rest -> parse_extra Batch  rest
+  | "-list-tags" :: rest -> Query PrintTags, []
   | "-print-mod-uid" :: rest -> Query (PrintModUid rest), []
   |   x :: rest ->
     let run_mode, rest = parse_extra run_mode rest in run_mode, x :: rest
   | [] -> run_mode, [] in
   let run_mode, extras = parse_extra Interactive extras in
-  let color_mode, extras = Colors.parse_extra_colors extras in
-  let async_opts, extras = Stmargs.parse_args ~init:Stm.AsyncOpts.default_opts extras in
+  let color_mode, extras = Colors.parse_extra_colors ~emacs:opts.config.print_emacs extras in
+  let async_opts, extras = Stmargs.parse_args opts extras in
   ({ run_mode; color_mode}, async_opts), extras
 
 let fix_windows_dirsep s =
@@ -173,7 +175,7 @@ let get_native_name s =
 
 let coqtop_run ({ run_mode; color_mode },_) ~opts state =
   match run_mode with
-  | Interactive -> Coqloop.loop ~opts ~state;
+  | Interactive -> Coqloop.run ~opts ~state;
   | Query PrintTags -> Colors.print_style_tags color_mode; exit 0
   | Query (PrintModUid sl) ->
       let s = String.concat " " (List.map get_native_name sl) in
@@ -182,10 +184,10 @@ let coqtop_run ({ run_mode; color_mode },_) ~opts state =
   | Batch -> exit 0
 
 let coqtop_specific_usage = Boot.Usage.{
-  executable_name = "coqtop";
+  executable_name = "rocq repl";
   extra_args = "";
   extra_options = "\n\
-coqtop specific options:\n\
+rocq repl specific options:\n\
 \n  -batch                 batch mode (exits after interpretation of command line)\
 \n"
 }

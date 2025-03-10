@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -166,7 +166,7 @@ val solve_pattern_eqn : env -> evar_map -> alias list -> constr -> constr
 
 val noccur_evar : env -> evar_map -> Evar.t -> constr -> bool
 
-exception IllTypedInstance of env * evar_map * types * types
+exception IllTypedInstance of env * evar_map * types option * types
 
 val check_evar_instance : unifier -> unify_flags ->
   env -> evar_map -> Evar.t -> constr -> evar_map
@@ -176,5 +176,7 @@ val remove_instance_local_defs :
   evar_map -> Evar.t -> 'a list -> 'a list
 
 val get_type_of_refresh :
-  ?polyprop:bool -> ?lax:bool -> env -> evar_map -> constr
+  ?lax:bool -> env -> evar_map -> constr
   -> evar_map * types
+
+val checked_appvect_hook : (env -> evar_map -> constr -> constr array -> evar_map * constr) Hook.t

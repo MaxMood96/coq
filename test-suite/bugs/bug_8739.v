@@ -1,11 +1,11 @@
-Require Coq.Program.Program.
-Require Coq.Classes.CMorphisms.
+Require Program.Basics Program.Tactics.
+Require Corelib.Classes.CMorphisms.
 Require Setoid.
 
-Export Coq.Program.Program.
+Export Program.Basics Program.Tactics.
 Delimit Scope category_theory_scope with category_theory.
 Open Scope category_theory_scope.
-Export Coq.Classes.CMorphisms.
+Export Corelib.Classes.CMorphisms.
 
 Notation "∀  x .. y , P" := (forall x, .. (forall y, P) ..)
   (at level 200, x binder, y binder, right associativity) :
@@ -16,7 +16,7 @@ Notation "x → y" := (x -> y)
 
 Class Setoid A := {
   equiv : crelation A;
-  setoid_equiv :> Equivalence equiv
+  setoid_equiv :: Equivalence equiv
 }.
 
 Notation "f ≈ g" := (equiv f g) (at level 79) : category_theory_scope.
@@ -28,13 +28,13 @@ Class Category := {
 
   uhom := Type : Type;
   hom : obj -> obj -> uhom where "a ~> b" := (hom a b);
-  homset :> ∀ X Y, Setoid (X ~> Y);
+  homset :: ∀ X Y, Setoid (X ~> Y);
 
   id {x} : x ~> x;
   compose {x y z} (f: y ~> z) (g : x ~> y) : x ~> z
     where "f ∘ g" := (compose f g);
 
-  compose_respects x y z :>
+  compose_respects x y z ::
     Proper (equiv ==> equiv ==> equiv) (@compose x y z);
 
   dom {x y} (f: x ~> y) := x;
@@ -66,10 +66,10 @@ Open Scope category_scope.
 Open Scope homset_scope.
 Open Scope morphism_scope.
 
-Context {C : Category}.
+#[warning="context-outside-section"] Context {C : Category}.
 
 Class Isomorphism (x y : C) : Type := {
-  to   :> x ~> y;
+  to   :: x ~> y;
   from :  y ~> x;
 
   iso_to_from : to ∘ from ≈ id;

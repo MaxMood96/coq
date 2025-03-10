@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -32,7 +32,7 @@ Ltac show_hyps :=
         | [ H : ?T |- _ ] => show_hyp H ; fail
       end.
 
-(** The [do] tactic but using a Coq-side nat. *)
+(** The [do] tactic but using a Rocq-side nat. *)
 
 Ltac do_nat n tac :=
   match n with
@@ -169,14 +169,6 @@ Ltac on_application f tac T :=
     | context [f ?x ?y] => tac (f x y)
     | context [f ?x] => tac (f x)
   end.
-
-(** A variant of [apply] using [refine], doing as much conversion as necessary. *)
-
-Ltac rapply p :=
-  (** before we try to add more underscores, first ensure that adding such underscores is valid *)
-  (assert_succeeds (idtac; let __ := open_constr:(p _) in idtac);
-   rapply uconstr:(p _))
-  || refine p.
 
 (** Tactical [on_call f tac] applies [tac] on any application of [f] in the hypothesis or goal. *)
 

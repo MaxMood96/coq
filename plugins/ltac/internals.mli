@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -29,7 +29,7 @@ val mytclWithHoles : (Tactics.evars_flag ->
 
 val with_delayed_uconstr : Tacinterp.interp_sign ->
   closed_glob_constr -> (EConstr.constr -> unit tactic) -> unit tactic
-val replace_in_clause_maybe_by : Tacinterp.interp_sign ->
+val replace_in_clause_maybe_by : Tacinterp.interp_sign -> bool option ->
   closed_glob_constr -> EConstr.constr ->
   Locus.clause -> Tacinterp.Value.t option -> unit tactic
 val replace_term : Geninterp.interp_sign -> bool option -> closed_glob_constr ->
@@ -37,7 +37,7 @@ val replace_term : Geninterp.interp_sign -> bool option -> closed_glob_constr ->
 
 val discrHyp : Names.Id.t -> unit tactic
 val injHyp : Names.Id.t -> unit tactic
-(* TODO: remove these, they are not used from within Coq *)
+(* TODO: remove these, they are not used from within Rocq *)
 
 val refine_tac : Tacinterp.interp_sign -> simple:bool -> with_classes:bool ->
   closed_glob_constr -> unit tactic

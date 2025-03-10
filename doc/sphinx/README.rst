@@ -223,16 +223,16 @@ Coq directives
 
 In addition to the objects above, the ``coqrst`` Sphinx plugin defines the following directives:
 
-``.. coqtop::`` A reST directive to describe interactions with Coqtop.
+``.. rocqtop::`` A reST directive to describe interactions with Coqtop.
     Usage::
 
-       .. coqtop:: options…
+       .. rocqtop:: options…
 
           Coq code to send to coqtop
 
     Example::
 
-       .. coqtop:: in reset
+       .. rocqtop:: in reset
 
           Print nat.
           Definition a := 1.
@@ -256,21 +256,25 @@ In addition to the objects above, the ``coqrst`` Sphinx plugin defines the follo
       - ``warn``: Don't die if a command emits a warning
       - ``restart``: Send a ``Restart`` command before running this block (only works in proof mode)
       - ``abort``: Send an ``Abort All`` command after running this block (leaves all pending proofs if any)
+      - ``extra-foo``: if environment variable 'COQRST_EXTRA' is set to `all`
+        or to a `,`-separated list containing `foo` this is ignored, otherwise behaves as ``fail``
+        This is typically used to showcase examples of things outside coq-core or rocq-core.
+        `foo` should be the name of the external requirement, e.g. `stdlib` or `mathcomp`.
 
-    ``coqtop``\ 's state is preserved across consecutive ``.. coqtop::`` blocks
+    ``coqtop``\ 's state is preserved across consecutive ``.. rocqtop::`` blocks
     of the same document (``coqrst`` creates a single ``coqtop`` process per
     reST source file).  Use the ``reset`` option to reset Coq's state.
 
-``.. coqdoc::`` A reST directive to display Coqtop-formatted source code.
+``.. rocqdoc::`` A reST directive to display Coqtop-formatted source code.
     Usage::
 
-       .. coqdoc::
+       .. rocqdoc::
 
           Coq code to highlight
 
     Example::
 
-       .. coqdoc::
+       .. rocqdoc::
 
           Definition test := 1.
 
@@ -288,7 +292,7 @@ In addition to the objects above, the ``coqrst`` Sphinx plugin defines the follo
 
           The following adds ``plus_comm`` to the ``plu`` database:
 
-          .. coqdoc::
+          .. rocqdoc::
 
              Hint Resolve plus_comm : plu.
 
@@ -451,7 +455,7 @@ DON'T
 
      .. tacv:: assert form as simple_intropattern
 
-Using the ``.. coqtop::`` directive for syntax highlighting
+Using the ``.. rocqtop::`` directive for syntax highlighting
 -----------------------------------------------------------
 
 DO
@@ -459,13 +463,13 @@ DO
 
      A tactic of the form:
 
-     .. coqdoc::
+     .. rocqdoc::
 
         do [ t1 | … | tn ].
 
      is equivalent to the standard Ltac expression:
 
-     .. coqdoc::
+     .. rocqdoc::
 
         first [ t1 | … | tn ].
 
@@ -474,13 +478,13 @@ DON'T
 
      A tactic of the form:
 
-     .. coqtop:: in
+     .. rocqtop:: in
 
         do [ t1 | … | tn ].
 
      is equivalent to the standard Ltac expression:
 
-     .. coqtop:: in
+     .. rocqtop:: in
 
         first [ t1 | … | tn ].
 
@@ -509,7 +513,7 @@ DO
 
      Here is a useful axiom:
 
-     .. coqdoc::
+     .. rocqdoc::
 
         Axiom proof_irrelevance : forall (P : Prop) (x y : P), x=y.
 
@@ -527,7 +531,7 @@ DON'T
 
      .. example::
 
-        .. coqdoc::
+        .. rocqdoc::
 
            Axiom proof_irrelevance : forall (P : Prop) (x y : P), x=y.
 
@@ -537,13 +541,13 @@ Tips and tricks
 Nested lemmas
 -------------
 
-The ``.. coqtop::`` directive does *not* reset Coq after running its contents.  That is, the following will create two nested lemmas (which by default results in a failure)::
+The ``.. rocqtop::`` directive does *not* reset Coq after running its contents.  That is, the following will create two nested lemmas (which by default results in a failure)::
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       Lemma l1: 1 + 1 = 2.
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       Lemma l2: 2 + 2 <> 1.
 

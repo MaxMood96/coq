@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -17,5 +17,5 @@ val lemInv_clause :
   quantified_hypothesis -> constr -> Id.t list -> unit Proofview.tactic
 
 val add_inversion_lemma_exn : poly:bool ->
-  Id.t -> constr_expr -> Sorts.family -> bool -> (Id.t -> unit Proofview.tactic) ->
+  lident -> constr_expr -> Sorts.family -> bool -> (Id.t -> unit Proofview.tactic) ->
     unit

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -71,19 +71,31 @@ Ltac2 cons (x : 'a) (xs : 'a list) :=
 Ltac2 hd_opt (ls : 'a list) :=
   match ls with
   | [] => None
-  | x :: xs => Some x
+  | x :: _ => Some x
   end.
 
 Ltac2 hd (ls : 'a list) :=
   match ls with
   | [] => Control.throw_invalid_argument "List.hd"
-  | x :: xs => x
+  | x :: _ => x
   end.
 
 Ltac2 tl (ls : 'a list) :=
   match ls with
   | [] => []
-  | x :: xs => xs
+  | _ :: xs => xs
+  end.
+
+Ltac2 dest (xs : 'a list) : 'a * 'a list :=
+  match xs with
+  | x :: xs => (x, xs)
+  | [] => Control.throw_invalid_argument "List.dest: list empty"
+  end.
+
+Ltac2 is_empty (xs : 'a list) : bool :=
+  match xs with
+  | _ :: _ => false
+  | _ => true
   end.
 
 Ltac2 rec last_opt (ls : 'a list) :=
@@ -199,17 +211,25 @@ Ltac2 rev_map (f : 'a -> 'b) (ls : 'a list) :=
       end in
   rmap_f [] ls.
 
-Ltac2 rec fold_right (f : 'a -> 'b -> 'b) (a : 'b) (ls : 'a list) :=
+Ltac2 rec fold_right (f : 'a -> 'b -> 'b) (ls : 'a list) (a : 'b) : 'b :=
   match ls with
   | [] => a
-  | l :: ls => f l (fold_right f a ls)
+  | l :: ls => f l (fold_right f ls a)
   end.
 
-Ltac2 rec fold_left (f : 'a -> 'b -> 'a) (xs : 'b list) (a : 'a) :=
+Ltac2 rec fold_left (f : 'a -> 'b -> 'a) (a : 'a) (xs : 'b list) : 'a :=
   match xs with
   | [] => a
-  | x :: xs => fold_left f xs (f a x)
+  | x :: xs => fold_left f (f a x) xs
   end.
+
+Ltac2 fold_lefti (f : int -> 'a -> 'b -> 'a) (a : 'a) (xs : 'b list) : 'a :=
+  let rec go i a xs :=
+    match xs with
+    | [] => a
+    | x :: xs => go (Int.add i 1) (f i a x) xs
+    end
+  in go 0 a xs.
 
 Ltac2 rec iter2 (f : 'a -> 'b -> unit) (ls1 : 'a list) (ls2 : 'b list) :=
   match ls1 with
@@ -259,7 +279,7 @@ Ltac2 rev_map2 (f : 'a -> 'b -> 'c) (ls1 : 'a list) (ls2 : 'b list) :=
       end in
   rmap2_f [] ls1 ls2.
 
-Ltac2 rec fold_right2 (f : 'a -> 'b -> 'c -> 'c) (a : 'c) (ls1 : 'a list) (ls2 : 'b list) :=
+Ltac2 rec fold_right2 (f : 'a -> 'b -> 'c -> 'c) (ls1 : 'a list) (ls2 : 'b list) (a : 'c) :=
   match ls1 with
   | []
     => match ls2 with
@@ -270,11 +290,11 @@ Ltac2 rec fold_right2 (f : 'a -> 'b -> 'c -> 'c) (a : 'c) (ls1 : 'a list) (ls2 :
     => match ls2 with
        | [] => Control.throw_invalid_argument "List.fold_right2"
        | l2 :: ls2
-         => f l1 l2 (fold_right2 f a ls1 ls2)
+         => f l1 l2 (fold_right2 f ls1 ls2 a)
        end
   end.
 
-Ltac2 rec fold_left2 (f : 'a -> 'b -> 'c -> 'a) (ls1 : 'b list) (ls2 : 'c list) (a : 'a) :=
+Ltac2 rec fold_left2 (f : 'a -> 'b -> 'c -> 'a)  (a : 'a) (ls1 : 'b list) (ls2 : 'c list) :=
   match ls1 with
   | []
     => match ls2 with
@@ -285,7 +305,7 @@ Ltac2 rec fold_left2 (f : 'a -> 'b -> 'c -> 'a) (ls1 : 'b list) (ls2 : 'c list) 
     => match ls2 with
        | [] => Control.throw_invalid_argument "List.fold_left2"
        | l2 :: ls2
-         => fold_left2 f ls1 ls2 (f a l1 l2)
+         => fold_left2 f (f a l1 l2) ls1 ls2
        end
   end.
 
@@ -312,7 +332,7 @@ Ltac2 rec for_all2_aux (on_length_mismatch : 'a list -> 'b list -> bool) f xs ys
   match xs with
   | [] => match ys with
           | [] => true
-          | y :: ys' => on_length_mismatch xs ys
+          | _ :: _ => on_length_mismatch xs ys
           end
   | x :: xs'
     => match ys with
@@ -332,7 +352,7 @@ Ltac2 rec exist2 f xs ys :=
   match xs with
   | [] => match ys with
           | [] => false
-          | y :: ys' => Control.throw_invalid_argument "List.exist2"
+          | _ :: _ => Control.throw_invalid_argument "List.exist2"
           end
   | x :: xs'
     => match ys with
@@ -402,7 +422,7 @@ Ltac2 remove (eqb : 'a -> 'a -> bool) (x : 'a) (ls : 'a list) :=
 Ltac2 count_occ (eqb : 'a -> 'a -> bool) (x : 'a) (ls : 'a list) :=
   length (filter (eqb x) ls).
 
-(* from the Coq stdlib *)
+(* from the Rocq stdlib *)
 Ltac2 rec list_power (ls1 : 'a list) (ls2 : 'b list) :=
   match ls1 with
   | [] => [] :: []
@@ -422,7 +442,7 @@ Ltac2 rec partition (f : 'a -> bool) (l : 'a list) :=
        end
   end.
 
-(* from the Coq stdlib *)
+(* from the Rocq stdlib *)
 (** [list_prod] has the same signature as [combine], but unlike
      [combine], it adds every possible pairs, not only those at the
      same position. *)
@@ -453,7 +473,7 @@ Ltac2 rec skipn (n : int) (ls : 'a list) :=
   | false
     => match ls with
        | [] => Control.throw_out_of_bounds "List.skipn"
-       | x :: xs
+       | _ :: xs
          => skipn (Int.sub n 1) xs
        end
   end.
@@ -487,7 +507,7 @@ Ltac2 init (len : int) (f : int -> 'a) :=
   Control.assert_valid_argument "List.init" (Int.ge len 0);
   map f (seq 0 1 len).
 
-Ltac2 repeat (x : 'a) (n : 'int) :=
+Ltac2 repeat (x : 'a) (n : int) :=
   init n (fun _ => x).
 
 Ltac2 assoc (eqk : 'k -> 'k -> bool) (k : 'k) (l : ('k * 'v) list) :=
@@ -537,8 +557,8 @@ Ltac2 rec combine (ls1 : 'a list) (ls2 : 'b list) :=
 Ltac2 enumerate (ls : 'a list) :=
   combine (seq 0 1 (length ls)) ls.
 
-(* from Coq stdlib *)
-Ltac2 rec merge (cmp : 'a -> 'a -> int) (l1 : 'a list) (l2 : 'b list) :=
+(* from Rocq stdlib *)
+Ltac2 rec merge (cmp : 'a -> 'a -> int) (l1 : 'a list) (l2 : 'a list) :=
   let rec merge_aux l2 :=
       match l1 with
       | [] => l2
@@ -599,3 +619,38 @@ Ltac2 sort_uniq (cmp : 'a -> 'a -> int) (l : 'a list) :=
            end
       end in
   uniq (sort cmp l).
+
+Ltac2 inclusive_range (lb : int) (ub : int) : int list :=
+  let rec go lb ub :=
+    if Int.gt lb ub then [] else lb :: go (Int.add lb 1) ub
+  in
+  go lb ub.
+
+Ltac2 range (lb : int) (ub : int) : int list :=
+  inclusive_range lb (Int.sub ub 1).
+
+(** [concat_rev [x1; ..; xN-1; xN]] computes [rev xN ++ rev xN-1 ++ .. x1].
+    Note that [x1] is not reversed and appears in its original order.
+    [concat_rev] is faster than [concat] and should be preferred over [concat]
+    when the order of items does not matter. *)
+Ltac2 concat_rev (ls : 'a list list) : 'a list :=
+  let rec go ls acc :=
+    match ls with
+    | [] => acc
+    | l :: ls => go ls (rev_append l acc)
+    end
+  in
+  match ls with
+  | [] => []
+  | l :: ls => go ls l
+  end.
+
+Ltac2 rec map_filter (f : 'a -> 'b option) (l : 'a list) : 'b list :=
+  match l with
+  | [] => []
+  | x :: l =>
+    match f x with
+    | Some y => y :: map_filter f l
+    | None => map_filter f l
+    end
+  end.

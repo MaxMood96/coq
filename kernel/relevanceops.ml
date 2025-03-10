@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -9,7 +9,6 @@
 (************************************************************************)
 
 open Util
-open Names
 open Constr
 open Declarations
 open Environ
@@ -25,19 +24,25 @@ let relevance_of_var env x =
   let decl = lookup_named x env in
   Context.Named.Declaration.get_relevance decl
 
-let relevance_of_constant env c =
+let relevance_of_constant env (c,u) =
   let decl = lookup_constant c env in
-  decl.const_relevance
+  UVars.subst_instance_relevance u decl.const_relevance
 
-let relevance_of_constructor env ((mi,i),_) =
-  let decl = lookup_mind mi env in
-  let packet = decl.mind_packets.(i) in
-  packet.mind_relevance
+let relevance_of_constructor env ((ind,_),u) =
+  Inductive.relevance_of_inductive env (ind,u)
 
-let relevance_of_projection env p =
-  let mind = Projection.mind p in
-  let mib = lookup_mind mind env in
-  Declareops.relevance_of_projection_repr mib (Projection.repr p)
+let relevance_of_projection_repr env (p, u) =
+  let mib = lookup_mind (Names.Projection.Repr.mind p) env in
+  let _mind,i = Names.Projection.Repr.inductive p in
+  match mib.mind_record with
+  | NotRecord | FakeRecord ->
+    CErrors.anomaly ~label:"relevance_of_projection" Pp.(str "not a projection")
+  | PrimRecord infos ->
+    let _,_,rs,_ = infos.(i) in
+    UVars.subst_instance_relevance u rs.(Names.Projection.Repr.arg p)
+
+let relevance_of_projection env (p,u) =
+  relevance_of_projection_repr env (Names.Projection.repr p,u)
 
 let rec relevance_of_term_extra env extra lft c =
   match kind c with
@@ -52,13 +57,13 @@ let rec relevance_of_term_extra env extra lft c =
   | LetIn ({binder_relevance=r;_}, _, _, bdy) ->
     relevance_of_term_extra env (Range.cons r extra) (lft + 1) bdy
   | App (c, _) -> relevance_of_term_extra env extra lft c
-  | Const (c,_) -> relevance_of_constant env c
-  | Construct (c,_) -> relevance_of_constructor env c
-  | Case (ci, _, _, _, _, _, _) -> ci.ci_relevance
+  | Const c -> relevance_of_constant env c
+  | Construct c -> relevance_of_constructor env c
+  | Case (_, _, _, (_, r), _, _, _) -> r
   | Fix ((_,i),(lna,_,_)) -> (lna.(i)).binder_relevance
   | CoFix (i,(lna,_,_)) -> (lna.(i)).binder_relevance
-  | Proj (p, _) -> relevance_of_projection env p
-  | Int _ | Float _ -> Sorts.Relevant
+  | Proj (_, r, _) -> r
+  | Int _ | Float _ | String _ -> Sorts.Relevant
   | Array _ -> Sorts.Relevant
 
   | Meta _ | Evar _ -> Sorts.Relevant (* let's assume metas and evars are relevant for now *)

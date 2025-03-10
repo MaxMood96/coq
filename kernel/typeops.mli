@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -10,7 +10,6 @@
 
 open Names
 open Constr
-open Univ
 open Environ
 
 (** {6 Typing functions (not yet tagged as safe) }
@@ -24,6 +23,7 @@ open Environ
    Do not discard the result. *)
 
 val infer      : env -> constr       -> unsafe_judgment
+val infer_hconstr : env -> HConstr.t -> unsafe_judgment
 val infer_type : env -> types        -> unsafe_type_judgment
 
 val check_context :
@@ -35,64 +35,33 @@ val check_context :
    returns the type {% $ %}c{% $ %}, checking that {% $ %}t{% $ %} is a sort. *)
 
 val assumption_of_judgment :  env -> unsafe_judgment -> Sorts.relevance
-val type_judgment          :  env -> unsafe_judgment -> unsafe_type_judgment
 
 (** {6 Type of sorts. } *)
 val type1 : types
 val type_of_sort : Sorts.t -> types
-val judge_of_prop : unsafe_judgment
-val judge_of_set  : unsafe_judgment
-val judge_of_type           : Universe.t -> unsafe_judgment
 
 (** {6 Type of a bound variable. } *)
 val type_of_relative : env -> int -> types
-val judge_of_relative : env -> int -> unsafe_judgment
 
 (** {6 Type of variables } *)
 val type_of_variable : env -> variable -> types
-val judge_of_variable : env -> variable -> unsafe_judgment
 
 (** {6 type of a constant } *)
 val type_of_constant_in : env -> pconstant -> types
-val judge_of_constant : env -> pconstant -> unsafe_judgment
 
 (** {6 type of an applied projection } *)
-val judge_of_projection : env -> Projection.t -> unsafe_judgment -> unsafe_judgment
-
-(** {6 Type of application. } *)
-val judge_of_apply :
-  env -> unsafe_judgment -> unsafe_judgment array
-    -> unsafe_judgment
-
-(** {6 Type of an abstraction. } *)
-(* val judge_of_abstraction : *)
-(*   env -> Name.t -> unsafe_type_judgment -> unsafe_judgment *)
-(*     -> unsafe_judgment *)
+val type_of_projection : env -> Projection.t -> constr -> types -> Sorts.relevance * types
 
 (** {6 Type of a product. } *)
 val sort_of_product : env -> Sorts.t -> Sorts.t -> Sorts.t
-val type_of_product : env -> Name.t Context.binder_annot -> Sorts.t -> Sorts.t -> types
-(* val judge_of_product : *)
-(*   env -> Name.t -> unsafe_type_judgment -> unsafe_type_judgment *)
-(*     -> unsafe_judgment *)
-
-(** s Type of a let in. *)
-(* val judge_of_letin : *)
-(*   env -> Name.t -> unsafe_judgment -> unsafe_type_judgment -> unsafe_judgment *)
-(*     -> unsafe_judgment *)
 
 (** {6 Type of a cast. } *)
-val judge_of_cast :
-  env -> unsafe_judgment -> cast_kind -> unsafe_type_judgment ->
-  unsafe_judgment
-
-(** {6 Inductive types. } *)
-val judge_of_inductive : env -> inductive puniverses -> unsafe_judgment
-val judge_of_constructor : env -> constructor puniverses -> unsafe_judgment
+val check_cast :
+  env -> unsafe_judgment -> cast_kind -> unsafe_type_judgment -> unit
 
 (** {6 Type of global references. } *)
 
-val type_of_global_in_context : env -> GlobRef.t -> types * Univ.AbstractContext.t
+val type_of_global_in_context : env -> GlobRef.t -> types * UVars.AbstractContext.t
 (** Returns the type of the global reference, by creating a fresh
     instance of polymorphic references and computing their
     instantiated universe context. The type should not be used
@@ -103,37 +72,19 @@ val type_of_global_in_context : env -> GlobRef.t -> types * Univ.AbstractContext
 (** {6 Miscellaneous. } *)
 
 (** Check that hyps are included in env and fails with error otherwise *)
-val check_hyps_inclusion : env -> ?evars:constr evar_handler ->
+val check_hyps_inclusion : env -> ?evars:CClosure.evar_handler ->
   GlobRef.t -> Constr.named_context -> unit
 
 (** Types for primitives *)
 
 val type_of_int : env -> types
-val judge_of_int : env -> Uint63.t -> unsafe_judgment
-
 val type_of_float : env -> types
-val judge_of_float : env -> Float64.t -> unsafe_judgment
+val type_of_string : env -> types
+val type_of_array : env -> UVars.Instance.t -> types
+val type_of_prim_type : env -> UVars.Instance.t -> 'a CPrimitives.prim_type -> types
+val type_of_prim : env -> UVars.Instance.t -> CPrimitives.t -> types
+val type_of_prim_or_type : env -> UVars.Instance.t -> CPrimitives.op_or_type -> types
 
-val type_of_array : env -> Univ.Instance.t -> types
-val judge_of_array : env -> Univ.Instance.t -> unsafe_judgment array -> unsafe_judgment -> unsafe_judgment
-
-val type_of_prim_type : env -> Univ.Instance.t -> 'a CPrimitives.prim_type -> types
-val type_of_prim : env -> Univ.Instance.t -> CPrimitives.t -> types
-val type_of_prim_or_type : env -> Univ.Instance.t -> CPrimitives.op_or_type -> types
-
-val warn_bad_relevance_name : string
-(** Allow the checker to make this warning into an error. *)
-
-val bad_relevance_warning : CWarnings.warning
-(** Also used by the pretyper to define a message which uses the evar map. *)
-
-type ('constr,'types) bad_relevance =
-| BadRelevanceBinder of Sorts.relevance * ('constr,'types) Context.Rel.Declaration.pt
-| BadRelevanceCase of Sorts.relevance * 'constr
-
-val bad_relevance_msg : (env * (constr,types) bad_relevance) CWarnings.msg
-(** Used by the higher layers to register a nicer printer than the default. *)
-
-val should_invert_case : env -> case_info -> bool
-(** We have case inversion exactly when going from irrelevant nonempty
-   (ie 1 constructor) inductive to relevant type. *)
+val should_invert_case : env -> Sorts.relevance -> case_info -> bool
+(** Matches must be annotated with the indices when going from SProp to non SProp
+    (implies 1 or 0 constructors). *)

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,7 +8,7 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-(** These are the notations whose level and associativity are imposed by Coq *)
+(** These are the notations whose level and associativity are imposed by Rocq *)
 
 (** Notations for propositional connectives *)
 
@@ -69,7 +69,9 @@ Reserved Notation "{ x }" (at level 0, x at level 99).
 
 (** Notations for sigma-types or subsets *)
 
+#[warning="-closed-notation-not-level-0"]
 Reserved Notation "{ A }  +  { B }" (at level 50, left associativity).
+#[warning="-postfix-notation-not-level-1"]
 Reserved Notation "A  +  { B }" (at level 50, left associativity).
 
 Reserved Notation "{ x | P }" (at level 0, x at level 99).
@@ -113,6 +115,11 @@ Notation "'if' c 'is' p 'then' u 'else' v" :=
   (at level 200, p pattern at level 100).
 
 End IfNotations.
+
+(** Notations for first and second projections *)
+
+Reserved Notation "p .1" (at level 1, left associativity, format "p .1").
+Reserved Notation "p .2" (at level 1, left associativity, format "p .2").
 
 (** Scopes *)
 

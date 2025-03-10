@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -77,10 +77,9 @@ val val_interp : interp_sign -> glob_tactic_expr -> (value -> unit Proofview.tac
 val interp_ltac_constr : interp_sign -> glob_tactic_expr -> (constr -> unit Proofview.tactic) -> unit Proofview.tactic
 
 (** Interprets redexp arguments *)
-val interp_red_expr : interp_sign -> Environ.env -> Evd.evar_map -> glob_red_expr -> Evd.evar_map * red_expr
+val interp_red_expr : interp_sign -> Environ.env -> Evd.evar_map -> Genredexpr.glob_red_expr -> Evd.evar_map * red_expr
 
-(** Interprets redexp arguments from a raw one *)
-val interp_redexp : Environ.env -> Evd.evar_map -> raw_red_expr -> Evd.evar_map * red_expr
+val interp_strategy : interp_sign -> Environ.env -> Evd.evar_map -> glob_strategy -> Rewrite.strategy
 
 (** Interprets tactic expressions *)
 

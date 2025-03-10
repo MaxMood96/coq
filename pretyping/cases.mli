@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -58,7 +58,7 @@ val constr_of_pat :
            Names.Id.Set.t ->
            Evd.evar_map * Glob_term.cases_pattern *
            (rel_context * constr *
-            (types * constr list) * Glob_term.cases_pattern) *
+            (types * Vars.substl) * Glob_term.cases_pattern) *
            Names.Id.Set.t
 
 type 'a rhs =

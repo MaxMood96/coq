@@ -31,6 +31,7 @@
 
 /dev/ci/nix          @coq/nix-maintainers
 *.nix                @coq/nix-maintainers
+/flake.lock          @coq/nix-maintainers
 
 /dev/ci/user-overlays/*.sh
 # Trick to avoid getting review requests
@@ -60,10 +61,10 @@
 /dev/doc/release-process.md   @coq/contributing-process-maintainers
 /dev/doc/shield-icon.png      @coq/contributing-process-maintainers
 /dev/doc/SProp.md             @coq/universes-maintainers
-/dev/doc/style.txt            @coq/contributing-process-maintainers
+/dev/doc/style.md             @coq/contributing-process-maintainers
 /dev/doc/unification.txt      @coq/pretyper-maintainers
 /dev/doc/universes.md         @coq/universes-maintainers
-/dev/doc/xml-protocol         @coq/stm-maintainers
+/dev/doc/xml-protocol.md      @coq/stm-maintainers
 
 /man/                  @coq/doc-maintainers
 
@@ -105,7 +106,7 @@
 /kernel/native*   @coq/vm-native-maintainers
 /kernel/vm*       @coq/vm-native-maintainers
 /kernel/vconv.*   @coq/vm-native-maintainers
-/kernel/genOpcodefiles.* @coq/vm-native-maintainers
+/kernel/genOpcodeFiles.* @coq/vm-native-maintainers
 
 /kernel/sorts.*   @coq/universes-maintainers
 /kernel/uGraph.*  @coq/universes-maintainers
@@ -125,42 +126,32 @@
 
 /theories/         @coq/stdlib-maintainers
 
-/theories/Classes/ @coq/typeclasses-maintainers
+/theories/Classes/        @coq/typeclasses-maintainers
 
-/theories/Reals/   @coq/reals-library-maintainers
 
 /theories/Compat/  @coq/compat-maintainers
 
-/plugins/btauto/       @coq/btauto-maintainers
-/theories/btauto/      @coq/btauto-maintainers
+/plugins/btauto/          @coq/btauto-maintainers
 
 /plugins/cc/           @coq/cc-maintainers
-/theories/cc/          @coq/cc-maintainers
 
 /plugins/derive/       @coq/derive-maintainers
 /theories/derive/      @coq/derive-maintainers
 
-/plugins/extraction/   @coq/extraction-maintainers
-/theories/extraction/  @coq/extraction-maintainers
+/plugins/extraction/         @coq/extraction-maintainers
+/theories/extraction/        @coq/extraction-maintainers
 
-/plugins/firstorder/   @coq/firstorder-maintainers
-/theories/firstorder/  @coq/firstorder-maintainers
+/plugins/firstorder/          @coq/firstorder-maintainers
 
 /plugins/funind/       @coq/funind-maintainers
-/theories/funind/      @coq/funind-maintainers
 
 /plugins/ltac/         @coq/ltac-maintainers
-/theories/ltac/        @coq/ltac-maintainers
 
 /plugins/micromega/    @coq/micromega-maintainers
-/theories/micromega/   @coq/micromega-maintainers
-/test-suite/micromega/ @coq/micromega-maintainers
 
 /plugins/nsatz/        @coq/nsatz-maintainers
-/theories/nsatz/       @coq/nsatz-maintainers
 
 /plugins/ring/  @coq/ring-maintainers
-/theories/setoid_ring/ @coq/ring-maintainers
 
 /plugins/ssrmatching/  @coq/ssreflect-maintainers
 /theories/ssrmatching/ @coq/ssreflect-maintainers
@@ -173,7 +164,6 @@
 /plugins/syntax/       @coq/parsing-maintainers
 
 /plugins/rtauto/       @coq/rtauto-maintainers
-/theories/rtauto/      @coq/rtauto-maintainers
 
 /plugins/ltac2/        @coq/ltac2-maintainers
 /user-contrib/Ltac2    @coq/ltac2-maintainers
@@ -216,7 +206,6 @@
 /plugins/syntax/number.ml            @coq/number-maintainers
 /plugins/syntax/number_string_notation_plugin.mllib  @coq/number-maintainers
 /user-contrib/Ltac2/Int.v            @coq/number-maintainers
-/test-suite/output/FloatExtraction*  @coq/number-maintainers
 /test-suite/output/*Number*          @coq/number-maintainers
 /test-suite/primitive/float/         @coq/number-maintainers
 /test-suite/primitive/sint63/        @coq/number-maintainers
@@ -225,13 +214,8 @@
 /theories/Init/Hexadecimal.v         @coq/number-maintainers
 /theories/Init/Nat.v                 @coq/number-maintainers
 /theories/Init/Number.v              @coq/number-maintainers
-/theories/*Arith/                    @coq/number-maintainers
 /theories/Numbers/                   @coq/number-maintainers
 /theories/Floats/                    @coq/number-maintainers
-/theories/extraction/Extr*Nat*       @coq/number-maintainers
-/theories/extraction/Extr*Z*         @coq/number-maintainers
-/theories/extraction/ExtrOCamlFloats.v  @coq/number-maintainers
-/theories/extraction/ExtrOCamlInt*   @coq/number-maintainers
 
 ########## Tools ##########
 
@@ -271,19 +255,14 @@
 /test-suite/report.sh       @coq/test-suite-maintainers
 /test-suite/unit-tests/src/ @coq/test-suite-maintainers
 
-/test-suite/complexity/ @herbelin
-
 /test-suite/success/Compat*.v @coq/compat-maintainers
 
 ########## Developer tools ##########
 
 /dev/tools/ @coq/dev-tools-maintainers
 
-/dev/tools/update-compat.py      @coq/compat-maintainers
-/test-suite/tools/update-compat/ @coq/compat-maintainers
-
 ########## Dune  ##########
 
 /.ocamlinit  @coq/build-maintainers
 *dune*       @coq/build-maintainers
-*.opam       @coq/build-maintainers
+*.opam       @coq/build-maintainers @erikmd

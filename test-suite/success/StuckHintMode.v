@@ -1,8 +1,8 @@
 
-Require Import Coq.Setoids.Setoid Coq.Classes.Morphisms.
+Require Import Corelib.Setoids.Setoid Corelib.Classes.Morphisms.
 
 Class PartialOrder {A} (R : relation A) : Prop := {
-  partial_order_pre :> PreOrder R;
+  partial_order_pre :: PreOrder R;
 }.
 Global Hint Mode PartialOrder - ! : typeclass_instances.
 

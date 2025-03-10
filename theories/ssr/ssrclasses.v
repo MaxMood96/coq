@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -15,7 +15,7 @@
  Note: this file does not require [ssreflect]; it is both required by
  [ssrsetoid] and required by [ssrunder].
 
- Redefine [Coq.Classes.RelationClasses.Reflexive] here, so that doing
+ Redefine [Corelib.Classes.RelationClasses.Reflexive] here, so that doing
  [Require Import ssreflect] does not [Require Import RelationClasses],
  and conversely. **)
 

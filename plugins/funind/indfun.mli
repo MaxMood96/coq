@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,5 +12,5 @@ val functional_induction :
      bool
   -> EConstr.constr
   -> (EConstr.constr * EConstr.constr Tactypes.bindings) option
-  -> Ltac_plugin.Tacexpr.or_and_intro_pattern option
+  -> Tactypes.or_and_intro_pattern option
   -> unit Proofview.tactic

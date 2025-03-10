@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -58,5 +58,5 @@ val wpsatz_Z : int -> Names.Id.t -> EConstr.t -> unit Proofview.tactic
 
 (** {5 Use Micromega independently from tactics. } *)
 
-(** [dump_proof_term] generates the Coq representation of a Micromega proof witness *)
+(** [dump_proof_term] generates the Rocq representation of a Micromega proof witness *)
 val dump_proof_term : Micromega.zArithProof -> EConstr.t

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -17,11 +17,11 @@ open Environ
 open EConstr
 
 (** about contexts *)
-val push_rel_assum : Name.t Context.binder_annot * types -> env -> env
-val push_rels_assum : (Name.t Context.binder_annot * Constr.types) list -> env -> env
-val push_named_rec_types : Name.t Context.binder_annot array * Constr.types array * 'a -> env -> env
+val push_rel_assum : Name.t EConstr.binder_annot * types -> env -> env
+val push_rels_assum : (Name.t Constr.binder_annot * Constr.types) list -> env -> env
+val push_named_rec_types : Name.t Constr.binder_annot array * Constr.types array * 'a -> env -> env
 
-val lookup_rel_id : Id.t -> ('c, 't) Context.Rel.pt -> int * 'c option * 't
+val lookup_rel_id : Id.t -> ('c, 't, 'r) Context.Rel.pt -> int * 'c option * 't
 (** Associates the contents of an identifier in a [rel_context]. Raise
     [Not_found] if there is no such identifier. *)
 
@@ -34,31 +34,31 @@ val rel_list : int -> int -> constr list
 (** Prod/Lambda/LetIn destructors on econstr *)
 
 val mkProd_or_LetIn : rel_declaration -> types -> types
-  [@@ocaml.deprecated "Use synonymous [EConstr.mkProd_or_LetIn]."]
+  [@@ocaml.deprecated "(8.17) Use synonymous [EConstr.mkProd_or_LetIn]."]
 
 val mkProd_wo_LetIn : rel_declaration -> types -> types
-  [@@ocaml.deprecated "Use synonymous [EConstr.mkProd_wo_LetIn]."]
+  [@@ocaml.deprecated "(8.17) Use synonymous [EConstr.mkProd_wo_LetIn]."]
 
-val it_mkProd : types -> (Name.t Context.binder_annot * types) list -> types
-  [@@ocaml.deprecated "Use synonymous [EConstr.it_mkProd]."]
+val it_mkProd : types -> (Name.t EConstr.binder_annot * types) list -> types
+  [@@ocaml.deprecated "(8.17) Use synonymous [EConstr.it_mkProd]."]
 
-val it_mkLambda : constr -> (Name.t Context.binder_annot * types) list -> constr
-  [@@ocaml.deprecated "Use synonymous [EConstr.it_mkLambda]."]
+val it_mkLambda : constr -> (Name.t EConstr.binder_annot * types) list -> constr
+  [@@ocaml.deprecated "(8.17) Use synonymous [EConstr.it_mkLambda]."]
 
 val it_mkProd_or_LetIn : types -> rel_context -> types
-  [@@ocaml.deprecated "Use synonymous [EConstr.it_mkProd_or_LetIn]."]
+  [@@ocaml.deprecated "(8.17) Use synonymous [EConstr.it_mkProd_or_LetIn]."]
 
 val it_mkProd_wo_LetIn : types -> rel_context -> types
-  [@@ocaml.deprecated "Use synonymous [EConstr.it_mkProd_wo_LetIn]."]
+  [@@ocaml.deprecated "(8.17) Use synonymous [EConstr.it_mkProd_wo_LetIn]."]
 
 val it_mkLambda_or_LetIn : Constr.constr -> Constr.rel_context -> Constr.constr
-  [@@ocaml.deprecated "Use synonymous [Term.it_mkLambda_or_LetIn]."]
+  [@@ocaml.deprecated "(8.17) Use synonymous [Term.it_mkLambda_or_LetIn]."]
 
 val it_mkNamedProd_or_LetIn : Evd.evar_map -> types -> named_context -> types
-  [@@ocaml.deprecated "Use synonymous [EConstr.it_mkNamedProd_or_LetIn]."]
+  [@@ocaml.deprecated "(8.17) Use synonymous [EConstr.it_mkNamedProd_or_LetIn]."]
 
 val it_mkNamedLambda_or_LetIn : Evd.evar_map -> constr -> named_context -> constr
-  [@@ocaml.deprecated "Use synonymous [EConstr.it_mkNamedLambda_or_LetIn]."]
+  [@@ocaml.deprecated "(8.17) Use synonymous [EConstr.it_mkNamedLambda_or_LetIn]."]
 
 (** Prod/Lambda/LetIn destructors on constr *)
 
@@ -199,8 +199,8 @@ val add_name : Name.t -> names_context -> names_context
 val lookup_name_of_rel : int -> names_context -> Name.t
 val lookup_rel_of_name : Id.t -> names_context -> int
 val empty_names_context : names_context
-val ids_of_rel_context : ('c, 't) Context.Rel.pt -> Id.t list
-val ids_of_named_context : ('c, 't) Context.Named.pt -> Id.t list
+val ids_of_rel_context : ('c, 't, 'r) Context.Rel.pt -> Id.t list
+val ids_of_named_context : ('c, 't, 'r) Context.Named.pt -> Id.t list
 val ids_of_context : env -> Id.t list
 val names_of_rel_context : env -> names_context
 
@@ -208,7 +208,7 @@ val names_of_rel_context : env -> names_context
    [n] hypotheses, excluding local definitions, and [Γ₁], if not empty,
    starts with an hypothesis (i.e. [Γ₁] has the form empty or [x:A;Γ₁'] *)
 val context_chop : int -> Constr.rel_context -> Constr.rel_context * Constr.rel_context
-  [@@ocaml.deprecated "Use synonymous [Context.Rel.chop_nhyps]."]
+  [@@ocaml.deprecated "(8.16) Use synonymous [Context.Rel.chop_nhyps]."]
 
 (* [env_rel_context_chop n env] extracts out the [n] top declarations
    of the rel_context part of [env], counting both local definitions and
@@ -221,17 +221,17 @@ val add_vname : Id.Set.t -> Name.t -> Id.Set.t
 
 (** other signature iterators *)
 val process_rel_context : (rel_declaration -> env -> env) -> env -> env
-val assums_of_rel_context : ('c, 't) Context.Rel.pt -> (Name.t Context.binder_annot * 't) list
+val assums_of_rel_context : ('c, 't, 'r) Context.Rel.pt -> ((Name.t,'r) Context.pbinder_annot * 't) list
 
 val lift_rel_context : int -> Constr.rel_context -> Constr.rel_context
-  [@@ocaml.deprecated "Use synonymous [Vars.lift_rel_context]."]
+  [@@ocaml.deprecated "(8.15) Use synonymous [Vars.lift_rel_context]."]
 val substl_rel_context : Constr.constr list -> Constr.rel_context -> Constr.rel_context
-  [@@ocaml.deprecated "Use synonymous [Vars.substl_rel_context]."]
+  [@@ocaml.deprecated "(8.15) Use synonymous [Vars.substl_rel_context]."]
 val smash_rel_context : Constr.rel_context -> Constr.rel_context
-  [@@ocaml.deprecated "Use synonymous [Vars.smash_rel_context]."]
+  [@@ocaml.deprecated "(8.15) Use synonymous [Vars.smash_rel_context]."]
 val map_rel_context_with_binders :
-  (int -> 'c -> 'c) -> ('c, 'c) Context.Rel.pt -> ('c, 'c) Context.Rel.pt
-  [@@ocaml.deprecated "Use synonymous [Context.Rel.map_with_binders]."]
+  (int -> 'c -> 'c) -> ('c, 'c, 'r) Context.Rel.pt -> ('c, 'c, 'r) Context.Rel.pt
+  [@@ocaml.deprecated "(8.15) Use synonymous [Context.Rel.map_with_binders]."]
 
 val map_rel_context_in_env :
   (env -> Constr.constr -> Constr.constr) -> env -> Constr.rel_context -> Constr.rel_context
@@ -241,8 +241,11 @@ val fold_named_context_both_sides :
 val mem_named_context_val : Id.t -> named_context_val -> bool
 val compact_named_context : Evd.evar_map -> EConstr.named_context -> EConstr.compacted_context
 
-val map_rel_decl : ('a -> 'b) -> ('a, 'a) Context.Rel.Declaration.pt -> ('b, 'b) Context.Rel.Declaration.pt
-val map_named_decl : ('a -> 'b) -> ('a, 'a) Context.Named.Declaration.pt -> ('b, 'b) Context.Named.Declaration.pt
+val map_rel_decl : ('r1 -> 'r2 ) -> ('a -> 'b) -> ('a, 'a, 'r1) Context.Rel.Declaration.pt -> ('b, 'b, 'r2) Context.Rel.Declaration.pt
+[@@deprecated "(8.20) Use [Context.Rel.Declaration.map_constr_het]"]
+
+val map_named_decl : ('r1 -> 'r2 ) -> ('a -> 'b) -> ('a, 'a, 'r1) Context.Named.Declaration.pt -> ('b, 'b, 'r2) Context.Named.Declaration.pt
+[@@deprecated "(8.20) Use [Context.Named.Declaration.map_constr_het]"]
 
 val clear_named_body : Id.t -> env -> env
 
@@ -258,14 +261,15 @@ val dependency_closure : env -> Evd.evar_map -> named_context -> Id.Set.t -> Id.
 val is_section_variable : env -> Id.t -> bool
 
 val global_of_constr : Evd.evar_map -> constr -> GlobRef.t * EInstance.t
-[@@ocaml.deprecated "Use [EConstr.destRef] instead (throws DestKO instead of Not_found)."]
+[@@ocaml.deprecated "(8.12) Use [EConstr.destRef] instead (throws DestKO instead of Not_found)."]
 
 val is_global : Environ.env -> Evd.evar_map -> GlobRef.t -> constr -> bool
-[@@ocaml.deprecated "Use [EConstr.isRefX] instead."]
+[@@ocaml.deprecated "(8.12) Use [EConstr.isRefX] instead."]
 
 val isGlobalRef : Evd.evar_map -> constr -> bool
-[@@ocaml.deprecated "Use [EConstr.isRef] instead."]
+[@@ocaml.deprecated "(8.12) Use [EConstr.isRef] instead."]
 
+val is_template_polymorphic_ref : env -> Evd.evar_map -> constr -> bool
 val is_template_polymorphic_ind : env -> Evd.evar_map -> constr -> bool
 
 val is_Prop : Evd.evar_map -> constr -> bool
@@ -289,9 +293,8 @@ val pr_evar_constraints : evar_map -> evar_constraint list -> Pp.t
 val pr_evar_map : ?with_univs:bool -> int option -> env -> evar_map -> Pp.t
 val pr_evar_map_filter : ?with_univs:bool -> (Evar.t -> any_evar_info -> bool) ->
   env -> evar_map -> Pp.t
-val pr_metaset : Metaset.t -> Pp.t
-val pr_evar_universe_context : UState.t -> Pp.t
 val pr_evd_level : evar_map -> Univ.Level.t -> Pp.t
+val pr_evd_qvar : evar_map -> Sorts.QVar.t -> Pp.t
 
 module Internal : sig
 
@@ -302,7 +305,7 @@ module Internal : sig
 val debug_print_constr : evar_map -> constr -> Pp.t
 
 (** Pretty-printer hook: [print_constr_env env sigma c] will pretty
-   print c if the pretty printing layer has been linked into the Coq
+   print c if the pretty printing layer has been linked into the Rocq
    binary. *)
 val print_constr_env : env -> Evd.evar_map -> constr -> Pp.t
 
@@ -310,9 +313,14 @@ val print_constr_env : env -> Evd.evar_map -> constr -> Pp.t
 val set_print_constr : (env -> Evd.evar_map -> constr -> Pp.t) -> unit
 
 (** Printers for contexts *)
-val print_named_context : env -> Pp.t
-val pr_rel_decl : env -> Constr.rel_declaration -> Pp.t
-val print_rel_context : env -> Pp.t
-val print_env : env -> Pp.t
+val print_named_context : env -> Evd.evar_map -> Pp.t
+val pr_rel_decl : env -> Evd.evar_map -> Constr.rel_declaration -> Pp.t
+val print_rel_context : env -> Evd.evar_map -> Pp.t
+val print_env : env -> Evd.evar_map -> Pp.t
+
+val print_kconstr : Environ.env -> Evd.evar_map -> Evd.econstr -> Pp.t
 
 end
+
+val pr_evar_universe_context : UState.t -> Pp.t
+[@@deprecated "(9.0) Use [Evd.pr_ustate] instead"]

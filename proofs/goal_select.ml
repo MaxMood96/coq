@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -26,15 +26,12 @@ let pr_range_selector (i, j) =
   if i = j then Pp.int i
   else Pp.(int i ++ str "-" ++ int j)
 
-let pr_goal_selector = function
-  | SelectAlreadyFocused -> Pp.str "!"
-  | SelectAll -> Pp.str "all"
-  | SelectNth i -> Pp.int i
-  | SelectList l ->
-    Pp.(str "["
-     ++ prlist_with_sep pr_comma pr_range_selector l
-     ++ str "]")
-  | SelectId id -> Names.Id.print id
+let pr_goal_selector = let open Pp in function
+  | SelectAlreadyFocused -> str "!"
+  | SelectAll -> str "all"
+  | SelectNth i -> int i
+  | SelectList l -> prlist_with_sep pr_comma pr_range_selector l
+  | SelectId id -> str "[" ++ Id.print id ++ str "]"
 
 let parse_goal_selector = function
   | "!" -> SelectAlreadyFocused
@@ -50,14 +47,13 @@ let parse_goal_selector = function
 
 (* Default goal selector: selector chosen when a tactic is applied
    without an explicit selector. *)
-let get_default_goal_selector =
+let { Goptions.get = get_default_goal_selector } =
   Goptions.declare_interpreted_string_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
-    ~key:["Default";"Goal";"Selector"]
-    ~value:(SelectNth 1)
     parse_goal_selector
     (fun v -> Pp.string_of_ppcmds @@ pr_goal_selector v)
+    ~key:["Default";"Goal";"Selector"]
+    ~value:(SelectNth 1)
+    ()
 
 (* Select a subset of the goals *)
 let tclSELECT ?nosuchgoal g tac = match g with

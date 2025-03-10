@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -38,38 +38,43 @@ type 'summary library_segment = ('summary node * Libobject.t list) list
 let module_kind is_type =
   if is_type then "module type" else "module"
 
-(*let load_and_subst_objects i prefix subst seg =
-  List.rev (List.fold_left (fun seg (id,obj as node) ->
-    let obj' =  subst_object (make_oname prefix id, subst, obj) in
-    let node = if obj == obj' then node else (id, obj') in
-    load_object i (make_oname prefix id, obj');
-    node :: seg) [] seg)
-*)
+type classified_objects = {
+  substobjs : Libobject.t list;
+  keepobjs : Libobject.t list;
+  escapeobjs : Libobject.t list;
+  anticipateobjs : Libobject.t list;
+}
+
+let empty_classified = {
+  substobjs = [];
+  keepobjs = [];
+  escapeobjs = [];
+  anticipateobjs = [];
+}
+
+let classify_object : Libobject.t -> Libobject.substitutivity = function
+  | ModuleObject _ | ModuleTypeObject _ | IncludeObject _ | ExportObject _ -> Substitute
+  | KeepObject _ -> Keep
+  | EscapeObject _ -> Escape
+  | AtomicObject o -> Libobject.classify_object o
+
 let classify_segment seg =
-  let rec clean ((substl,keepl,anticipl) as acc) = function
+  let rec clean acc = function
     | [] -> acc
     | o :: stk ->
-      let open Libobject in
-      begin match o with
-        | ModuleObject _ | ModuleTypeObject _ | IncludeObject _ ->
-          clean (o::substl, keepl, anticipl) stk
-        | KeepObject _ ->
-          clean (substl, o::keepl, anticipl) stk
-        | ExportObject _ ->
-          clean (o::substl, keepl, anticipl) stk
-        | AtomicObject obj as o ->
-          begin match classify_object obj with
-            | Dispose -> clean acc stk
-            | Keep ->
-              clean (substl, o::keepl, anticipl) stk
-            | Substitute ->
-              clean (o::substl, keepl, anticipl) stk
-            | Anticipate ->
-              clean (substl, keepl, o::anticipl) stk
-          end
+      begin match classify_object o with
+      | Dispose -> clean acc stk
+      | Substitute ->
+        clean {acc with substobjs = o :: acc.substobjs} stk
+      | Keep ->
+        clean {acc with keepobjs = o :: acc.keepobjs} stk
+      | Escape ->
+        clean {acc with escapeobjs = o :: acc.escapeobjs} stk
+      | Anticipate ->
+        clean {acc with anticipateobjs = o :: acc.anticipateobjs} stk
       end
   in
-  clean ([],[],[]) (List.rev seg)
+  clean empty_classified (List.rev seg)
 
 let find_entries_p p stk =
   let rec find = function
@@ -131,6 +136,8 @@ let dummy = {
 
 let synterp_state = ref dummy
 let interp_state = ref ([] : Summary.Interp.frozen library_segment)
+
+let library_info = ref UserWarn.empty
 
 let contents () = !interp_state
 
@@ -285,10 +292,17 @@ let is_in_section ref = match sections () with
 let section_instance ref =
   Cooking.instance_of_cooking_info (section_segment_of_reference ref)
 
+type discharged_item =
+  | DischargedExport of Libobject.ExportObj.t
+  | DischargedLeaf of Libobject.discharged_obj
+
 let discharge_item = Libobject.(function
-  | ModuleObject _ | ModuleTypeObject _ | IncludeObject _ | KeepObject _
-  | ExportObject _ -> None
-  | AtomicObject obj -> discharge_object obj)
+  | ModuleObject _ | ModuleTypeObject _ | IncludeObject _ | KeepObject _ | EscapeObject _ ->
+    assert false
+  | ExportObject o -> Some (DischargedExport o)
+  | AtomicObject obj ->
+    let obj = discharge_object obj in
+    Option.map (fun o -> DischargedLeaf o) obj)
 
 (* Misc *)
 
@@ -309,10 +323,30 @@ let library_part = function
   | GlobRef.VarRef id -> library_dp ()
   | ref -> ModPath.dp (mp_of_global ref)
 
-let discharge_proj_repr p =
+let discharge_section_proj_repr p =
   let ind = Projection.Repr.inductive p in
   let sec = section_segment_of_reference (GlobRef.IndRef ind) in
   Cooking.discharge_proj_repr sec p
+
+let discharge_proj_repr p =
+    if is_in_section (Names.GlobRef.IndRef (Names.Projection.Repr.inductive p)) then
+      discharge_section_proj_repr p
+    else
+      p
+
+let debug_object_name = function
+  | Libobject.ModuleObject _ -> "ModuleObject"
+  | ModuleTypeObject  _-> "ModuleTypeObject"
+  | IncludeObject _ -> "IncludeObject"
+  | KeepObject _ -> "KeepObject"
+  | EscapeObject _ -> "EscapeObject"
+  | ExportObject _ -> "ExportObject"
+  | AtomicObject (Dyn (tag,_)) -> Libobject.Dyn.repr tag
+
+let anomaly_unitialized_add_leaf stage o =
+  CErrors.anomaly
+    Pp.(str "cannot add object (" ++ str (debug_object_name o) ++ pr_comma() ++
+        str "in " ++ str stage ++ str "): not initialized")
 
 (** The [LibActions] abstraction represent the set of operations on the Lib
     structure that is specific to a given stage. Two instances are defined below,
@@ -346,6 +380,8 @@ module type LibActions = sig
 
   val drop_objects : frozen -> frozen
 
+  val declare_info : Library_info.t -> unit
+
 end
 
 module SynterpActions : LibActions with type summary = Summary.Synterp.frozen = struct
@@ -377,7 +413,7 @@ module SynterpActions : LibActions with type summary = Summary.Synterp.frozen = 
     let lib_stk = match !synterp_state.lib_stk with
       | [] ->
         (* top_printers does set_bool_option_value which adds a leaf *)
-        if !Flags.in_debugger then [dummylib, [leaf]] else assert false
+        if !Flags.in_debugger then [dummylib, [leaf]] else anomaly_unitialized_add_leaf "synterp" leaf
       | (node, leaves) :: rest -> (node, leaf :: leaves) :: rest
     in
     synterp_state := { !synterp_state with lib_stk }
@@ -387,6 +423,7 @@ module SynterpActions : LibActions with type summary = Summary.Synterp.frozen = 
     let dir = Libnames.add_dirpath_suffix !synterp_state.path_prefix.Nametab.obj_dir id in
     let prefix = Nametab.{ obj_dir = dir; obj_mp = mp; } in
     check_mod_fresh ~is_type prefix id;
+    assert (not (sections_are_opened()));
     add_entry (OpenedModule (is_type,export,prefix,fs));
     synterp_state := { !synterp_state with path_prefix = prefix } ;
     prefix
@@ -402,7 +439,7 @@ module SynterpActions : LibActions with type summary = Summary.Synterp.frozen = 
     let obj_dir = Libnames.add_dirpath_suffix opp.Nametab.obj_dir id in
     let prefix = Nametab.{ obj_dir; obj_mp=opp.obj_mp; } in
     check_section_fresh obj_dir id;
-    let fs = Summary.Synterp.freeze_summaries ~marshallable:false in
+    let fs = Summary.Synterp.freeze_summaries () in
     add_entry (OpenedSection (prefix, fs));
     (*Pushed for the lifetime of the section: removed by unfreezing the summary*)
     push_section_name obj_dir;
@@ -432,6 +469,15 @@ module SynterpActions : LibActions with type summary = Summary.Synterp.frozen = 
     let lib_synterp_stk = List.map (fun (node,_) -> drop_node node, []) st.lib_stk in
     { st with lib_stk = lib_synterp_stk }
 
+  let declare_info info =
+    let open UserWarn in
+    let depr = match !library_info.depr, info.depr with
+      | None, depr | depr, None -> depr
+      | Some _, Some _ ->
+         CErrors.user_err Pp.(str "Library file is already deprecated.") in
+    let warn = !library_info.warn @ info.warn in
+    library_info := { depr; warn }
+
 end
 
 module InterpActions : LibActions with type summary = Summary.Interp.frozen = struct
@@ -453,7 +499,7 @@ module InterpActions : LibActions with type summary = Summary.Interp.frozen = st
     let lib_stk = match !interp_state with
       | [] ->
         (* top_printers does set_bool_option_value which adds a leaf *)
-        if !Flags.in_debugger then [dummylib, [leaf]] else assert false
+        if !Flags.in_debugger then [dummylib, [leaf]] else anomaly_unitialized_add_leaf "interp" leaf
       | (node, leaves) :: rest -> (node, leaf :: leaves) :: rest
     in
     interp_state := lib_stk
@@ -473,7 +519,7 @@ module InterpActions : LibActions with type summary = Summary.Interp.frozen = st
   let open_section id =
     Global.open_section ();
     let prefix = !synterp_state.path_prefix in
-    let fs = Summary.Interp.freeze_summaries ~marshallable:false in
+    let fs = Summary.Interp.freeze_summaries () in
     add_entry (OpenedSection (prefix, fs))
 
   let pop_path_prefix () = ()
@@ -499,6 +545,8 @@ module InterpActions : LibActions with type summary = Summary.Interp.frozen = st
     in
     List.map (fun (node,_) -> drop_node node, []) interp_state
 
+  let declare_info _ = ()
+
 end
 
 let add_discharged_leaf obj =
@@ -522,21 +570,14 @@ module type StagedLibS = sig
 
   type summary
 
-  type classified_objects = {
-    substobjs : Libobject.t list;
-    keepobjs : Libobject.t list;
-    anticipateobjs : Libobject.t list;
-  }
-  val classify_segment : Libobject.t list -> classified_objects
-
-  val find_opening_node : Id.t -> summary node
+  val find_opening_node : ?loc:Loc.t -> Id.t -> summary node
 
   val add_entry : summary node -> unit
   val add_leaf_entry : Libobject.t -> unit
 
   (** {6 Sections } *)
   val open_section : Id.t -> unit
-  val close_section : unit -> unit
+  val close_section : unit -> discharged_item list
 
   (** {6 Modules and module types } *)
   val start_module :
@@ -563,6 +604,8 @@ module type StagedLibS = sig
 
   val drop_objects : frozen -> frozen
 
+  val declare_info : Library_info.t -> unit
+
 end
 
 (** The [StagedLib] abstraction factors out the code dealing with Lib structure
@@ -571,22 +614,23 @@ module StagedLib(Actions : LibActions) : StagedLibS with type summary = Actions.
 
 type summary = Actions.summary
 
-type classified_objects = {
-  substobjs : Libobject.t list;
-  keepobjs : Libobject.t list;
-  anticipateobjs : Libobject.t list;
-}
-
-let classify_segment seg =
-  let substobjs, keepobjs, anticipateobjs = classify_segment seg in
-  { substobjs; keepobjs; anticipateobjs; }
-
 let add_entry node = Actions.add_entry node
 let add_leaf_entry obj = Actions.add_leaf_entry obj
 
 let open_section id = Actions.open_section id
 
-let find_opening_node id =
+exception WrongClosingBlockName of Id.t * Loc.t option
+
+let () = CErrors.register_handler (function
+  | WrongClosingBlockName (id,_) ->
+    Some Pp.(str "Last block to end has name " ++ Id.print id ++ str ".")
+  | _ -> None)
+
+let () = Quickfix.register (function
+  | WrongClosingBlockName (id, Some loc) -> [Quickfix.make ~loc (Id.print id)]
+  | _ -> [])
+
+let find_opening_node ?loc id =
   let entry = match Actions.get_lib_stk () with
     | [] -> assert false
     | (CompilingLibrary _, _) :: _ ->
@@ -595,8 +639,7 @@ let find_opening_node id =
   in
   let id' = prefix_id (node_prefix entry) in
   if not (Names.Id.equal id id') then
-    CErrors.user_err Pp.(str "Last block to end has name "
-      ++ Id.print id' ++ str ".");
+    Loc.raise ?loc (WrongClosingBlockName(id',loc));
   entry
 
 let start_module = Actions.start_mod ~is_type:false
@@ -630,9 +673,9 @@ let close_section () =
   in
   Actions.set_lib_stk before;
   Actions.pop_path_prefix ();
-  let newdecls = List.map discharge_item secdecls in
+  let newdecls = List.filter_map discharge_item secdecls in
   Actions.close_section fs;
-  List.iter (Option.iter add_discharged_leaf) newdecls
+  newdecls
 
 type frozen = Actions.frozen
 
@@ -644,10 +687,18 @@ let init () = Actions.init ()
 
 let drop_objects st = Actions.drop_objects st
 
+let declare_info info = Actions.declare_info info
+
 end
 
 module Synterp : StagedLibS with type summary = Summary.Synterp.frozen = StagedLib(SynterpActions)
 module Interp : StagedLibS with type summary = Summary.Interp.frozen = StagedLib(InterpActions)
+
+type compilation_result = {
+  info : Library_info.t;
+  synterp_objects : classified_objects;
+  interp_objects : classified_objects;
+}
 
 let end_compilation dir =
   end_compilation_checks dir;
@@ -656,9 +707,9 @@ let end_compilation dir =
   assert (List.is_empty syntax_before);
   assert (List.is_empty before);
   synterp_state := { !synterp_state with comp_name = None };
-  let syntax_after = Synterp.classify_segment syntax_after in
-  let after = Interp.classify_segment after in
-  !synterp_state.path_prefix, after, syntax_after
+  let syntax_after = classify_segment syntax_after in
+  let after = classify_segment after in
+  { info = !library_info; interp_objects = after; synterp_objects = syntax_after; }
 
 (** Compatibility layer *)
 let init () =
@@ -666,11 +717,3 @@ let init () =
   Interp.init ();
   Summary.Synterp.init_summaries ();
   Summary.Interp.init_summaries ()
-
-let open_section id =
-  Synterp.open_section id;
-  Interp.open_section id
-
-let close_section () =
-  Synterp.close_section ();
-  Interp.close_section ()
