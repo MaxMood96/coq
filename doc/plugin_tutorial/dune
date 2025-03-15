@@ -3,11 +3,11 @@
 ;  (alias plugin-tutorial)
 ;  (deps
 ;   (source_tree .)
-;   (package coq-core)
+;   (package rocq-runtime)
 ;    ../../tools/CoqMakefile.in
 ;    ../../theories/Init/Prelude.vo)
 ;  (action
-;    (bash "make COQCORELIB=$(pwd)/../../ COQLIB=$(pwd)/../../")))
+;    (bash "make ROCQRUNTIMELIB=$(pwd)/../../ ROCQLIB=$(pwd)/../../")))
 
 
 (env

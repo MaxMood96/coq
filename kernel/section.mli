@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -10,6 +10,7 @@
 
 open Names
 open Univ
+open UVars
 open Cooking
 
 (** Kernel implementation of sections. *)
@@ -58,7 +59,7 @@ val push_global : Environ.env -> poly:bool -> section_entry -> 'a t -> 'a t
 
 (** {6 Retrieving section data} *)
 
-val all_poly_univs : 'a t -> Univ.Level.t array
+val all_poly_univs : 'a t -> Instance.t
 (** Returns all polymorphic universes, including those from previous
    sections. Earlier sections are earlier in the array.
 

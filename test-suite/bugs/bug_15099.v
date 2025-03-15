@@ -2,13 +2,13 @@ Require Setoid.
 
 Declare Scope category_theory_scope.
 Open Scope category_theory_scope.
-Require Import Coq.Classes.CMorphisms.
+Require Import Corelib.Classes.CMorphisms.
 Set Primitive Projections.
 Set Universe Polymorphism.
 
 Class Setoid A := {
   equiv : crelation A;
-  setoid_equiv :> Equivalence equiv
+  setoid_equiv :: Equivalence equiv
 }.
 
 Notation "f ≈ g" := (equiv f g) (at level 79) : category_theory_scope.
@@ -19,7 +19,7 @@ Class Category := {
   obj : Type;
 
   hom : obj -> obj -> Type where "a ~> b" := (hom a b);
-  homset :> forall X Y, Setoid (X ~> Y);
+  homset :: forall X Y, Setoid (X ~> Y);
 
   id {x} : x ~> x;
 
@@ -38,7 +38,7 @@ Class Functor {C D : Category} := {
   fobj : C -> D;
   fmap {x y : C} (f : x ~> y) : fobj x ~> fobj y;
 
-  fmap_respects :> forall x y, Proper (equiv ==> equiv) (@fmap x y);
+  fmap_respects :: forall x y, Proper (equiv ==> equiv) (@fmap x y);
 
   fmap_id {x : C} : fmap (@id C x) ≈ id;
 }.

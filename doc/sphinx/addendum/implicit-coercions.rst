@@ -8,7 +8,7 @@ Implicit Coercions
 General Presentation
 ---------------------
 
-This section describes the inheritance mechanism of Coq. In Coq with
+This section describes one inheritance mechanism of the Rocq Prover. With
 inheritance, we are not interested in adding any expressive power to
 our theory, but only convenience. Given a term, possibly not typable,
 we are interested in the problem of determining if it can be well
@@ -73,7 +73,7 @@ We then write :g:`f : C >-> D`.
 .. _ambiguous-paths:
 
 When you declare a new coercion (e.g. with :cmd:`Coercion`), new coercion
-paths with the same classes as existing ones are ignored. Coq will generate
+paths with the same classes as existing ones are ignored. Rocq will generate
 a warning when the two paths may be non convertible. When the :g:`x₁..xₖ` are exactly
 the :g:`v₁..vₙ` (in the same order), the coercion is said to satisfy
 the :gdef:`uniform inheritance condition`. When possible, we recommend
@@ -90,24 +90,24 @@ then an object of ``D``.
 Reversible Coercions
 --------------------
 
-When a term cannot be coerced (directly) to its expected type, Coq tries to
+When a term cannot be coerced (directly) to its expected type, Rocq tries to
 use a :gdef:`reversible coercion` (see the :attr:`reversible` attribute). Intuitively,
-Coq synthesizes a new term of the right type that can be coerced
+Rocq synthesizes a new term of the right type that can be coerced
 to the original one. The new term is obtained by reversing the coercion, that
 is guessing its input given the output.
 
-More precisely, in order to coerce a term :g:`a : A` to type :g:`B`, Coq
+More precisely, in order to coerce a term :g:`a : A` to type :g:`B`, Rocq
 finds a reversible coercion :g:`f : B >-> A`, then synthesizes some :g:`?x : B`
 such that :g:`f ?x = a` (typically through :ref:`canonicalstructures` or
 :ref:`typeclasses`) and finally replaces :g:`a` with the value of :g:`?x`.
 
-If Coq doesn't find a reversible coercion :g:`f : B >-> A`, then it
+If Rocq doesn't find a reversible coercion :g:`f : B >-> A`, then it
 looks for a coercion class :g:`C` equipped with an incoming reversible coercion
 :g:`g : B >-> C` and a coercion :g:`h : A >-> C` (not necessarily reversible),
 then synthesizes some :g:`?x : B` such that :g:`g ?x = h a`, and finally
 replaces :g:`a` with the value of :g:`?x`.
 If there's another class :g:`D` with a coercion from :g:`C` to :g:`D` and
-incoming coercions from :g:`A` and :g:`B`, Coq tries :g:`C` before :g:`D`.
+incoming coercions from :g:`A` and :g:`B`, Rocq tries :g:`C` before :g:`D`.
 This ordering is well defined only if the coercion graph happens to be a semi
 lattice.  The intuition behind this ordering is that since coercions forget
 information, :g:`D` has less information that :g:`C`, and hence
@@ -171,6 +171,10 @@ Coercion Classes
 
      Silence the non uniform inheritance warning.
 
+     .. deprecated:: 8.18
+
+        Use the :attr:`warnings` attribute instead with "-uniform-inheritance".
+
   .. exn:: @qualid not declared.
 
      :token:`qualid` is not defined globally.
@@ -190,7 +194,7 @@ Coercion Classes
 
   .. exn:: Cannot find the source class of @qualid.
 
-     Coq can not infer a valid source class.
+     Rocq can not infer a valid source class.
 
   .. exn:: Cannot recognize @coercion_class as a source class of @qualid.
 
@@ -209,7 +213,7 @@ Coercion Classes
 
      The :ref:`test for ambiguous coercion paths <ambiguous-paths>`
      may yield false positives involving the coercion :token:`qualid`.
-     Use the :attr:`nonuniform` attribute to silence this warning.
+     Use the :attr:`warnings` attribute with "-uniform-inheritance" to silence this warning.
 
   .. warn:: New coercion path ... is ambiguous with existing ...
 
@@ -344,7 +348,7 @@ There are three situations:
 
   We first give an example of coercion between atomic inductive types
 
-  .. coqtop:: all
+  .. rocqtop:: all
 
     Definition bool_in_nat (b:bool) := if b then 0 else 1.
     Coercion bool_in_nat : bool >-> nat.
@@ -361,7 +365,7 @@ There are three situations:
 
   We give an example of coercion between classes with parameters.
 
-  .. coqtop:: all
+  .. rocqtop:: all
 
     Parameters (C : nat -> Set) (D : nat -> bool -> Set) (E : bool -> Set).
     Parameter f : forall n:nat, C n -> D (S n) true.
@@ -380,7 +384,7 @@ There are three situations:
   :g:`forall x : A', B'`, we have to coerce ``A'`` towards ``A`` and ``B``
   towards ``B'``. An example is given below:
 
-  .. coqtop:: all
+  .. rocqtop:: all
 
     Parameters (A B : Set) (h : A -> B).
     Coercion h : A >-> B.
@@ -394,7 +398,7 @@ There are three situations:
   Remark the changes in the result following the modification of the
   previous example.
 
-  .. coqtop:: all
+  .. rocqtop:: all
 
     Parameter U' : (C 0 -> B) -> nat.
     Parameter t' : E true -> A.
@@ -414,7 +418,7 @@ There are three situations:
   functions. In :g:`forall x:A,B`, such a coercion path may also be applied
   to ``B`` if necessary.
 
-  .. coqtop:: all
+  .. rocqtop:: all
 
     Parameter Graph : Type.
     Parameter Node : Graph -> Type.
@@ -434,7 +438,7 @@ There are three situations:
   ``f`` is replaced by the term obtained by applying to ``f`` the
   coercion path between ``A`` and ``Funclass`` if it exists.
 
-  .. coqtop:: all
+  .. rocqtop:: all
 
     Parameter bij : Set -> Set -> Set.
     Parameter ap : forall A B:Set, bij A B -> A -> B.
@@ -451,7 +455,7 @@ There are three situations:
 
   Notice the :n:`:>` on `ssort` making it a :term:`reversible coercion`.
 
-  .. coqtop:: in
+  .. rocqtop:: in
 
     Structure S := {
       ssort :> Type;
@@ -460,7 +464,7 @@ There are three situations:
     Definition test (s : S) := sstuff s.
     Canonical Structure S_nat := {| ssort := nat; sstuff := 0; |}.
 
-  .. coqtop:: all
+  .. rocqtop:: all
 
     Check test (nat : Type).
 
@@ -471,7 +475,7 @@ There are three situations:
   Notice there is no `:>` on `ssort'` and the added :cmd:`Coercion` compared
   to the previous example.
 
-  .. coqtop:: in
+  .. rocqtop:: in
 
     Structure S' := {
       ssort' : Type;
@@ -483,13 +487,13 @@ There are three situations:
 
   Since there's no `:>` on the definition of `ssort'`, the :attr:`reversible` attribute is not set:
 
-  .. coqtop:: all
+  .. rocqtop:: all
 
     Fail Check test' (nat : Type).
 
   The attribute can be set after declaring the coercion:
 
-  .. coqtop:: all
+  .. rocqtop:: all
 
     #[reversible] Coercion ssort'.
     Check test' (nat : Type).
@@ -498,22 +502,22 @@ There are three situations:
 
 .. example:: Identity coercions.
 
-  .. coqtop:: in
+  .. rocqtop:: in
 
     Definition fct := nat -> nat.
     Parameter incr_fct : Set.
     Parameter fct_of_incr_fct : incr_fct -> fct.
 
-  .. coqtop:: all
+  .. rocqtop:: all
 
     Fail Coercion fct_of_incr_fct : incr_fct >-> Funclass.
 
-  .. coqtop:: in
+  .. rocqtop:: in
 
     Coercion fct_of_incr_fct : incr_fct >-> fct.
     Parameter f' : incr_fct.
 
-  .. coqtop:: all
+  .. rocqtop:: all
 
     Check f' : fct.
     Fail Check f' 0.
@@ -524,6 +528,6 @@ There are three situations:
 
   Let us see the resulting graph after all these examples.
 
-  .. coqtop:: all
+  .. rocqtop:: all
 
     Print Graph.

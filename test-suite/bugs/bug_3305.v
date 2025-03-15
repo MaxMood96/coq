@@ -1,4 +1,4 @@
-Require Export Coq.Classes.RelationClasses.
+Require Export Corelib.Classes.RelationClasses.
 
 Section defs.
   Variable A : Type.

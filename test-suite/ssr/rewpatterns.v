@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -124,7 +124,7 @@ Goal forall a : bool, a -> true && a || false && a.
 by move=> a ?; rewrite [X in X || _]/= [X in _ || X]/= orbC [false && a as X in X || _]//=.
 Qed.
 
-Variable a : bool.
+Parameter a : bool.
 Definition f x := x || a.
 Definition g x := f x.
 

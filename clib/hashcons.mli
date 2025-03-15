@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,6 +11,9 @@
 (** Generic hash-consing. *)
 
 (** {6 Hashconsing functorial interface} *)
+
+type 'a f = 'a -> int * 'a
+(** Type of hashconsing function for ['a]. The returned int is the hash. *)
 
 module type HashconsedType =
   sig
@@ -30,66 +33,72 @@ module type HashconsedType =
     type t
     (** Type of objects to hashcons. *)
 
-    type u
-    (** Type of hashcons functions for the sub-structures contained in [t].
-        Usually a tuple of functions. *)
-
-    val hashcons :  u -> t -> t
-    (** The actual hashconsing function, using its fist argument to recursively
-        hashcons substructures. It should be compatible with [eq], that is
-        [eq x (hashcons f x) = true]. *)
+    val hashcons : t f
+    (** The actual hashconsing function. It should be compatible with [eq], that is
+        [eq x (snd @@ hashcons f x) = true]. It also returns the hash. *)
 
     val eq : t -> t -> bool
     (** A comparison function. It is allowed to use physical equality
         on the sub-terms hashconsed by the [hashcons] function, but it should be
-        insensible to shallow copy of the compared object. *)
-
-    val hash : t -> int
-    (** A hash function passed to the underlying hashtable structure. [hash]
-        should be compatible with [eq], i.e. if [eq x y = true] then
-        [hash x = hash y]. *)
+        insensible to shallow copy of the compared object.
+        It should be compatible with the hash returned by [hashcons], ie
+        [eq x y] implies [fst @@ hashcons x = fst @@ hashcons y].
+    *)
   end
+
+module type HashconsedRecType = sig
+  type t
+
+  val hashcons : t f -> t f
+  (** Hashcons the given constructor, calling the provided function on children. *)
+
+  val eq : t -> t -> bool
+end
 
 module type S =
   sig
     type t
     (** Type of objects to hashcons. *)
 
-    type u
-    (** Type of hashcons functions for the sub-structures contained in [t]. *)
-
     type table
     (** Type of hashconsing tables *)
 
-    val generate : u -> table
+    val generate : unit -> table
     (** This create a hashtable of the hashconsed objects. *)
 
-    val hcons : table -> t -> t
-    (** Perform the hashconsing of the given object within the table. *)
+    val hcons : table -> t f
+    (** Perform the hashconsing of the given object within the table, and returns the hash. *)
 
     val stats : table -> Hashset.statistics
     (** Recover statistics of the hashconsing table. *)
   end
 
-module Make (X : HashconsedType) : (S with type t = X.t and type u = X.u)
+module Make (X : HashconsedType) : (S with type t = X.t)
 (** Create a new hashconsing, given canonicalization functions. *)
+
+module MakeRec (X : HashconsedRecType) : (S with type t = X.t)
+(** Create a new hashconsing, given canonicalization functions.
+    [hashcons] will get the resulting [hcons] as first argument. *)
 
 (** {6 Wrappers} *)
 
 (** These are intended to be used together with instances of the [Make]
     functor. *)
 
-val simple_hcons : ('u -> 'tab) -> ('tab -> 't -> 't) -> 'u -> 't -> 't
-(** [simple_hcons f sub obj] creates a new table each time it is applied to any
-    sub-hash function [sub]. *)
+val simple_hcons : ('u -> 'tab) -> ('tab -> 't -> 'v) -> 'u -> 't -> 'v
+(** Typically used as [let hcons = simple_hcons H.generate H.hcons ()] where [H] is of type [S]. *)
 
 (** {6 Hashconsing of usual structures} *)
 
-module type HashedType = sig type t val hash : t -> int end
+module type HashedType = sig
+  type t
+  val hcons : t f
+end
 
-module Hstring : (S with type t = string and type u = unit)
-(** Hashconsing of strings.  *)
-
-module Hlist (D:HashedType) :
-  (S with type t = D.t list and type u = (D.t->D.t))
+module Hlist (D:HashedType) : (S with type t = D.t list)
 (** Hashconsing of lists.  *)
+
+val hashcons_array : 'v f -> 'v array f
+(** Helper for array hashconsing. Shares the elements producing a new
+    array if needed, does not mutate the array, does not share the
+    array itself. *)

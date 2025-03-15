@@ -1,5 +1,5 @@
 
-Require Import Coq.Setoids.Setoid.
+Require Import Corelib.Setoids.Setoid.
 
 Set Implicit Arguments.
 

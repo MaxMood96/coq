@@ -5,6 +5,9 @@ Micromega: solvers for arithmetic goals over ordered rings
 
 :Authors: Frédéric Besson and Evgeny Makarov
 
+.. note::
+   The tactics described in this chapter require the Stdlib library.
+
 Short description of the tactics
 --------------------------------
 
@@ -30,6 +33,12 @@ or only for reals by ``Require Import Lra``.
   Note that the CSDP driver
   generates a *proof cache* which makes it possible to rerun scripts
   even without CSDP.
+
+.. flag:: Info Micromega
+
+   When set, instructs the tactics :tacn:`lia`,
+   :tacn:`nia`, :tacn:`lra`, :tacn:`nra` and :tacn:`psatz` to print the
+   list of hypotheses needed by the proof. The default is unset.
 
 .. opt:: Dump Arith
 
@@ -312,10 +321,10 @@ proof by abstracting monomials by variables.
    that might miss a refutation.
 
    To illustrate the working of the tactic, consider we wish to prove the
-   following Coq goal:
+   following goal:
 
 .. needs csdp
-.. coqdoc::
+.. rocqdoc::
 
    Require Import ZArith Psatz.
    Open Scope Z_scope.
@@ -366,9 +375,16 @@ obtain :math:`-1`. Thus, by Theorem :ref:`Psatz <psatz_thm>`, the goal is valid.
    :tacn:`zify` can also be extended by rebinding the tactics `Zify.zify_pre_hook` and `Zify.zify_post_hook` that are
    respectively run in the first and the last steps of :tacn:`zify`.
 
+   + To support :g:`Z.divide`: ``Ltac Zify.zify_post_hook ::= Z.divide_to_equations``.
    + To support :g:`Z.div` and :g:`Z.modulo`: ``Ltac Zify.zify_post_hook ::= Z.div_mod_to_equations``.
    + To support :g:`Z.quot` and :g:`Z.rem`: ``Ltac Zify.zify_post_hook ::= Z.quot_rem_to_equations``.
-   + To support :g:`Z.div`, :g:`Z.modulo`, :g:`Z.quot` and :g:`Z.rem`: either ``Ltac Zify.zify_post_hook ::= Z.to_euclidean_division_equations`` or ``Ltac Zify.zify_convert_to_euclidean_division_equations_flag ::= constr:(true)``.
+   + To support :g:`Z.divide`, :g:`Z.div`, :g:`Z.modulo`, :g:`Z.quot` and :g:`Z.rem`: either ``Ltac Zify.zify_post_hook ::= Z.to_euclidean_division_equations`` or ``Ltac Zify.zify_convert_to_euclidean_division_equations_flag ::= constr:(true)``.
+     The :g:`Z.to_euclidean_division_equations` tactic consists of the following passes:
+     - :g:`Z.divide_to_equations'`, posing characteristic equations using factors from :g:`Z.divide`
+     - :g:`Z.div_mod_to_equations'`, posing characteristic equations for and generalizing over :g:`Z.div` and :g:`Z.modulo`
+     - :g:`Z.quot_rem_to_equations'`, posing characteristic equations for and generalizing over :g:`Z.quot` and :g:`Z.rem`
+     - :g:`Z.euclidean_division_equations_cleanup`, removing impossible hypotheses introduced by the above passes, such as those presupposing :g:`x <> x`
+     - :g:`Z.euclidean_division_equations_find_duplicate_quotients`, which heuristically adds equations of the form :g:`q1 = q2 \/ q1 <> q2` when it seems that two quotients might be equal, allowing :g:`nia` to prove more goals, including those relating :g:`Z.quot` and :g:`Z.modulo` to :g:`Z.quot` and :g:`Z.rem`.
 
    The :tacn:`zify` tactic can be extended with new types and operators by declaring and registering new typeclass instances using the following commands.
    The typeclass declarations can be found in the module ``ZifyClasses`` and the default instances can be found in the module ``ZifyInst``.
@@ -385,6 +401,9 @@ obtain :math:`-1`. Thus, by Theorem :ref:`Psatz <psatz_thm>`, the goal is valid.
    The typeclass type (e.g. :g:`BinOp Z.mul` or :g:`BinRel (@eq Z)`) has the additional constraint that
    the non-implicit argument (here, :g:`Z.mul` or :g:`(@eq Z)`)
    is either a :n:`@reference` (here, :g:`Z.mul`) or the application of a :n:`@reference` (here, :g:`@eq`) to a sequence of :n:`@one_term`.
+
+   This command supports attributes :attr:`local`, :attr:`export` and :attr:`global`.
+   In sections only :attr:`local` is supported, outside sections the default is :attr:`global`.
 
 .. cmd:: Show Zify @show_zify
 
@@ -411,9 +430,9 @@ obtain :math:`-1`. Thus, by Theorem :ref:`Psatz <psatz_thm>`, the goal is valid.
 
   The :tacn:`lra` tactic automatically proves the following goal.
 
-  .. coqtop:: in
+  .. rocqtop:: in extra-stdlib
 
-    Require Import QArith Lqa. #[local] Open Scope Q_scope.
+    From Stdlib Require Import QArith Lqa. #[local] Open Scope Q_scope.
 
     Lemma example_lra x y : x + 2 * y <= 4 -> 2 * x + y <= 4 -> x + y < 3.
     Proof.
@@ -432,9 +451,9 @@ obtain :math:`-1`. Thus, by Theorem :ref:`Psatz <psatz_thm>`, the goal is valid.
   This is done thanks to the :term:`cone expression`
   :math:`p_2 + p_1 + 3 \times p_0 \equiv -1`.
 
-  .. coqtop:: all
+  .. rocqtop:: all extra-stdlib
 
-    From Coq.micromega Require Import RingMicromega QMicromega EnvRing Tauto.
+    From Stdlib.micromega Require Import RingMicromega QMicromega EnvRing Tauto.
 
     Print example_lra.
 
@@ -450,7 +469,7 @@ obtain :math:`-1`. Thus, by Theorem :ref:`Psatz <psatz_thm>`, the goal is valid.
   ``QTautoChecker ff wit`` returns ``true``, then the goal represented by
   ``ff`` is valid.
 
-  .. coqtop:: in
+  .. rocqtop:: in extra-stdlib
 
     Lemma example_lra' x y : x + 2 * y <= 4 -> 2 * x + y <= 4 -> x + y < 3.
     Proof.
@@ -468,14 +487,14 @@ obtain :math:`-1`. Thus, by Theorem :ref:`Psatz <psatz_thm>`, the goal is valid.
                Fop := OpLt; Frhs := PEc 3 |} tt))
       : BFormula (Formula Q) isProp).
 
-  .. coqtop:: all
+  .. rocqtop:: all extra-stdlib
 
     pose (varmap := VarMap.Branch (VarMap.Elt y) x VarMap.Empty).
     let ff' := eval unfold ff in ff in wlra_Q wit ff'.
     change (eval_bf (Qeval_formula (@VarMap.find Q 0 varmap)) ff).
     apply (QTautoChecker_sound ff wit).
 
-  .. coqtop:: in
+  .. rocqtop:: in extra-stdlib
 
     vm_compute.
     reflexivity.

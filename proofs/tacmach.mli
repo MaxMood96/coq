@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -48,6 +48,7 @@ val pf_hnf_constr : Proofview.Goal.t -> constr -> types
 val pf_hnf_type_of : Proofview.Goal.t -> constr -> types
 
 val pf_compute : Proofview.Goal.t -> constr -> constr
+val pf_whd_compute : Proofview.Goal.t -> constr -> constr
 
 val pf_nf_evar : Proofview.Goal.t -> constr -> constr
 

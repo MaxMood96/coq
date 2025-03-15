@@ -1,2 +1,2 @@
-Fail Require Import Coq.Does.Not.Exist.
-Fail From Coq Require Import Does.Not.Exist.
+Fail Require Import Corelib.Does.Not.Exist.
+Fail From Corelib Require Import Does.Not.Exist.

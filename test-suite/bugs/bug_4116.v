@@ -29,14 +29,14 @@ Open Scope function_scope.
 Notation pr1 := projT1.
 Notation pr2 := projT2.
 
-Notation "x .1" := (pr1 x) (at level 3, format "x '.1'") : fibration_scope.
-Notation "x .2" := (pr2 x) (at level 3, format "x '.2'") : fibration_scope.
+Notation "x .1" := (pr1 x) : fibration_scope.
+Notation "x .2" := (pr2 x) : fibration_scope.
 
 Notation compose := (fun g f x => g (f x)).
 
 Notation "g 'o' f" := (compose g%function f%function) (at level 40, left associativity) : function_scope.
 
-Inductive paths {A : Type} (a : A) : A -> Type :=
+Inductive paths {A : Type} (a : A) : A -> Prop :=
   idpath : paths a a.
 
 Arguments idpath {A a} , [A] a.
@@ -185,8 +185,8 @@ Module Export Category.
 
           identity_identity : forall x, identity x o identity x = identity x
         }.
-    Arguments identity {!C%category} / x%object : rename.
-    Arguments compose {!C%category} / {s d d'}%object (m1 m2)%morphism : rename.
+    Arguments identity {!C%_category} / x%_object : rename.
+    Arguments compose {!C%_category} / {s d d'}%_object (m1 m2)%_morphism : rename.
 
     Definition Build_PreCategory
                object morphism compose identity
@@ -233,7 +233,7 @@ Module Export Core.
                                 = identity (object_of x)
       }.
   End Functor.
-  Arguments morphism_of [C%category] [D%category] F%functor [s%object d%object] m%morphism : rename, simpl nomatch.
+  Arguments morphism_of [C%_category] [D%_category] F%_functor [s%_object d%_object] m%_morphism : rename, simpl nomatch.
 
 End Core.
 Module Export Morphisms.
@@ -251,8 +251,8 @@ Module Export Morphisms.
 
   Class Isomorphic {C : PreCategory} s d :=
     {
-      morphism_isomorphic :> morphism C s d;
-      isisomorphism_isomorphic :> IsIsomorphism morphism_isomorphic
+      morphism_isomorphic :: morphism C s d;
+      isisomorphism_isomorphic :: IsIsomorphism morphism_isomorphic
     }.
 
   Coercion morphism_isomorphic : Isomorphic >-> morphism.

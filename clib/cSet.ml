@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -16,7 +16,35 @@ end
 
 module type S = Set.S
 
-module Make(M : OrderedType)= Set.Make(M)
+module type ExtS =
+sig
+  include CSig.SetS
+  module List : sig
+    val union : t list -> t
+  end
+end
+
+module SetExt (M : Set.OrderedType) :
+sig
+  type set = Set.Make(M).t
+  module List : sig
+    val union : set list -> set
+  end
+end =
+struct
+  module S = Set.Make(M)
+  type set = S.t
+
+  module List = struct
+    let union = List.fold_left S.union S.empty
+  end
+end
+
+module Make(M : Set.OrderedType) =
+struct
+  include Set.Make(M)
+  include SetExt(M)
+end
 
 module type HashedType =
 sig
@@ -24,7 +52,7 @@ sig
   val hash : t -> int
 end
 
-module Hashcons(M : OrderedType)(H : HashedType with type t = M.t)  =
+module Hashcons(M : OrderedType)(H : Hashcons.HashedType with type t = M.t)  =
 struct
   module Set = Make(M)
 
@@ -36,17 +64,20 @@ struct
   let set_prj : set -> _set = Obj.magic
   let set_inj : _set -> set = Obj.magic
 
+  (* equivalent sets may have different structure, so we don't hash and compare by
+     the actual structure but only by the list of elements *)
   let rec spine s accu = match set_prj s with
   | SEmpty -> accu
   | SNode (l, v, r, _) -> spine l ((v, r) :: accu)
 
-  let rec umap f s = match set_prj s with
-  | SEmpty -> set_inj SEmpty
+  let rec umap hacc s = match set_prj s with
+  | SEmpty -> hacc, set_inj SEmpty
   | SNode (l, v, r, h) ->
-    let l' = umap f l in
-    let r' = umap f r in
-    let v' = f v in
-    set_inj (SNode (l', v', r', h))
+    let hacc, l' = umap hacc l in
+    let hv, v' = H.hcons v in
+    let hacc = Hashset.Combine.combine hacc hv in
+    let hacc, r' = umap hacc r in
+    hacc, set_inj (SNode (l', v', r', h))
 
   let rec eqeq s1 s2 = match s1, s2 with
   | [], [] -> true
@@ -56,12 +87,9 @@ struct
 
   module Hashed =
   struct
-    open Hashset.Combine
     type t = set
-    type u = M.t -> M.t
     let eq s1 s2 = s1 == s2 || eqeq (spine s1 []) (spine s2 [])
-    let hash s = Set.fold (fun v accu -> combine (H.hash v) accu) s 0
-    let hashcons = umap
+    let hashcons v = umap 0 v
   end
 
   include Hashcons.Make(Hashed)

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -47,6 +47,8 @@ type mix_type_scheme = int * mix_var glb_typexpr
 val mem_var : Id.t -> t -> bool
 
 val find_var : Id.t -> t -> mix_type_scheme
+
+val is_used_var : Id.t -> t -> bool
 
 val bound_vars : t -> Id.Set.t
 

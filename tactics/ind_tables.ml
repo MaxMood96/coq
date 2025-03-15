@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -18,9 +18,8 @@ open Names
 open Nameops
 open Declarations
 open Constr
-open CErrors
 open Util
-open Pp
+
 
 (**********************************************************************)
 (* Registering schemes in the environment *)
@@ -28,9 +27,9 @@ open Pp
 type handle = Evd.side_effects
 
 type mutual_scheme_object_function =
-  Environ.env -> handle -> MutInd.t -> constr array Evd.in_evar_universe_context
+  Environ.env -> handle -> MutInd.t -> constr array Evd.in_ustate
 type individual_scheme_object_function =
-  Environ.env -> handle -> inductive -> constr Evd.in_evar_universe_context
+  Environ.env -> handle -> inductive -> constr Evd.in_ustate
 
 type 'a scheme_kind = string
 
@@ -53,26 +52,28 @@ type scheme_object_function =
 let scheme_object_table =
   (Hashtbl.create 17 : (string, string * scheme_object_function) Hashtbl.t)
 
-let declare_scheme_object s aux f =
+let declare_scheme_object key ?(suff=key) f =
   let () =
-    if not (Id.is_valid ("ind" ^ s)) then
-      user_err Pp.(str ("Illegal induction scheme suffix: " ^ s))
+    if not (Id.is_valid ("ind_" ^ suff)) then
+      CErrors.user_err Pp.(str ("Illegal induction scheme suffix: " ^ suff))
   in
-  let key = if String.is_empty aux then s else aux in
-  try
-    let _ = Hashtbl.find scheme_object_table key in
-(*    let aux_msg = if aux="" then "" else " (with key "^aux^")" in*)
-    user_err
-      (str "Scheme object " ++ str key ++ str " already declared.")
-  with Not_found ->
-    Hashtbl.add scheme_object_table key (s,f);
+  if Hashtbl.mem scheme_object_table key then
+    CErrors.user_err
+      Pp.(str "Scheme object " ++ str key ++ str " already declared.")
+  else begin
+    Hashtbl.add scheme_object_table key (suff,f);
     key
+  end
 
-let declare_mutual_scheme_object s ?deps ?(aux="") f =
-  declare_scheme_object s aux (MutualSchemeFunction (f, deps))
+let declare_mutual_scheme_object key ?suff ?deps f =
+  declare_scheme_object key ?suff (MutualSchemeFunction (f, deps))
 
-let declare_individual_scheme_object s ?deps ?(aux="") f =
-  declare_scheme_object s aux (IndividualSchemeFunction (f, deps))
+let declare_individual_scheme_object key ?suff ?deps f =
+  declare_scheme_object key ?suff (IndividualSchemeFunction (f, deps))
+
+let is_declared_scheme_object key = Hashtbl.mem scheme_object_table key
+
+let scheme_kind_name (key : _ scheme_kind) : string = key
 
 (**********************************************************************)
 (* Defining/retrieving schemes *)
@@ -103,10 +104,7 @@ let redeclare_schemes eff =
       String.Map.add kind ((ind, c) :: old) accu
   in
   let schemes = Cmap.fold fold eff.Evd.seff_roles String.Map.empty in
-  let iter kind defs =
-    let defs = Array.of_list defs in
-    DeclareScheme.declare_scheme kind defs
-  in
+  let iter kind defs = List.iter (DeclareScheme.declare_scheme SuperGlobal kind) defs in
   String.Map.iter iter schemes
 
 let local_lookup_scheme eff kind ind = match lookup_scheme kind ind with
@@ -124,10 +122,12 @@ let local_lookup_scheme eff kind ind = match lookup_scheme kind ind with
 let local_check_scheme kind ind eff =
   Option.has_some (local_lookup_scheme eff kind ind)
 
-let define ?loc internal role id c poly univs =
+let define ?loc internal role id c poly uctx =
   let id = compute_name internal id in
-  let uctx = UState.minimize univs in
+  let uctx = UState.collapse_above_prop_sort_variables ~to_prop:true uctx in
+  let uctx = UState.minimize uctx in
   let c = UState.nf_universes uctx c in
+  let uctx = UState.restrict uctx (Vars.universes_of_constr c) in
   let univs = UState.univ_entry ~poly uctx in
   !declare_definition_scheme ~internal ~univs ~role ~name:id ?loc c
 
@@ -172,18 +172,18 @@ let rec define_individual_scheme_base ?loc kind suff f ~internal idopt (mind,i a
   let mib = Global.lookup_mind mind in
   let id = match idopt with
     | Some id -> id
-    | None -> add_suffix mib.mind_packets.(i).mind_typename suff in
+    | None -> add_suffix mib.mind_packets.(i).mind_typename ("_"^suff) in
   let role = Evd.Schema (ind, kind) in
   let const, neff = define ?loc internal role id c (Declareops.inductive_is_polymorphic mib) ctx in
   let eff = Evd.concat_side_effects neff eff in
   const, eff
 
-and define_individual_scheme ?loc kind ~internal names (mind,i as ind) =
+and define_individual_scheme ?loc kind ~internal names (mind,i as ind) eff =
   match Hashtbl.find scheme_object_table kind with
   | _,MutualSchemeFunction _ -> assert false
   | s,IndividualSchemeFunction (f, deps) ->
     let deps = match deps with None -> [] | Some deps -> deps (Global.env ()) ind in
-    let eff = List.fold_left (fun eff dep -> declare_scheme_dependence eff dep) Evd.empty_side_effects deps in
+    let eff = List.fold_left (fun eff dep -> declare_scheme_dependence eff dep) eff deps in
     define_individual_scheme_base ?loc kind s f ~internal names ind eff
 
 (* Assumes that dependencies are already defined *)
@@ -193,7 +193,7 @@ and define_mutual_scheme_base ?(locmap=Locmap.default None) kind suff f ~interna
   let mib = Global.lookup_mind mind in
   let ids = Array.init (Array.length mib.mind_packets) (fun i ->
       try Int.List.assoc i names
-      with Not_found -> add_suffix mib.mind_packets.(i).mind_typename suff) in
+      with Not_found -> add_suffix mib.mind_packets.(i).mind_typename ("_"^suff)) in
   let fold i effs id cl =
     let role = Evd.Schema ((mind, i), kind)in
     let loc = Locmap.lookup ~locmap (mind,i) in
@@ -203,12 +203,12 @@ and define_mutual_scheme_base ?(locmap=Locmap.default None) kind suff f ~interna
   let (eff, consts) = Array.fold_left2_map_i fold eff ids cl in
   consts, eff
 
-and define_mutual_scheme ?locmap kind ~internal names mind =
+and define_mutual_scheme ?locmap kind ~internal names mind eff =
   match Hashtbl.find scheme_object_table kind with
   | _,IndividualSchemeFunction _ -> assert false
   | s,MutualSchemeFunction (f, deps) ->
     let deps = match deps with None -> [] | Some deps -> deps (Global.env ()) mind in
-    let eff = List.fold_left (fun eff dep -> declare_scheme_dependence eff dep) Evd.empty_side_effects deps in
+    let eff = List.fold_left (fun eff dep -> declare_scheme_dependence eff dep) eff deps in
     define_mutual_scheme_base ?locmap kind s f ~internal names mind eff
 
 and declare_scheme_dependence eff sd =
@@ -216,12 +216,12 @@ match sd with
 | SchemeIndividualDep (ind, kind) ->
   if local_check_scheme kind ind eff then eff
   else
-    let _, eff' = define_individual_scheme kind ~internal:true None ind in
+    let _, eff' = define_individual_scheme kind ~internal:true None ind eff in
     Evd.concat_side_effects eff' eff
 | SchemeMutualDep (mind, kind) ->
   if local_check_scheme kind (mind, 0) eff then eff
   else
-    let _, eff' = define_mutual_scheme kind ~internal:true [] mind in
+    let _, eff' = define_mutual_scheme kind ~internal:true [] mind eff in
     Evd.concat_side_effects eff' eff
 
 let find_scheme kind (mind,i as ind) =
@@ -231,22 +231,26 @@ let find_scheme kind (mind,i as ind) =
   | Some s ->
     Proofview.tclUNIT s
   | None ->
-  match Hashtbl.find scheme_object_table kind with
-  | s,IndividualSchemeFunction (f, deps) ->
-    let deps = match deps with None -> [] | Some deps -> deps (Global.env ()) ind in
-    let eff = List.fold_left (fun eff dep -> declare_scheme_dependence eff dep) Evd.empty_side_effects deps in
-    let c, eff = define_individual_scheme_base kind s f ~internal:true None ind eff in
-    Proofview.tclEFFECTS eff <*> Proofview.tclUNIT c
-  | s,MutualSchemeFunction (f, deps) ->
-    let deps = match deps with None -> [] | Some deps -> deps (Global.env ()) mind in
-    let eff = List.fold_left (fun eff dep -> declare_scheme_dependence eff dep) Evd.empty_side_effects deps in
-    let ca, eff = define_mutual_scheme_base kind s f ~internal:true [] mind eff in
-    Proofview.tclEFFECTS eff <*> Proofview.tclUNIT ca.(i)
+    try
+      match Hashtbl.find scheme_object_table kind with
+      | s,IndividualSchemeFunction (f, deps) ->
+        let deps = match deps with None -> [] | Some deps -> deps (Global.env ()) ind in
+        let eff = List.fold_left (fun eff dep -> declare_scheme_dependence eff dep) Evd.empty_side_effects deps in
+        let c, eff = define_individual_scheme_base kind s f ~internal:true None ind eff in
+        Proofview.tclEFFECTS eff <*> Proofview.tclUNIT c
+      | s,MutualSchemeFunction (f, deps) ->
+        let deps = match deps with None -> [] | Some deps -> deps (Global.env ()) mind in
+        let eff = List.fold_left (fun eff dep -> declare_scheme_dependence eff dep) Evd.empty_side_effects deps in
+        let ca, eff = define_mutual_scheme_base kind s f ~internal:true [] mind eff in
+        Proofview.tclEFFECTS eff <*> Proofview.tclUNIT ca.(i)
+    with Rocqlib.NotFoundRef _ as e ->
+      let e, info = Exninfo.capture e in
+      Proofview.tclZERO ~info e
 
 let define_individual_scheme ?loc kind names ind =
-  let _ , eff = define_individual_scheme ?loc kind ~internal:false names ind in
+  let _ , eff = define_individual_scheme ?loc kind ~internal:false names ind Evd.empty_side_effects in
   redeclare_schemes eff
 
 let define_mutual_scheme ?locmap kind names mind =
-  let _, eff = define_mutual_scheme ?locmap kind ~internal:false names mind in
+  let _, eff = define_mutual_scheme ?locmap kind ~internal:false names mind Evd.empty_side_effects in
   redeclare_schemes eff

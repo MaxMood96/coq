@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -24,8 +24,6 @@ let wit_ident = Arg.create "ident"
 let wit_constr = Arg.create "constr"
 let wit_open_constr = Arg.create "open_constr"
 let wit_preterm = Arg.create "preterm"
-let wit_ltac1 = Arg.create "ltac1"
-let wit_ltac1val = Arg.create "ltac1val"
 
 (** Syntactic quoting of expressions. *)
 
@@ -35,13 +33,21 @@ let prefix_gen n =
 let control_prefix = prefix_gen "Control"
 let pattern_prefix = prefix_gen "Pattern"
 let array_prefix = prefix_gen "Array"
+let constr_prefix = prefix_gen "Constr"
 let format_prefix = MPdot (prefix_gen "Message", Label.make "Format")
 
 let kername prefix n = KerName.make prefix (Label.of_id (Id.of_string_soft n))
 let std_core n = kername Tac2env.std_prefix n
-let coq_core n = kername Tac2env.coq_prefix n
+let rocq_core n = kername Tac2env.rocq_prefix n
 let control_core n = kername control_prefix n
 let pattern_core n = kername pattern_prefix n
+
+let in_constr mods n =
+  let mp = List.fold_left (fun mp mod_ -> MPdot (mp, Label.of_id @@ Id.of_string mod_))
+      constr_prefix
+      mods
+  in
+  kername mp n
 
 let global_ref ?loc kn =
   CAst.make ?loc @@ CTacRef (AbsKn (TacConstant kn))
@@ -58,7 +64,7 @@ let std_proj ?loc name =
   AbsKn (std_core name)
 
 let thunk e =
-  let t_unit = coq_core "unit" in
+  let t_unit = rocq_core "unit" in
   let loc = e.loc in
   let ty = CAst.make?loc @@ CTypRef (AbsKn (Other t_unit), []) in
   let pat = CAst.make ?loc @@ CPatVar (Anonymous) in
@@ -83,8 +89,8 @@ let of_int {loc;v=n} =
   CAst.make ?loc @@ CTacAtm (AtmInt n)
 
 let of_option ?loc f opt = match opt with
-| None -> constructor ?loc (coq_core "None") []
-| Some e -> constructor ?loc (coq_core "Some") [f e]
+| None -> constructor ?loc (rocq_core "None") []
+| Some e -> constructor ?loc (rocq_core "Some") [f e]
 
 let inj_wit ?loc wit x =
   CAst.make ?loc @@ CTacExt (wit, x)
@@ -102,13 +108,12 @@ let of_anti f = function
 
 let of_ident {loc;v=id} = inj_wit ?loc wit_ident id
 
-let quote_constr ?delimiters c =
+let quote_constr ?(delimiters=[]) c =
   let loc = Constrexpr_ops.constr_loc c in
-  Option.cata
-    (List.fold_left (fun c d ->
-          CAst.make ?loc @@ Constrexpr.CDelimiters(Id.to_string d, c))
-        c)
-    c delimiters
+  List.fold_left (fun c d ->
+      CAst.make ?loc @@ Constrexpr.(CDelimiters(DelimUnboundedScope, Id.to_string d, c)))
+    c
+    delimiters
 
 let of_constr ?delimiters c =
   let loc = Constrexpr_ops.constr_loc c in
@@ -125,18 +130,41 @@ let of_preterm ?delimiters c =
   let c = quote_constr ?delimiters c in
   inj_wit ?loc wit_preterm c
 
+let of_open_constr_expected_istype ?delimiters c =
+  let {loc} as c = quote_constr ?delimiters c in
+  let mk e = CAst.make ?loc e in
+  let c =
+    let sc = Notation.current_type_scope_names () in
+    let delim = List.filter_map (fun sc -> Notation.scope_delimiters (Notation.find_scope sc)) sc in
+    (* Not sure if this puts the delimiters in the correct order, usually we have just "type" *)
+    List.fold_left (fun c delim ->
+        mk @@ Constrexpr.CDelimiters (DelimOnlyTmpScope, delim, c))
+      c
+      delim
+  in
+  let c = inj_wit ?loc wit_preterm c in
+  let gref n = global_ref ?loc n in
+  mk @@ CTacApp
+    (gref @@ in_constr ["Pretype"] "pretype",
+     [mk @@ CTacApp (gref @@ in_constr ["Pretype";"Flags"] "open_constr_flags_with_tc_kn",
+                     [of_tuple ?loc []]);
+      gref @@ in_constr ["Pretype"] "expected_istype";
+      c])
+
 let of_bool ?loc b =
-  let c = if b then coq_core "true" else coq_core "false" in
+  let c = if b then rocq_core "true" else rocq_core "false" in
   constructor ?loc c []
 
 let rec of_list ?loc f = function
-| [] -> constructor (coq_core "[]") []
+| [] -> constructor (rocq_core "[]") []
 | e :: l ->
-  constructor ?loc (coq_core "::") [f e; of_list ?loc f l]
+  constructor ?loc (rocq_core "::") [f e; of_list ?loc f l]
 
-let array_of_list ?loc l =
-  let of_list = global_ref ?loc (kername array_prefix "of_list")  in
-  CAst.make ?loc @@ CTacApp (of_list, [l])
+let array_literal ?loc a =
+  if CList.is_empty a then global_ref ?loc (kername array_prefix "empty")
+  else
+    let of_list_kn = global_ref ?loc (kername array_prefix "of_list")  in
+    CAst.make ?loc @@ CTacApp (of_list_kn, [of_list ?loc (fun x -> x) a])
 
 let of_qhyp {loc;v=h} = match h with
 | QAnonHyp n -> std_constructor ?loc "AnonHyp" [of_int n]
@@ -176,6 +204,8 @@ and of_intro_pattern_action {loc;v=pat} = match pat with
   std_constructor ?loc "IntroOrAndPattern" [of_or_and_intro_pattern pat]
 | QIntroInjection il ->
   std_constructor ?loc "IntroInjection" [of_intro_patterns il]
+| QIntroApplyOn (c, i) ->
+  std_constructor ?loc "IntroApplyOn" [thunk @@ of_open_constr c; of_intro_pattern i]
 | QIntroRewrite b ->
   std_constructor ?loc "IntroRewrite" [of_bool ?loc b]
 
@@ -284,7 +314,7 @@ let abstract_vars loc ?typ vars tac =
   let pat = match typ with
   | None -> pat
   | Some typ ->
-    let t_array = coq_core "array" in
+    let t_array = rocq_core "array" in
     let typ = CAst.make ?loc @@ CTypRef (AbsKn (Other t_array), [typ]) in
     CAst.make ?loc @@ CPatCnv (pat, typ)
   in
@@ -313,15 +343,15 @@ let of_repeat {loc;v=r} = match r with
 | QRepeatStar -> std_constructor ?loc "RepeatStar" []
 | QRepeatPlus -> std_constructor ?loc "RepeatPlus" []
 
-let of_orient loc b =
-  if b then std_constructor ?loc "LTR" []
-  else std_constructor ?loc "RTL" []
+let of_orient {loc;v=b} =
+  let helper b =
+    if b then std_constructor ?loc "LTR" []
+    else std_constructor ?loc "RTL" []
+  in
+  of_option ?loc helper b
 
 let of_rewriting {loc;v=rew} =
-  let orient =
-    let {loc;v=orient} = rew.rew_orient in
-    of_option ?loc (fun b -> of_orient loc b) orient
-  in
+  let orient = of_orient rew.rew_orient in
   let repeat = of_repeat rew.rew_repeat in
   let equatn = thunk (of_constr_with_bindings rew.rew_equatn) in
   CAst.make ?loc @@ CTacRec (None, [
@@ -357,6 +387,7 @@ let make_red_flag l =
   | [] -> red
   | {v=flag} :: lf ->
     let red = match flag with
+    | QHead -> { red with rStrength = Head }
     | QBeta -> { red with rBeta = true }
     | QMatch -> { red with rMatch = true }
     | QFix -> { red with rFix = true }
@@ -379,7 +410,7 @@ let make_red_flag l =
   in
   add_flag
     {rBeta = false; rMatch = false; rFix = false; rCofix = false;
-     rZeta = false; rDelta = false; rConst = []}
+     rZeta = false; rDelta = false; rConst = []; rStrength = Norm; }
     l
 
 let of_reference r =
@@ -388,10 +419,18 @@ let of_reference r =
   in
   of_anti of_ref r
 
+let of_strength ?loc s =
+  let s = let open Genredexpr in match s with
+  | Norm -> std_core "Norm"
+  | Head -> std_core "Head"
+  in
+  constructor ?loc s []
+
 let of_strategy_flag {loc;v=flag} =
   let open Genredexpr in
   let flag = make_red_flag flag in
   CAst.make ?loc @@ CTacRec (None, [
+    std_proj "rStrength", of_strength ?loc flag.rStrength;
     std_proj "rBeta", of_bool ?loc flag.rBeta;
     std_proj "rMatch", of_bool ?loc flag.rMatch;
     std_proj "rFix", of_bool ?loc flag.rFix;
@@ -432,7 +471,7 @@ let of_constr_matching {loc;v=m} =
     let vars = List.map (fun (id, loc) -> CAst.make ?loc (Name id)) vars in
     (* Annotate the bound array variable with constr type *)
     let typ =
-      let t_constr = coq_core "constr" in
+      let t_constr = rocq_core "constr" in
       CAst.make ?loc @@ CTypRef (AbsKn (Other t_constr), [])
     in
     let e = abstract_vars loc ~typ vars tac in
@@ -440,7 +479,8 @@ let of_constr_matching {loc;v=m} =
     let pat = inj_wit ?loc:ploc wit_pattern pat in
     of_tuple [knd; pat; e]
   in
-  of_list ?loc map m
+  let e = of_list ?loc map m in
+  e
 
 (** From the patterns and the body of the branch, generate:
     - a goal pattern: (constr_match list * constr_match)
@@ -503,7 +543,10 @@ let of_goal_matching {loc;v=gm} =
     let tac = abstract_vars loc hyps tac in
     of_tuple ?loc [pat; tac]
   in
-  of_list ?loc map gm
+  let e = of_list ?loc map gm in
+  let tykn = pattern_core "goal_matching" in
+  let ty = CAst.make ?loc (CTypRef (AbsKn (Other tykn),[CAst.make ?loc (CTypVar Anonymous)])) in
+  CAst.make ?loc (CTacCnv (e, ty))
 
 let of_move_location {loc;v=mv} = match mv with
 | QMoveAfter id -> std_constructor ?loc "MoveAfter" [of_anti of_ident id]
@@ -517,7 +560,7 @@ let of_pose p =
 let of_assertion {loc;v=ast} = match ast with
 | QAssertType (ipat, c, tac) ->
   let ipat = of_option of_intro_pattern ipat in
-  let c = of_constr c in
+  let c = of_open_constr_expected_istype c in
   let tac = of_option thunk tac in
   std_constructor ?loc "AssertType" [ipat; c; tac]
 | QAssertValue (id, c) ->
@@ -546,5 +589,5 @@ let of_format { v = fmt; loc } =
     with Tac2print.InvalidFormat ->
       CErrors.user_err ?loc (str "Invalid format")
   in
-  let stop = CAst.make @@ CTacApp (global_ref (kername format_prefix "stop"), [of_tuple []]) in
+  let stop = global_ref (kername format_prefix "stop") in
   List.fold_left of_format stop fmt

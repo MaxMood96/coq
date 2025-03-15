@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,56 +11,7 @@
 open Names
 open EConstr
 open Tac2dyn
-
-(** {5 Toplevel values} *)
-
-(** {5 Dynamic semantics} *)
-
-(** Values are represented in a way similar to OCaml, i.e. they contrast
-    immediate integers (integers, constructors without arguments) and structured
-    blocks (tuples, arrays, constructors with arguments), as well as a few other
-    base cases, namely closures, strings, named constructors, and dynamic type
-    coming from the Coq implementation. *)
-
-type tag = int
-
-type closure
-
-type valexpr =
-| ValInt of int
-  (** Immediate integers *)
-| ValBlk of tag * valexpr array
-  (** Structured blocks *)
-| ValStr of Bytes.t
-  (** Strings *)
-| ValCls of closure
-  (** Closures *)
-| ValOpn of KerName.t * valexpr array
-  (** Open constructors *)
-| ValExt : 'a Tac2dyn.Val.tag * 'a -> valexpr
-  (** Arbitrary data *)
-
-type 'a arity
-
-val arity_one : (valexpr -> valexpr Proofview.tactic) arity
-val arity_suc : 'a arity -> (valexpr -> 'a) arity
-
-val mk_closure : 'v arity -> 'v -> closure
-val mk_closure_val : 'v arity -> 'v -> valexpr
-
-val annotate_closure : Tac2expr.frame -> closure -> closure
-(** The closure must not be already annotated *)
-
-module Valexpr :
-sig
-  type t = valexpr
-  val is_int : t -> bool
-  val tag : t -> int
-  val field : t -> int -> t
-  val set_field : t -> int -> t -> unit
-  val make_block : int -> t array -> t
-  val make_int : int -> t
-end
+open Tac2val
 
 (** {5 Ltac2 FFI} *)
 
@@ -110,13 +61,31 @@ val of_constr : EConstr.t -> valexpr
 val to_constr : valexpr -> EConstr.t
 val constr : EConstr.t repr
 
+val of_matching_context : Constr_matching.context -> valexpr
+val to_matching_context : valexpr -> Constr_matching.context
+val matching_context : Constr_matching.context repr
+
+val of_preterm : Ltac_pretype.closed_glob_constr -> valexpr
+val to_preterm : valexpr -> Ltac_pretype.closed_glob_constr
+val preterm : Ltac_pretype.closed_glob_constr repr
+
 val of_cast : Constr.cast_kind -> valexpr
 val to_cast : valexpr -> Constr.cast_kind
 val cast : Constr.cast_kind repr
 
+(** Toplevel representation of OCaml exceptions. Invariant: no [LtacError]
+    should be used with [err]. *)
+val of_err : Exninfo.iexn -> valexpr
+val to_err : valexpr -> Exninfo.iexn
+val err : Exninfo.iexn repr
+
 val of_exn : Exninfo.iexn -> valexpr
 val to_exn : valexpr -> Exninfo.iexn
 val exn : Exninfo.iexn repr
+
+val of_exninfo : Exninfo.info -> valexpr
+val to_exninfo : valexpr -> Exninfo.info
+val exninfo : Exninfo.info repr
 
 val of_ident : Id.t -> valexpr
 val to_ident : valexpr -> Id.t
@@ -157,13 +126,65 @@ val of_evar : Evar.t -> valexpr
 val to_evar : valexpr -> Evar.t
 val evar : Evar.t repr
 
+val of_sort : ESorts.t -> valexpr
+val to_sort : valexpr -> ESorts.t
+val sort : ESorts.t repr
+
 val of_pp : Pp.t -> valexpr
 val to_pp : valexpr -> Pp.t
 val pp : Pp.t repr
 
+val of_transparent_state : TransparentState.t -> valexpr
+val to_transparent_state : valexpr -> TransparentState.t
+val transparent_state : TransparentState.t repr
+
+val of_pretype_flags : Pretyping.inference_flags -> valexpr
+val to_pretype_flags : valexpr -> Pretyping.inference_flags
+val pretype_flags : Pretyping.inference_flags repr
+
+val of_expected_type : Pretyping.typing_constraint -> valexpr
+val to_expected_type : valexpr -> Pretyping.typing_constraint
+val expected_type : Pretyping.typing_constraint repr
+
+type ind_data = (Names.Ind.t * Declarations.mutual_inductive_body)
+
+val of_ind_data : ind_data -> valexpr
+val to_ind_data : valexpr -> ind_data
+val ind_data : ind_data repr
+
+val of_inductive : inductive -> valexpr
+val to_inductive : valexpr -> inductive
+val inductive : inductive repr
+
 val of_constant : Constant.t -> valexpr
 val to_constant : valexpr -> Constant.t
 val constant : Constant.t repr
+
+val of_constructor : constructor -> valexpr
+val to_constructor : valexpr -> constructor
+val constructor : constructor repr
+
+val of_projection : Projection.t -> valexpr
+val to_projection : valexpr -> Projection.t
+val projection : Projection.t repr
+
+val of_qvar : Sorts.QVar.t -> valexpr
+val to_qvar : valexpr -> Sorts.QVar.t
+val qvar : Sorts.QVar.t repr
+
+val of_case : Constr.case_info -> valexpr
+val to_case : valexpr -> Constr.case_info
+val case : Constr.case_info repr
+
+type binder = (Name.t EConstr.binder_annot * types)
+
+val of_binder : binder -> valexpr
+val to_binder : valexpr -> binder
+val binder : binder repr
+
+val of_instance : EConstr.EInstance.t -> valexpr
+val to_instance : valexpr -> EConstr.EInstance.t
+val instance : EConstr.EInstance.t repr
 
 val of_reference : GlobRef.t -> valexpr
 val to_reference : valexpr -> GlobRef.t
@@ -177,6 +198,10 @@ val of_open : KerName.t * valexpr array -> valexpr
 val to_open : valexpr -> KerName.t * valexpr array
 val open_ : (KerName.t * valexpr array) repr
 
+val of_free : Nameops.Fresh.t -> valexpr
+val to_free : valexpr -> Nameops.Fresh.t
+val free : Nameops.Fresh.t repr
+
 val of_uint63 : Uint63.t -> valexpr
 val to_uint63 : valexpr -> Uint63.t
 val uint63 : Uint63.t repr
@@ -184,6 +209,10 @@ val uint63 : Uint63.t repr
 val of_float : Float64.t -> valexpr
 val to_float : valexpr -> Float64.t
 val float : Float64.t repr
+
+val of_pstring : Pstring.t -> valexpr
+val to_pstring : valexpr -> Pstring.t
+val pstring : Pstring.t repr
 
 type ('a, 'b) fun1
 
@@ -193,45 +222,6 @@ val to_fun1 : 'a repr -> 'b repr -> valexpr -> ('a, 'b) fun1
 val fun1 : 'a repr -> 'b repr -> ('a, 'b) fun1 repr
 
 val valexpr : valexpr repr
-
-(** {5 Dynamic tags} *)
-
-val val_constr : EConstr.t Val.tag
-val val_ident : Id.t Val.tag
-val val_pattern : Pattern.constr_pattern Val.tag
-val val_preterm : Ltac_pretype.closed_glob_constr Val.tag
-val val_matching_context : Constr_matching.context Val.tag
-val val_evar : Evar.t Val.tag
-val val_pp : Pp.t Val.tag
-val val_sort : ESorts.t Val.tag
-val val_cast : Constr.cast_kind Val.tag
-val val_inductive : inductive Val.tag
-val val_constant : Constant.t Val.tag
-val val_constructor : constructor Val.tag
-val val_projection : Projection.t Val.tag
-val val_case : Constr.case_info Val.tag
-val val_binder : (Name.t Context.binder_annot * types) Val.tag
-val val_univ : Univ.Level.t Val.tag
-val val_free : Id.Set.t Val.tag
-val val_uint63 : Uint63.t Val.tag
-val val_float : Float64.t Val.tag
-val val_ltac1 : Geninterp.Val.t Val.tag
-
-val val_ind_data : (Names.Ind.t * Declarations.mutual_inductive_body) Val.tag
-
-val val_exn : Exninfo.iexn Tac2dyn.Val.tag
-(** Toplevel representation of OCaml exceptions. Invariant: no [LtacError]
-    should be put into a value with tag [val_exn]. *)
-
-(** Closures *)
-
-val apply : closure -> valexpr list -> valexpr Proofview.tactic
-(** Given a closure, apply it to some arguments. Handling of argument mismatches
-    is done automatically, i.e. in case of over or under-application. *)
-
-val abstract : int -> (valexpr list -> valexpr Proofview.tactic) -> closure
-(** Turn a fixed-arity function into a closure. The inner function is guaranteed
-    to be applied to a list whose size is the integer argument. *)
 
 (** Exception *)
 

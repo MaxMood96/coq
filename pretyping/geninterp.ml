@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -99,5 +99,7 @@ end
 module Interp = Register(InterpObj)
 
 let interp = Interp.obj
+
+let generic_interp ist (GenArg (Glbwit wit, v)) = interp wit ist v
 
 let register_interp0 = Interp.register0

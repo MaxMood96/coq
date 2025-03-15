@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -312,7 +312,7 @@ let parse s =
         let attrs = List.map int_of_string attrs in
         let attrs = parse_style (make ()) attrs in
         (name, attrs) :: accu
-      with _ -> accu
+      with Failure _ | Invalid_argument _ -> accu
     in
     accu
   | _ -> accu

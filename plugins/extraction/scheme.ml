@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -60,7 +60,9 @@ let pp_apply st _ = function
 
 (*s The pretty-printer for Scheme syntax *)
 
-let pp_global k r = str (Common.pp_global k r)
+let pp_global k r =
+  if is_inline_custom r then str (find_custom r)
+  else str (Common.pp_global k r)
 
 (*s Pretty-printing of expressions.  *)
 
@@ -128,11 +130,13 @@ let rec pp_expr env args =
         str "__" (* An [MLdummy] may be applied, but I don't really care. *)
     | MLmagic a ->
         pp_expr env args a
-    | MLaxiom -> paren (str "error \"AXIOM TO BE REALIZED\"")
+    | MLaxiom s -> paren (str "error \"AXIOM TO BE REALIZED (" ++ str s ++ str ")\"")
     | MLuint _ ->
       paren (str "Prelude.error \"EXTRACTION OF UINT NOT IMPLEMENTED\"")
     | MLfloat _ ->
       paren (str "Prelude.error \"EXTRACTION OF FLOAT NOT IMPLEMENTED\"")
+    | MLstring _ ->
+      paren (str "Prelude.error \"EXTRACTION OF STRING NOT IMPLEMENTED\"")
     | MLparray _ ->
             paren (str "Prelude.error \"EXTRACTION OF PARRAY NOT IMPLEMENTED\"")
 

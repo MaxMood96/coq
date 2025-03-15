@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,7 +12,6 @@
 
 (** #<style> .doc { font-family: monospace; white-space: pre; } </style># **)
 
-Require Bool.
 Require Import ssreflect ssrfun.
 
 (**
@@ -300,9 +299,9 @@ Set Implicit Arguments.
 Unset Strict Implicit.
 Unset Printing Implicit Defensive.
 
-Notation reflect := Bool.reflect.
-Notation ReflectT := Bool.ReflectT.
-Notation ReflectF := Bool.ReflectF.
+Notation reflect := Datatypes.reflect.
+Notation ReflectT := Datatypes.ReflectT.
+Notation ReflectF := Datatypes.ReflectF.
 
 Reserved Notation "~~ b" (at level 35, right associativity).
 Reserved Notation "b ==> c" (at level 55, right associativity).
@@ -583,7 +582,7 @@ Proof. by case: b => // /(_ isT). Qed.
 
 (**
  Coercion of sum-style datatypes into bool, which makes it possible
- to use ssr's boolean if rather than Coq's "generic" if.             **)
+ to use ssr's boolean if rather than Rocq's "generic" if.             **)
 
 Coercion isSome T (u : option T) := if u is Some _ then true else false.
 
@@ -832,6 +831,17 @@ move=> iPQ []// notPQ; apply/notPQ=> /iPQ-cQ.
 by case: notF; apply: cQ => hQ; apply: notPQ.
 Qed.
 
+Lemma classic_sigW T (P : T -> Prop) :
+  classically (exists x, P x) <-> classically ({x | P x}).
+Proof. by split; apply: classic_bind => -[x Px]; apply/classicW; exists x. Qed.
+
+Lemma classic_ex T (P : T -> Prop) :
+  ~ (forall x, ~ P x) -> classically (exists x, P x).
+Proof.
+move=> NfNP; apply/classicP => exPF; apply: NfNP => x Px.
+by apply: exPF; exists x.
+Qed.
+
 (**
  List notations for wider connectives; the Prop connectives have a fixed
  width so as to avoid iterated destruction (we go up to width 5 for /\, and
@@ -911,6 +921,7 @@ Proof. by case b1; constructor. Qed.
 Lemma boolP : alt_spec b1 b1 b1.
 Proof. exact: (altP idP). Qed.
 
+(* Left-to-right reflection of ~~b1 to (b1 = false), no-op otherwise. *)
 Lemma idPn : reflect (~~ b1) (~~ b1).
 Proof. by case b1; constructor. Qed.
 
@@ -920,6 +931,10 @@ Proof. by case b1; constructor; auto. Qed.
 Lemma negPn : reflect b1 (~~ ~~ b1).
 Proof. by case b1; constructor. Qed.
 
+(* Right-to-left reflection, no-op otherwise.
+   C.f., https://github.com/math-comp/math-comp/issues/284
+   To change `b1 = false` into `~~ b1`, use `apply/negbTE` or `apply/idPn` (goal)
+   or `move/negbT` or `move/idPn` (hypothesis). *)
 Lemma negPf : reflect (b1 = false) (~~ b1).
 Proof. by case b1; constructor. Qed.
 
@@ -1211,7 +1226,7 @@ Ltac bool_congr :=
  appearing in the premises or right-hand side of a generic lemma parameterized
  by ?P will be indistinguishable from @mem T pT A.
    Users should take care not to inadvertently "strip" (mem A) down to the
- coerced A, since this will expose the internal toP coercion: Coq could then
+ coerced A, since this will expose the internal toP coercion: Rocq could then
  display terms A x that cannot be typed as such. The topredE lemma can be used
  to restore the x \in A syntax in this case. While -topredE can conversely be
  used to change x \in P into P x for an applicative P, it is safer to use the
@@ -1302,20 +1317,21 @@ Definition predC {T} (p : pred T) := SimplPred (xpredC p).
 Definition predD {T} (p1 p2 : pred T) := SimplPred (xpredD p1 p2).
 Definition preim {aT rT} (f : aT -> rT) (d : pred rT) := SimplPred (xpreim f d).
 
-Notation "[ 'pred' : T | E ]" := (SimplPred (fun _ : T => E%B)) : fun_scope.
-Notation "[ 'pred' x | E ]" := (SimplPred (fun x => E%B)) : fun_scope.
-Notation "[ 'pred' x | E1 & E2 ]" := [pred x | E1 && E2 ] : fun_scope.
+Notation "[ 'pred' : T | E ]" := (SimplPred (fun _ : T => E%B)) :
+  function_scope.
+Notation "[ 'pred' x | E ]" := (SimplPred (fun x => E%B)) : function_scope.
+Notation "[ 'pred' x | E1 & E2 ]" := [pred x | E1 && E2 ] : function_scope.
 Notation "[ 'pred' x : T | E ]" :=
-  (SimplPred (fun x : T => E%B)) (only parsing) : fun_scope.
+  (SimplPred (fun x : T => E%B)) (only parsing) : function_scope.
 Notation "[ 'pred' x : T | E1 & E2 ]" :=
-  [pred x : T | E1 && E2 ] (only parsing) : fun_scope.
+  [pred x : T | E1 && E2 ] (only parsing) : function_scope.
 
 (** Coercions for simpl_pred.
    As simpl_pred T values are used both applicatively and collectively we
  need simpl_pred to coerce to both pred T _and_ {pred T}. However it is
  undesirable to have two distinct constants for what are essentially identical
  coercion functions, as this confuses the SSReflect keyed matching algorithm.
- While the Coq Coercion declarations appear to disallow such Coercion aliasing,
+ While the Rocq Coercion declarations appear to disallow such Coercion aliasing,
  it is possible to work around this limitation with a combination of modules
  and functors, which we do below.
    In addition we also give a predType instance for simpl_pred, which will
@@ -1380,9 +1396,9 @@ Definition relU {T} (r1 r2 : rel T) := SimplRel (xrelU r1 r2).
 Definition relpre {aT rT} (f : aT -> rT) (r : rel rT) := SimplRel (xrelpre f r).
 
 Notation "[ 'rel' x y | E ]" := (SimplRel (fun x y => E%B))
-  (only parsing) : fun_scope.
+  (only parsing) : function_scope.
 Notation "[ 'rel' x y : T | E ]" :=
-  (SimplRel (fun x y : T => E%B)) (only parsing) : fun_scope.
+  (SimplRel (fun x y : T => E%B)) (only parsing) : function_scope.
 
 Lemma subrelUl T (r1 r2 : rel T) : subrel r1 (relU r1 r2).
 Proof. by move=> x y r1xy; apply/orP; left. Qed.
@@ -1443,25 +1459,29 @@ Notation "x \notin A" := (~~ (x \in A)) : bool_scope.
 Notation "A =i B" := (eq_mem (mem A) (mem B)) : type_scope.
 Notation "{ 'subset' A <= B }" := (sub_mem (mem A) (mem B)) : type_scope.
 
-Notation "[ 'mem' A ]" :=
-  (pred_of_simpl (simpl_of_mem (mem A))) (only parsing) : fun_scope.
+Notation "[ 'in' A ]" := (in_mem^~ (mem A))
+  (at level 0, format "[ 'in'  A ]") : function_scope.
 
-Notation "[ 'predI' A & B ]" := (predI [mem A] [mem B]) : fun_scope.
-Notation "[ 'predU' A & B ]" := (predU [mem A] [mem B]) : fun_scope.
-Notation "[ 'predD' A & B ]" := (predD [mem A] [mem B]) : fun_scope.
-Notation "[ 'predC' A ]" := (predC [mem A]) : fun_scope.
-Notation "[ 'preim' f 'of' A ]" := (preim f [mem A]) : fun_scope.
-Notation "[ 'pred' x 'in' A ]" := [pred x | x \in A] : fun_scope.
-Notation "[ 'pred' x 'in' A | E ]" := [pred x | x \in A & E] : fun_scope.
+Notation "[ 'mem' A ]" :=
+  (pred_of_simpl (simpl_of_mem (mem A))) (only parsing) : function_scope.
+
+Notation "[ 'predI' A & B ]" := (predI [in A] [in B]) : function_scope.
+Notation "[ 'predU' A & B ]" := (predU [in A] [in B]) : function_scope.
+Notation "[ 'predD' A & B ]" := (predD [in A] [in B]) : function_scope.
+Notation "[ 'predC' A ]" := (predC [in A]) : function_scope.
+Notation "[ 'preim' f 'of' A ]" := (preim f [in A]) : function_scope.
+
+Notation "[ 'pred' x 'in' A ]" := [pred x | x \in A] : function_scope.
+Notation "[ 'pred' x 'in' A | E ]" := [pred x | x \in A & E] : function_scope.
 Notation "[ 'pred' x 'in' A | E1 & E2 ]" :=
-  [pred x | x \in A & E1 && E2 ] : fun_scope.
+  [pred x | x \in A & E1 && E2 ] : function_scope.
 
 Notation "[ 'rel' x y 'in' A & B | E ]" :=
-  [rel x y | (x \in A) && (y \in B) && E] : fun_scope.
+  [rel x y | (x \in A) && (y \in B) && E] : function_scope.
 Notation "[ 'rel' x y 'in' A & B ]" :=
-  [rel x y | (x \in A) && (y \in B)] : fun_scope.
-Notation "[ 'rel' x y 'in' A | E ]" := [rel x y in A & A | E] : fun_scope.
-Notation "[ 'rel' x y 'in' A ]" := [rel x y in A & A] : fun_scope.
+  [rel x y | (x \in A) && (y \in B)] : function_scope.
+Notation "[ 'rel' x y 'in' A | E ]" := [rel x y in A & A | E] : function_scope.
+Notation "[ 'rel' x y 'in' A ]" := [rel x y in A & A] : function_scope.
 
 (** Aliases of pred T that let us tag instances of simpl_pred as applicative
   or collective, via bespoke coercions. This tagging will give control over
@@ -1868,7 +1888,7 @@ Notation "{ 'on' cd , 'bijective' f }" :=
 (**
  Weakening and monotonicity lemmas for localized predicates.
  Note that using these lemmas in backward reasoning will force expansion of
- the predicate definition, as Coq needs to expose the quantifier to apply
+ the predicate definition, as Rocq needs to expose the quantifier to apply
  these lemmas. We define a few specialized variants to avoid this for some
  of the ssrfun predicates.                                                   **)
 

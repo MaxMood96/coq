@@ -3,11 +3,9 @@
    (Simplification of an example from file parsing2.v of the Coq'Art
     exercises) *)
 
-Require Import List.
+Parameter parse_rel : list bool -> list bool -> nat -> Prop.
 
-Variable parse_rel : list bool -> list bool -> nat -> Prop.
-
-Variables (l0 : list bool)
+Parameter (l0 : list bool)
   (rec :
      forall l' : list bool,
      length l' <= S (length l0) ->
@@ -19,8 +17,8 @@ Axiom HHH : forall A : Prop, A.
 
 Check
   (match rec l0 (HHH _) with
-   | inleft (existT _ (false :: l1) _) => inright _ (HHH _)
-   | inleft (existT _ (true :: l1) (exist _ t1 (conj Hp Hl))) =>
+   | inleft (existT _ (cons false l1) _) => inright _ (HHH _)
+   | inleft (existT _ (cons true l1) (exist _ t1 (conj Hp Hl))) =>
        inright _ (HHH _)
    | inleft (existT _ _ _) => inright _ (HHH _)
    | inright Hnp => inright _ (HHH _)
@@ -39,8 +37,8 @@ Check
             {t : nat | parse_rel l' l'' t /\ length l'' <= length l'}} +
             {(forall (l'' : list bool) (t : nat), ~ parse_rel l' l'' t)}) =>
    match rec l0 (HHH _) with
-   | inleft (existT _ (false :: l1) _) => inright _ (HHH _)
-   | inleft (existT _ (true :: l1) (exist _ t1 (conj Hp Hl))) =>
+   | inleft (existT _ (cons false l1) _) => inright _ (HHH _)
+   | inleft (existT _ (cons true l1) (exist _ t1 (conj Hp Hl))) =>
        inright _ (HHH _)
    | inleft (existT _ _ _) => inright _ (HHH _)
    | inright Hnp => inright _ (HHH _)

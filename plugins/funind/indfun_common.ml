@@ -41,9 +41,9 @@ let chop_rlambda_n =
     if n == 0 then (List.rev acc, rt)
     else
       match DAst.get rt with
-      | Glob_term.GLambda (name, k, t, b) ->
+      | Glob_term.GLambda (name, _, k, t, b) ->
         chop_lambda_n ((name, t, None) :: acc) (n - 1) b
-      | Glob_term.GLetIn (name, v, t, b) ->
+      | Glob_term.GLetIn (name, _, v, t, b) ->
         chop_lambda_n ((name, v, t) :: acc) (n - 1) b
       | _ ->
         CErrors.user_err
@@ -56,7 +56,7 @@ let chop_rprod_n =
     if n == 0 then (List.rev acc, rt)
     else
       match DAst.get rt with
-      | Glob_term.GProd (name, k, t, b) ->
+      | Glob_term.GProd (name, _, k, t, b) ->
         chop_prod_n ((name, t) :: acc) (n - 1) b
       | _ ->
         CErrors.user_err
@@ -72,14 +72,14 @@ let list_union_eq eq_fun l1 l2 =
   urec l1
 
 let list_add_set_eq eq_fun x l = if List.exists (eq_fun x) l then l else x :: l
-let coq_constant s = UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Coqlib.lib_ref s
+let rocq_constant s = UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Rocqlib.lib_ref s
 
 let find_reference sl s =
   let dp = Names.DirPath.make (List.rev_map Id.of_string sl) in
   Nametab.locate (make_qualid dp (Id.of_string s))
 
-let eq = lazy (EConstr.of_constr (coq_constant "core.eq.type"))
-let refl_equal = lazy (EConstr.of_constr (coq_constant "core.eq.refl"))
+let eq = lazy (EConstr.of_constr (rocq_constant "core.eq.type"))
+let refl_equal = lazy (EConstr.of_constr (rocq_constant "core.eq.refl"))
 
 let with_full_print f a =
   let old_implicit_args = Impargs.is_implicit_args ()
@@ -301,19 +301,17 @@ let pr_table env sigma = pr_table env sigma !from_function
 (*********************************)
 (* Debugging *)
 
-let do_rewrite_dependent =
+let { Goptions.get = do_rewrite_dependent } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Functional"; "Induction"; "Rewrite"; "Dependent"]
     ~value:true
+    ()
 
-let do_observe =
+let { Goptions.get = do_observe } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Function_debug"]
     ~value:false
+    ()
 
 let observe strm = if do_observe () then Feedback.msg_debug strm else ()
 let debug_queue = Stack.create ()
@@ -356,12 +354,11 @@ let do_observe_tac ~header s tac =
 let observe_tac ~header s tac =
   if do_observe () then do_observe_tac ~header s tac else tac
 
-let is_strict_tcc =
+let { Goptions.get = is_strict_tcc } =
   Goptions.declare_bool_option_and_ref
-    ~stage:Summary.Stage.Interp
-    ~depr:false
     ~key:["Function_raw_tcc"]
     ~value:false
+    ()
 
 exception Building_graph of exn
 exception Defining_principle of exn
@@ -369,16 +366,16 @@ exception ToShow of exn
 
 let jmeq () =
   try
-    Coqlib.check_required_library Coqlib.jmeq_module_name;
+    Rocqlib.check_required_library Rocqlib.jmeq_module_name;
     EConstr.of_constr @@ UnivGen.constr_of_monomorphic_global (Global.env ())
-    @@ Coqlib.lib_ref "core.JMeq.type"
+    @@ Rocqlib.lib_ref "core.JMeq.type"
   with e when CErrors.noncritical e -> raise (ToShow e)
 
 let jmeq_refl () =
   try
-    Coqlib.check_required_library Coqlib.jmeq_module_name;
+    Rocqlib.check_required_library Rocqlib.jmeq_module_name;
     EConstr.of_constr @@ UnivGen.constr_of_monomorphic_global (Global.env ())
-    @@ Coqlib.lib_ref "core.JMeq.refl"
+    @@ Rocqlib.lib_ref "core.JMeq.refl"
   with e when CErrors.noncritical e -> raise (ToShow e)
 
 let h_intros l = Tacticals.tclMAP (fun x -> Tactics.Simple.intro x) l
@@ -386,30 +383,29 @@ let h_id = Id.of_string "h"
 let hrec_id = Id.of_string "hrec"
 
 let well_founded = function
-  | () -> EConstr.of_constr (coq_constant "core.wf.well_founded")
+  | () -> EConstr.of_constr (rocq_constant "core.wf.well_founded")
 
-let acc_rel = function () -> EConstr.of_constr (coq_constant "core.wf.acc")
+let acc_rel = function () -> EConstr.of_constr (rocq_constant "core.wf.acc")
 
 let acc_inv_id = function
-  | () -> EConstr.of_constr (coq_constant "core.wf.acc_inv")
+  | () -> EConstr.of_constr (rocq_constant "core.wf.acc_inv")
 
 let well_founded_ltof () =
-  EConstr.of_constr (coq_constant "num.nat.well_founded_ltof")
+  EConstr.of_constr (rocq_constant "num.nat.well_founded_ltof")
 
-let ltof_ref = function () -> find_reference ["Coq"; "Arith"; "Wf_nat"] "ltof"
+let ltof_ref = function () -> find_reference ["Stdlib"; "Arith"; "Wf_nat"] "ltof"
 
 let make_eq () =
   try
     EConstr.of_constr
-      (UnivGen.constr_of_monomorphic_global (Global.env ()) (Coqlib.lib_ref "core.eq.type"))
-  with _ -> assert false
+      (UnivGen.constr_of_monomorphic_global (Global.env ()) (Rocqlib.lib_ref "core.eq.type"))
+  with e when CErrors.noncritical e -> assert false
 
 let evaluable_of_global_reference r =
-  let open Tacred in
   (* Tacred.evaluable_of_global_reference (Global.env ()) *)
   match r with
-  | GlobRef.ConstRef sp -> EvalConstRef sp
-  | GlobRef.VarRef id -> EvalVarRef id
+  | GlobRef.ConstRef sp -> Evaluable.EvalConstRef sp
+  | GlobRef.VarRef id -> Evaluable.EvalVarRef id
   | _ -> assert false
 
 let list_rewrite (rev : bool) (eqs : (EConstr.constr * bool) list) =
@@ -467,7 +463,7 @@ type tcc_lemma_value = Undefined | Value of constr | Not_needed
 
 (* We only "purify" on exceptions. XXX: What is this doing here? *)
 let funind_purify f x =
-  let st = Vernacstate.freeze_full_state ~marshallable:false in
+  let st = Vernacstate.freeze_full_state () in
   try f x
   with e ->
     let e = Exninfo.capture e in

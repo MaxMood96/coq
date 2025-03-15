@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -18,6 +18,7 @@ type t = Names.Id.Set.t
 val definition_using
   : Environ.env
   -> Evd.evar_map
+  -> fixnames:Names.Id.t list (* names of fixpoint occurring recursively, if any *)
   -> using:Vernacexpr.section_subset_expr
   -> terms:EConstr.constr list
   -> t

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -22,24 +22,67 @@ open Pp
 
 exception CannotCoerceTo of string
 
-let base_val_typ wit =
-  match val_tag (topwit wit) with Val.Base t -> t | _ -> CErrors.anomaly (Pp.str "Not a base val.")
+let pr_argument_type arg =
+  let Val.Dyn (tag, _) = arg in
+  Val.pr tag
 
-let (wit_constr_context : (Empty.t, Empty.t, Constr_matching.context) Genarg.genarg_type) =
-  let wit = Genarg.create_arg "constr_context" in
-  let () = register_val0 wit None in
+(** TODO: unify printing of generic Ltac values in case of coercion failure. *)
+
+(* Displays a value *)
+let pr_value env v =
+  let ppty = spc() ++ str "of type" ++ spc () ++ pr_argument_type v in
+  let pr_with_env pr =
+    match env with
+    | Some (env,sigma) -> pr env sigma ++ ppty
+    | None -> str "a value" ++ ppty
+  in
+  let open Genprint in
+  match generic_val_print v with
+  | TopPrinterBasic pr -> pr () ++ ppty
+  | TopPrinterNeedsContext pr -> pr_with_env pr
+  | TopPrinterNeedsContextAndLevel { default_already_surrounded; printer } ->
+     pr_with_env (fun env sigma -> printer env sigma default_already_surrounded)
+
+(** Abstract application, to print ltac functions *)
+type appl =
+  | UnnamedAppl (** For generic applications: nothing is printed *)
+  | GlbAppl of (Names.KerName.t * Val.t list) list
+       (** For calls to global constants, some may alias other. *)
+
+(* Values for interpretation *)
+type tacvalue =
+  | VFun of
+      appl *
+      Tacexpr.ltac_trace *
+      Loc.t option * (* when executing a global Ltac function: the location where this function was called *)
+      Val.t Id.Map.t * (* closure *)
+      Name.t list * (* binders *)
+      Tacexpr.glob_tactic_expr (* body *)
+  | VRec of Val.t Id.Map.t ref * Tacexpr.glob_tactic_expr
+
+let tacvalue_tag : tacvalue Val.typ =
+  let tag = Val.create "tacvalue" in
+  let pr = function
+    | VFun (a,_,loc,ids,l,tac) ->
+      let tac = if List.is_empty l then tac else CAst.make ?loc @@ Tacexpr.TacFun (l,tac) in
+      let pr_env env sigma = if Id.Map.is_empty ids then mt () else cut () ++ str "where" ++ Id.Map.fold (fun id c pp -> cut () ++ Id.print id ++ str " := " ++ pr_value (Some (env,sigma)) c ++ pp) ids (mt ()) in
+      Genprint.TopPrinterNeedsContext (fun env sigma -> v 0 (hov 0 (Pptactic.pr_glob_tactic env tac) ++ pr_env env sigma))
+    | _ -> Genprint.TopPrinterBasic (fun _ -> str "<tactic closure>") in
+  let () = Genprint.register_val_print0 tag pr in
+  tag
+
+let constr_context_tag : Constr_matching.context Val.typ =
+  let tag = Val.create "constr_context" in
   let pr env sigma lev c : Pp.t = Printer.pr_econstr_n_env env sigma lev (Constr_matching.repr_context c) in
-  let () = Genprint.register_val_print0 (base_val_typ wit) (Pptactic.make_constr_printer pr) in
-  wit
+  let () = Genprint.register_val_print0 tag (Pptactic.make_constr_printer pr) in
+  tag
 
 (* includes idents known to be bound and references *)
-let (wit_constr_under_binders : (Empty.t, Empty.t, Ltac_pretype.constr_under_binders) Genarg.genarg_type) =
-  let wit = Genarg.create_arg "constr_under_binders" in
-  let () = register_val0 wit None in
-  let () = Genprint.register_val_print0 (base_val_typ wit)
-             (fun c ->
-               Genprint.TopPrinterNeedsContext (fun env sigma -> Printer.pr_constr_under_binders_env env sigma c)) in
-  wit
+let constr_under_binders_tag : Ltac_pretype.constr_under_binders Val.typ =
+  let tag = Val.create "constr_under_binders" in
+  let () = Genprint.register_val_print0 tag (fun c ->
+      Genprint.TopPrinterNeedsContext (fun env sigma -> Printer.pr_constr_under_binders_env env sigma c)) in
+  tag
 
 (** All the types considered here are base types *)
 let val_tag wit = match val_tag wit with
@@ -66,16 +109,20 @@ struct
 
 type t = Val.t
 
+let of_tacvalue v = Val.Dyn (tacvalue_tag, v)
+
+let to_tacvalue v = prj tacvalue_tag v
+
 let of_constr c = in_gen (topwit wit_constr) c
 
 let to_constr v =
   if has_type v (topwit wit_constr) then
     let c = out_gen (topwit wit_constr) v in
     Some c
-  else if has_type v (topwit wit_constr_under_binders) then
-    let vars, c = out_gen (topwit wit_constr_under_binders) v in
-    match vars with [] -> Some c | _ -> None
-  else None
+  else match prj constr_under_binders_tag v with
+    | Some (vars, c) ->
+      begin match vars with [] -> Some c | _ -> None end
+    | None ->  None
 
 let of_uconstr c = in_gen (topwit wit_uconstr) c
 
@@ -83,6 +130,13 @@ let to_uconstr v =
   if has_type v (topwit wit_uconstr) then
     Some (out_gen (topwit wit_uconstr) v)
   else None
+
+let of_constr_context v = Val.Dyn (constr_context_tag, v)
+
+let to_constr_context v = prj constr_context_tag v
+
+(* XXX should we do [of_constr] when the vars are empty? *)
+let of_constr_under_binders v = Val.Dyn (constr_under_binders_tag, v)
 
 let of_int i = in_gen (topwit wit_int) i
 
@@ -145,11 +199,11 @@ let is_variable env id =
 let constr_of_id env id =
   EConstr.mkVar (let _ = Environ.lookup_named id env in id)
 
-(* Gives the constr corresponding to a Constr_context tactic_arg *)
+(* Gives the Value.t corresponding to a Constr_context tactic_arg *)
 let coerce_to_constr_context v =
-  if has_type v (topwit wit_constr_context) then
-    out_gen (topwit wit_constr_context) v
-  else raise (CannotCoerceTo "a term context")
+  match Value.to_constr_context v with
+  | Some v -> v
+  | None -> raise (CannotCoerceTo "a term context")
 
 let is_intro_pattern v =
   if has_type v (topwit wit_intro_pattern) then
@@ -183,9 +237,6 @@ let coerce_var_to_ident fresh env sigma v =
    be fresh but suitable to be given to the fresh tactic. Works for
    vars, constants, inductive, constructors and sorts. *)
 let coerce_to_ident_not_fresh sigma v =
-let id_of_name = function
-  | Name.Anonymous -> Id.of_string "x"
-  | Name.Name x -> x in
   let fail () = raise (CannotCoerceTo "an identifier") in
   match is_intro_pattern v with
   | Some (IntroNaming (IntroIdentifier id)) -> id
@@ -199,7 +250,7 @@ let id_of_name = function
     | Some c ->
        match EConstr.kind sigma c with
        | Var id -> id
-       | Meta m -> id_of_name (Evd.meta_name sigma m)
+       | Meta m -> Id.of_string "x"
        | Evar (kn,_) ->
         begin match Evd.evar_ident kn sigma with
         | None -> fail ()
@@ -264,9 +315,10 @@ let coerce_to_constr env v =
   if has_type v (topwit wit_constr) then
     let c = out_gen (topwit wit_constr) v in
     ([], c)
-  else if has_type v (topwit wit_constr_under_binders) then
-    out_gen (topwit wit_constr_under_binders) v
-  else if has_type v (topwit wit_hyp) then
+  else match prj constr_under_binders_tag v with
+  | Some v -> v
+  | None ->
+  if has_type v (topwit wit_hyp) then
     let id = out_gen (topwit wit_hyp) v in
     (try [], constr_of_id env id with Not_found -> fail ())
   else fail ()
@@ -283,7 +335,7 @@ let coerce_to_closed_constr env v =
   c
 
 let coerce_to_evaluable_ref env sigma v =
-  let open Tacred in
+  let open Evaluable in
   let fail () = raise (CannotCoerceTo "an evaluable reference") in
   let ev =
   match is_intro_pattern v with
@@ -387,60 +439,11 @@ let coerce_to_decl_or_quant_hyp sigma v =
     with CannotCoerceTo _ ->
       raise (CannotCoerceTo "a declared or quantified hypothesis")
 
-let coerce_to_int_or_var_list v =
+let coerce_to_int_list v =
   match Value.to_list v with
   | None -> raise (CannotCoerceTo "an int list")
   | Some l ->
-    let map n = Locus.ArgArg (coerce_to_int n) in
-    List.map map l
-
-(** Abstract application, to print ltac functions *)
-type appl =
-  | UnnamedAppl (** For generic applications: nothing is printed *)
-  | GlbAppl of (Names.KerName.t * Val.t list) list
-       (** For calls to global constants, some may alias other. *)
-
-let pr_argument_type arg =
-  let Val.Dyn (tag, _) = arg in
-  Val.pr tag
-
-(** TODO: unify printing of generic Ltac values in case of coercion failure. *)
-
-(* Displays a value *)
-let pr_value env v =
-  let pr_with_env pr =
-    match env with
-    | Some (env,sigma) -> pr env sigma
-    | None -> str "a value of type" ++ spc () ++ pr_argument_type v in
-  let open Genprint in
-  match generic_val_print v with
-  | TopPrinterBasic pr -> pr ()
-  | TopPrinterNeedsContext pr -> pr_with_env pr
-  | TopPrinterNeedsContextAndLevel { default_already_surrounded; printer } ->
-     pr_with_env (fun env sigma -> printer env sigma default_already_surrounded)
-
-(* Values for interpretation *)
-type tacvalue =
-  | VFun of
-      appl *
-      Tacexpr.ltac_trace *
-      Loc.t option * (* when executing a global Ltac function: the location where this function was called *)
-      Val.t Id.Map.t * (* closure *)
-      Name.t list * (* binders *)
-      Tacexpr.glob_tactic_expr (* body *)
-  | VRec of Val.t Id.Map.t ref * Tacexpr.glob_tactic_expr
-
-let (wit_tacvalue : (Empty.t, tacvalue, tacvalue) Genarg.genarg_type) =
-  let wit = Genarg.create_arg "tacvalue" in
-  let () = register_val0 wit None in
-  let pr = function
-    | VFun (a,_,loc,ids,l,tac) ->
-      let tac = if List.is_empty l then tac else CAst.make ?loc @@ Tacexpr.TacFun (l,tac) in
-      let pr_env env sigma = if Id.Map.is_empty ids then mt () else cut () ++ str "where" ++ Id.Map.fold (fun id c pp -> cut () ++ Id.print id ++ str " := " ++ pr_value (Some (env,sigma)) c ++ pp) ids (mt ()) in
-      Genprint.TopPrinterNeedsContext (fun env sigma -> v 0 (hov 0 (Pptactic.pr_glob_tactic env tac) ++ pr_env env sigma))
-    | _ -> Genprint.TopPrinterBasic (fun _ -> str "<tactic closure>") in
-  let () = Genprint.register_val_print0 (base_val_typ wit) pr in
-  wit
+    List.map coerce_to_int l
 
 exception CoercionError of Id.t * (Environ.env * Evd.evar_map) option * Val.t * string
 

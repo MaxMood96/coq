@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -9,6 +9,6 @@
 (************************************************************************)
 
 val wit_withtac :
-  Tacexpr.raw_tactic_expr option Genarg.uniform_genarg_type
+  Tacexpr.raw_tactic_expr option Genarg.vernac_genarg_type
 
-val withtac : Tacexpr.raw_tactic_expr option Pcoq.Entry.t
+val withtac : Tacexpr.raw_tactic_expr option Procq.Entry.t

@@ -30,7 +30,7 @@ f x := @foo x   do not deactivate further arguments and scopes
 
 Inductive prod' A : Type -> Type :=
 | pair' (a:A) B (b:B) (c:bool) : prod' A B.
-Arguments pair' [A] a%bool_scope [B] b%bool_scope c%bool_scope.
+Arguments pair' [A] a%_bool_scope [B] b%_bool_scope c%_bool_scope.
 Notation "0" := true : bool_scope.
 
 (* 1. Abbreviations do not stop implicit arguments to be inserted and scopes to be used *)
@@ -131,7 +131,7 @@ End M14.
 
 Module M15.
   Local Notation "###### x" := (S x) (right associativity, at level 79, x at next level).
-  Fail Local Notation "###### x" := (S x) (right associativity, at level 79).
+  Fail Local Notation "###### x" := (S x) (right associativity, at level 79, x at level 79).
   Local Notation "###### x" := (S x) (at level 79).
 End M15.
 
@@ -229,3 +229,10 @@ Fail Notation "[ x ]" := (id x) (x custom doesntexist, only printing).
 Fail Notation "# x" := (id x) (in custom doesntexist, only printing).
 
 End TestNonExistentCustomOnlyPrinting.
+
+Module NotationClauseIn.
+
+Notation "1" := unit.
+Check fun x => match x in 1 with tt => 0 end.
+
+End NotationClauseIn.

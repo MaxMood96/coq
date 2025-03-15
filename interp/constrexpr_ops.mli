@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -14,11 +14,17 @@ open Constrexpr
 
 (** Constrexpr_ops: utilities on [constr_expr] *)
 
+val expr_Type_sort : sort_expr
+val expr_SProp_sort : sort_expr
+val expr_Prop_sort : sort_expr
+val expr_Set_sort : sort_expr
+
 (** {6 Equalities on [constr_expr] related types} *)
 
 val sort_name_expr_eq : sort_name_expr -> sort_name_expr -> bool
 val univ_level_expr_eq : univ_level_expr -> univ_level_expr -> bool
 val sort_expr_eq : sort_expr -> sort_expr -> bool
+val relevance_info_expr_eq : relevance_info_expr -> relevance_info_expr -> bool
 
 val explicitation_eq : explicitation -> explicitation -> bool
 (** Equality on [explicitation]. *)
@@ -113,6 +119,8 @@ val map_constr_expr_with_binders :
   (Id.t -> 'a -> 'a) -> ('a -> constr_expr -> constr_expr) ->
       'a -> constr_expr -> constr_expr
 
+(** {6 Miscellaneous}*)
+
 val replace_vars_constr_expr :
   Id.t Id.Map.t -> constr_expr -> constr_expr
 
@@ -122,10 +130,10 @@ val occur_var_constr_expr : Id.t -> constr_expr -> bool
 (** Return all (non-qualified) names treating binders as names *)
 val names_of_constr_expr : constr_expr -> Id.Set.t
 
-val split_at_annot : local_binder_expr list -> lident option -> local_binder_expr list * local_binder_expr list
-
 val ntn_loc : ?loc:Loc.t -> constr_notation_substitution -> notation -> (int * int) list
 val patntn_loc : ?loc:Loc.t -> cases_pattern_notation_substitution -> notation -> (int * int) list
+
+val isCSort : constr_expr -> bool
 
 (** For cases pattern parsing errors *)
 val error_invalid_pattern_notation : ?loc:Loc.t -> unit -> 'a

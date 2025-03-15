@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -28,7 +28,7 @@ module Summary :
 sig
   type t
   val init : unit -> unit
-  val freeze : marshallable:bool -> t
+  val freeze : unit -> t
   val unfreeze : t -> unit
   val join : ?except:Future.UUIDSet.t -> unit -> unit
 end

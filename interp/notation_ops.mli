@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,6 +11,14 @@
 open Names
 open Notation_term
 open Glob_term
+
+(** Constr default entries *)
+
+(* Equivalent to an entry "in constr at level 0"; used for coercion to constr *)
+val constr_lowest_level : Constrexpr.notation_entry_level
+
+(* Equivalent to "x constr" in a subentry, at highest level *)
+val constr_some_level : Constrexpr.notation_entry_relative_level
 
 (** {5 Utilities about [notation_constr]} *)
 
@@ -65,6 +73,9 @@ val glob_constr_of_notation_constr_with_binders : ?loc:Loc.t ->
 
 val glob_constr_of_notation_constr : ?loc:Loc.t -> notation_constr -> glob_constr
 
+val pr_notation_info :
+  (Glob_term.glob_constr -> Pp.t) -> Constrexpr.notation_key -> Notation_term.notation_constr -> Pp.t
+
 (** {5 Matching a notation pattern against a [glob_constr]} *)
 
 (** [match_notation_constr] matches a [glob_constr] against a notation
@@ -82,10 +93,14 @@ val match_notation_constr : print_univ:bool -> 'a glob_constr_g -> vars:Id.Set.t
 
 val match_notation_constr_cases_pattern :
   'a cases_pattern_g -> interpretation ->
-  (('a cases_pattern_g * extended_subscopes) list * ('a cases_pattern_g list * extended_subscopes) list) *
+  (('a cases_pattern_g * extended_subscopes) list *
+   ('a cases_pattern_g list * extended_subscopes) list *
+   ('a cases_pattern_g * extended_subscopes) list) *
     (bool * int * 'a cases_pattern_g list)
 
 val match_notation_constr_ind_pattern :
   inductive -> 'a cases_pattern_g list -> interpretation ->
-  (('a cases_pattern_g * extended_subscopes) list * ('a cases_pattern_g list * extended_subscopes) list) *
+  (('a cases_pattern_g * extended_subscopes) list *
+   ('a cases_pattern_g list * extended_subscopes) list *
+   ('a cases_pattern_g * extended_subscopes) list) *
     (bool * int * 'a cases_pattern_g list)

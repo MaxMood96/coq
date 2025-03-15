@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -49,6 +49,24 @@ Bind Scope bool_scope with bool.
 Register bool as core.bool.type.
 Register true as core.bool.true.
 Register false as core.bool.false.
+
+(************************************************)
+(** * Reflect: a specialized inductive type for
+    relating propositions and booleans,
+    as popularized by the Ssreflect library.    *)
+(************************************************)
+
+Inductive reflect (P : Prop) : bool -> Set :=
+  | ReflectT : P -> reflect P true
+  | ReflectF : ~ P -> reflect P false.
+#[global]
+Hint Constructors reflect : bool.
+Arguments ReflectT : clear implicits.
+Arguments ReflectF : clear implicits.
+
+(** Interest: a case on a reflect lemma or hyp performs clever
+    unification, and leave the goal in a convenient shape
+    (a bit like case_eq). *)
 
 (** Basic boolean operators *)
 
@@ -167,7 +185,7 @@ Delimit Scope hex_nat_scope with xnat.
 Declare Scope nat_scope.
 Delimit Scope nat_scope with nat.
 Bind Scope nat_scope with nat.
-Arguments S _%nat.
+Arguments S _%_nat.
 
 Register nat as num.nat.type.
 Register O as num.nat.O.

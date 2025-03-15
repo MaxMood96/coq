@@ -15,6 +15,9 @@ ring and field: solvers for polynomial and rational equations
 
 :Author: Bruno Barras, Benjamin Grégoire, Assia Mahboubi, Laurent Théry [#f1]_
 
+.. note::
+   The tactics described in this chapter require the Stdlib library.
+
 This chapter presents the tactics dedicated to dealing with ring and
 field equations.
 
@@ -102,7 +105,7 @@ Yes, building the variables map and doing the substitution after
 normalizing is automatically done by the tactic. So you can just
 forget this paragraph and use the tactic according to your intuition.
 
-Concrete usage in Coq
+Concrete usage
 --------------------------
 
 .. tacn:: ring {? [ {+ @one_term } ] }
@@ -156,9 +159,9 @@ Concrete usage in Coq
 
 .. example::
 
-  .. coqtop:: all
+  .. rocqtop:: all extra-stdlib
 
-    Require Import ZArith.
+    From Stdlib Require Import ZArith.
     Open Scope Z_scope.
     Goal forall a b c:Z, 
         (a + b + c) ^ 2 = 
@@ -208,7 +211,7 @@ be either Leibniz equality, or any relation declared as a setoid (see
 :ref:`tactics-enabled-on-user-provided-relations`).
 The definitions of ring and semiring (see module ``Ring_theory``) are:
 
-.. coqdoc::
+.. rocqdoc::
 
     Record ring_theory : Prop := mk_rt {
       Radd_0_l    : forall x, 0 + x == x;
@@ -246,7 +249,7 @@ coefficients could be the rational numbers, upon which the ring
 operations can be implemented. The fact that there exists a morphism
 is defined by the following properties:
 
-.. coqdoc::
+.. rocqdoc::
 
     Record ring_morph : Prop := mkmorph {
       morph0    : [cO] == 0;
@@ -294,9 +297,9 @@ This implementation of ring can also recognize simple power
 expressions as ring expressions. A power function is specified by the
 following property:
 
-.. coqtop:: in
+.. rocqtop:: in extra-stdlib
 
-    Require Import Reals.
+    From Stdlib Require Import Reals.
     Section POWER.
       Variable Cpow : Set.
       Variable Cp_phi : N -> Cpow.
@@ -368,9 +371,11 @@ The syntax for adding a new ring is
 
    :n:`preprocess [ @ltac_expr ]`
       specifies a tactic :n:`@ltac_expr` that is applied as a
-      preliminary step for :tacn:`ring` and :tacn:`ring_simplify`. It can be used to
+      preliminary step for :tacn:`ring` and :tacn:`ring_simplify`.
+      It can be used to
       transform a goal so that it is better recognized. For instance, ``S n``
-      can be changed to ``plus 1 n``.
+      can be changed to ``plus 1 n``.  For :tacn:`ring_simplify`, the terms
+      given as arguments are also modified by this tactic.
 
    :n:`postprocess [ @ltac_expr ]`
       specifies a tactic :n:`@ltac_expr` that is applied as a final
@@ -436,17 +441,17 @@ How does it work?
 
 The code of ``ring`` is a good example of a tactic written using *reflection*.
 What is reflection? Basically, using it means that a part of a tactic is written
-in Gallina, Coq's language of terms, rather than |Ltac| or OCaml. From the
+in Gallina, Rocq's language of terms, rather than |Ltac| or OCaml. From the
 philosophical point of view, reflection is using the ability of the Calculus of
 Constructions to speak and reason about itself. For the ``ring`` tactic we used
-Coq as a programming language and also as a proof environment to build a tactic
+Rocq as a programming language and also as a proof environment to build a tactic
 and to prove its correctness.
 
 The interested reader is strongly advised to have a look at the
 file ``Ring_polynom.v``. Here a type for polynomials is defined:
 
 
-.. coqdoc::
+.. rocqdoc::
 
     Inductive PExpr : Type :=
       | PEc : C -> PExpr
@@ -461,7 +466,7 @@ file ``Ring_polynom.v``. Here a type for polynomials is defined:
 Polynomials in normal form are defined as:
 
 
-.. coqdoc::
+.. rocqdoc::
 
     Inductive Pol : Type :=
       | Pc : C -> Pol 
@@ -478,7 +483,7 @@ polynomial to an element of the concrete ring, and the second one that
 does the same for normal forms:
 
 
-.. coqdoc::
+.. rocqdoc::
 
 
     Definition PEeval : list R -> PExpr -> R := [...].
@@ -489,7 +494,7 @@ A function to normalize polynomials is defined, and the big theorem is
 its correctness w.r.t interpretation, that is:
 
 
-.. coqdoc::
+.. rocqdoc::
 
     Definition norm : PExpr -> Pol := [...].
     Lemma Pphi_dev_ok :
@@ -561,9 +566,9 @@ Dealing with fields
 
 .. example::
 
-  .. coqtop:: all
+  .. rocqtop:: all extra-stdlib
 
-    Require Import Reals.
+    From Stdlib Require Import Reals.
     Open Scope R_scope.
     Goal forall x,
            x <> 0 -> (1 - 1 / x) * x - x + 1 = 0.
@@ -577,9 +582,9 @@ Dealing with fields
 
 .. example:: :tacn:`field` that generates side goals
 
-   .. coqtop:: reset all
+   .. rocqtop:: reset all extra-stdlib
 
-      Require Import Reals.
+      From Stdlib Require Import Reals.
       Goal forall x y:R,
       (x * y > 0)%R ->
       (x * (1 / x + x / (x + y)))%R =
@@ -633,7 +638,7 @@ also supported. The equality can be either Leibniz equality, or any
 relation declared as a setoid (see :ref:`tactics-enabled-on-user-provided-relations`). The definition of
 fields and semifields is:
 
-.. coqdoc::
+.. rocqdoc::
 
     Record field_theory : Prop := mk_field {
       F_R : ring_theory rO rI radd rmul rsub ropp req;
@@ -653,7 +658,7 @@ fields and semifields is:
 The result of the normalization process is a fraction represented by
 the following type:
 
-.. coqdoc::
+.. rocqdoc::
 
     Record linear : Type := mk_linear {
       num : PExpr C;
@@ -694,6 +699,14 @@ The syntax for adding a new field is
       which is the completeness of equality on coefficients
       w.r.t. the field equality.
 
+   When :cmd:`Add Field` is called, a call to :cmd:`Add Ring` is performed with
+   all modifiers of the form :n:`@ring_mod`.  As a result, any previous ring
+   declaration for the type is replaced by the one that uses the same modifiers
+   as the :cmd:`Add Field` command.  In the case where it
+   is desired to have different modifiers for the field and the ring structure,
+   a new call to :cmd:`Add Ring` can be performed after this command, to set
+   different values of certain modifiers.
+
 .. cmd:: Print Fields
    :undocumented:
 
@@ -704,9 +717,9 @@ First Samuel Boutin designed the tactic ``ACDSimpl``. This tactic did lot
 of rewriting. But the proofs terms generated by rewriting were too big
 for Coq’s type checker. Let us see why:
 
-.. coqtop:: reset all
+.. rocqtop:: reset all extra-stdlib
 
-  Require Import ZArith.
+  From Stdlib Require Import ZArith.
   Open Scope Z_scope.
   Goal forall x y z : Z, 
          x + 3 + y + y * z = x + 3 + y + z * y.
@@ -765,12 +778,12 @@ tactics using reflection.
 
 Another idea suggested by Benjamin Werner: reflection could be used to
 couple an external tool (a rewriting program or a model checker)
-with Coq. We define (in Coq) a type of terms, a type of *traces*, and
+with Rocq. We define (in Rocq) a type of terms, a type of *traces*, and
 prove a correctness theorem that states that *replaying traces* is safe
 with respect to some interpretation. Then we let the external tool do every
 computation (using side-effects, backtracking, exception, or others
 features that are not available in pure lambda calculus) to produce
-the trace. Now we can check in Coq that the trace has the expected
+the trace. Now we can check in Rocq that the trace has the expected
 semantics by applying the correctness theorem.
 
 

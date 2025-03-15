@@ -3,7 +3,7 @@
 Conversion rules
 ----------------
 
-Coq has conversion rules that can be used to determine if two
+The Rocq Prover has conversion rules that can be used to determine if two
 terms are equal by definition in |CiC|, or :term:`convertible`.
 Conversion rules consist of reduction rules and expansion rules.
 Equality is determined by
@@ -19,7 +19,7 @@ closer to its normal form.  For example, :term:`zeta-reduction` removes
 :n:`@ident` with :n:`@term__1` wherever :n:`@ident` appears in :n:`@term__2`.
 The resulting term may be longer or shorter than the original.
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Eval cbv zeta in let i := 1 in i + i.
 
@@ -85,6 +85,8 @@ to other changes to the proof state.)
 Two terms are :gdef:`α-convertible <alpha-convertible>` if they are syntactically
 equal ignoring differences in the names of variables bound within the expression.
 For example `forall x, x + 0 = x` is α-convertible with `forall y, y + 0 = y`.
+(Internally, Rocq represents these two terms using de Bruijn indices,
+so explicit α-conversion is not necessary.)
 
 β-reduction
 ~~~~~~~~~~~
@@ -220,7 +222,7 @@ Examples
       ``+`` is a :ref:`notation <Notations>` for ``Nat.add``, which is defined
       with a :cmd:`Fixpoint`.
 
-      .. coqtop:: all abort
+      .. rocqtop:: all abort
 
          Print Nat.add.
          Goal 1 + 1 = 2.
@@ -231,7 +233,7 @@ Examples
 
       The term can be fully reduced with `cbv`:
 
-      .. coqtop:: all abort
+      .. rocqtop:: all abort
 
          Goal 1 + 1 = 2.
          cbv.

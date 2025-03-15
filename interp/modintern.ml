@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -9,6 +9,7 @@
 (************************************************************************)
 
 open Declarations
+open Mod_declarations
 open Libnames
 open Constrexpr
 open Constrintern
@@ -66,8 +67,8 @@ let lookup_module lqid = fst (lookup_module_or_modtype Module lqid)
 
 let lookup_polymorphism env base kind fqid =
   let m = match kind with
-    | Module -> (Environ.lookup_module base env).mod_type
-    | ModType -> (Environ.lookup_modtype base env).mod_type
+    | Module -> mod_type (Environ.lookup_module base env)
+    | ModType -> mod_type (Environ.lookup_modtype base env)
     | ModAny -> assert false
   in
   let rec defunctor = function
@@ -81,7 +82,7 @@ let lookup_polymorphism env base kind fqid =
     | [id] ->
       let test (lab,obj) =
         match Id.equal (Label.to_id lab) id, obj with
-        | false, _ | _, (SFBmodule _ | SFBmodtype _) -> None
+        | false, _ | _, (SFBrules _ | SFBmodule _ | SFBmodtype _) -> None
         | true, SFBmind mind -> Some (Declareops.inductive_is_polymorphic mind)
         | true, SFBconst const -> Some (Declareops.constant_is_polymorphic const)
       in
@@ -93,10 +94,10 @@ let lookup_polymorphism env base kind fqid =
       in
       let test (lab,obj) =
         match Id.equal (Label.to_id lab) id, obj with
-        | false, _ | _, (SFBconst _ | SFBmind _) -> None
-        | true, SFBmodule body -> Some (next body.mod_type)
+        | false, _ | _, (SFBrules _ | SFBconst _ | SFBmind _) -> None
+        | true, SFBmodule body -> Some (next @@ mod_type body)
         | true, SFBmodtype body ->  (* XXX is this valid? If not error later *)
-          Some (next body.mod_type)
+          Some (next @@ mod_type body)
       in
       (match CList.find_map test m with Some v -> v | None -> false (* error later *))
   in
@@ -137,8 +138,8 @@ let interp_with_decl env base kind = function
     let poly = lookup_polymorphism env base kind fqid in
     begin match fst (UState.check_univ_decl ~poly ectx udecl) with
       | UState.Polymorphic_entry ctx ->
-        let inst, ctx = Univ.abstract_universes ctx in
-        let c = EConstr.Vars.subst_univs_level_constr (Univ.make_instance_subst inst) c in
+        let inst, ctx = UVars.abstract_universes ctx in
+        let c = EConstr.Vars.subst_univs_level_constr (UVars.make_instance_subst inst) c in
         let c = EConstr.to_constr sigma c in
         WithDef (fqid,(c, Some ctx)), Univ.ContextSet.empty
       | UState.Monomorphic_entry ctx ->

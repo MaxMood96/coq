@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -15,7 +15,7 @@ open Names
 open Pp
 open Tacexpr
 
-let (ltac_trace_info : ltac_stack Exninfo.t) = Exninfo.make ()
+let (ltac_trace_info : ltac_stack Exninfo.t) = Exninfo.make "ltac_trace"
 
 let prtac x =
   let env = Global.env () in
@@ -69,7 +69,7 @@ let update_bpt fname offset opt =
           (try
             let p = Loadpath.find_load_path (CUnix.physical_path_of_string dirname) in
             DirPath.repr (Loadpath.logical p)
-          with _ -> []))
+          with exn when CErrors.noncritical exn -> []))
     end
   in
   let dirpath = DirPath.to_string dp in
@@ -82,7 +82,6 @@ let update_bpt fname offset opt =
 let upd_bpts updates =
   List.iter (fun op ->
     let ((file, offset), opt) = op in
-(*    Printf.printf "Coq upd_bpts %s %d %b\n%!" file offset opt;*)
     update_bpt file offset opt;
   ) updates
 
@@ -164,20 +163,20 @@ let cvt_loc loc =
          let file = String.sub dp (lastdot+1) (dplen - (lastdot + 1)) in
          let module_name = String.sub dp 0 lastdot in
          let routine =
-           try
-             (* try text as a kername *)
-             assert (CString.is_prefix dp text);
-             let knlen = String.length text in
-             let lastdot = String.rindex text '.' in
-             String.sub text (lastdot+1) (knlen - (lastdot + 1))
-           with _ -> text
+           (* try text as a kername *)
+           if not (CString.is_prefix dp text) then text else
+             try
+               let knlen = String.length text in
+               let lastdot = String.rindex text '.' in
+               String.sub text (lastdot+1) (knlen - (lastdot + 1))
+             with Not_found -> text
          in
          Printf.sprintf "%s:%d, %s  (%s)" routine line_nb file module_name;
        | Some { fname=ToplevelInput; line_nb } ->
          let items = String.split_on_char '.' text in
          Printf.sprintf "%s:%d, %s" (List.nth items 1) line_nb (List.hd items);
        | _ -> text
-   with _ -> text
+   with Not_found -> text
 
 let format_stack s =
   List.map (fun (tac, loc) ->
@@ -316,9 +315,10 @@ let defer_output = Comm.defer_output
 
 let db_pr_goal gl =
   let env = Proofview.Goal.env gl in
+  let sigma = Tacmach.project gl in
   let concl = Proofview.Goal.concl gl in
-  let penv = Termops.Internal.print_named_context env in
-  let pc = Printer.pr_econstr_env env (Tacmach.project gl) concl in
+  let penv = Termops.Internal.print_named_context env sigma in
+  let pc = Printer.pr_econstr_env env sigma concl in
     str"  " ++ hv 0 (penv ++ fnl () ++
                    str "============================" ++ fnl ()  ++
                    str" "  ++ pc) ++ fnl () ++ fnl ()
@@ -355,7 +355,6 @@ let tac_loc tac =
   | TacThens _ -> "TacThens"
   | TacThens3parts _ -> "TacThens3parts"
   | TacFirst _ -> "TacFirst"
-  | TacComplete _ -> "TacComplete"
   | TacSolve _ -> "TacSolve"
   | TacTry _ -> "TacTry"
   | TacOr _ -> "TacOr"
@@ -458,6 +457,7 @@ let goal_com tac varmap trace =
 let skipped = Proofview.NonLogical.run (Proofview.NonLogical.ref 0)
 let skip = Proofview.NonLogical.run (Proofview.NonLogical.ref 0)
 let idtac_breakpt = Proofview.NonLogical.run (Proofview.NonLogical.ref None)
+let idtac_bpt_stop = ref false
 
 let batch = ref false
 
@@ -466,7 +466,7 @@ open Goptions
 let () =
   declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ["Ltac";"Batch";"Debug"];
       optread  = (fun () -> !batch);
       optwrite = (fun x -> batch := x) }
@@ -478,7 +478,10 @@ let db_initialize is_tac =
       (fun _ -> set_break true));
   let open Proofview.NonLogical in
   let x = (skip:=0) >> (skipped:=0) >> (idtac_breakpt:=None) in
-  if is_tac then make Comm.init >> x else x
+  if is_tac then begin
+    idtac_bpt_stop.contents <- false;
+    make Comm.init >> x
+  end else x
 
 (* Prints the run counter *)
 let print_run_ctr print =
@@ -497,11 +500,11 @@ let print_run_ctr print =
 let rec prompt level =
   let runnoprint = print_run_ctr false in
     let open Proofview.NonLogical in
-    let nl = if Util.(!batch) then "\n" else "" in
+    let nl = if Stdlib.(!batch) then "\n" else "" in
     Comm.print_deferred () >>
     Comm.prompt (tag "message.prompt"
                    @@ fnl () ++ str "TcDebug (" ++ int level ++ str (") > " ^ nl)) >>
-    if Util.(!batch) && Comm.isTerminal () then return (DebugOn (level+1)) else
+    if Stdlib.(!batch) && Comm.isTerminal () then return (DebugOn (level+1)) else
     let exit = (skip:=0) >> (skipped:=0) >> raise (Sys.Break, Exninfo.null) in
     Comm.read >>= fun inst ->
     let open DebugHook.Action in
@@ -614,13 +617,19 @@ let debug_prompt lev tac f varmap trace =
       else if get_break () then begin
         set_break false;
         stop_here ()
+      end else if s = 1 then begin
+        Proofview.tclLIFT ((skip := 0) >> runprint) >=
+        (fun () -> stop_here ())
       end else if s > 0 then
         Proofview.tclLIFT ((skip := s-1) >>
           runprint >>
           !skip >>= fun new_skip ->
           (if new_skip = 0 then skipped := 0 else return ()) >>
           return (DebugOn (lev+1)))
-      else (* todo: move this block before skip logic? *)
+      else if idtac_bpt_stop.contents then begin
+        idtac_bpt_stop.contents <- false;
+        stop_here ()
+      end else
         Proofview.tclLIFT !idtac_breakpt >= fun idtac_breakpt ->
           if Option.has_some idtac_breakpt then
             Proofview.tclLIFT(runprint >> return (DebugOn (lev+1)))
@@ -641,6 +650,7 @@ let debug_prompt lev tac f varmap trace =
                             else if l_prev = 0 then false
                             else
                               StdList.nth st (l_cur - l_prev) != (StdList.hd st_prev)
+              | Skip | RunCnt _ | RunBreakpoint _ -> false (* handled elsewhere *)
               | _ -> failwith "action op"
             in
             if stop then begin
@@ -690,9 +700,10 @@ let db_breakpoint debug s =
   !idtac_breakpt >>= fun opt_breakpoint ->
   match debug with
   | DebugOn lev when not (CList.is_empty s) && is_breakpoint opt_breakpoint s ->
-      idtac_breakpt:=None
+    idtac_bpt_stop.contents <- true;
+    idtac_breakpt:=None
   | _ ->
-      return ()
+    return ()
 
 (** Extracting traces *)
 

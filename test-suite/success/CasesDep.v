@@ -226,11 +226,11 @@ Module Sig.
 Record Signature : Type :=
   {Sigma : DSetoid; Arity : Map (Set_of Sigma) (Set_of Dposint)}.
 
-Variable S : Signature.
+Parameter S : Signature.
 
 
 
-Variable Var : DSetoid.
+Parameter Var : DSetoid.
 
 Inductive TERM : Type :=
   | var : elem (Set_of Var) -> TERM
@@ -527,7 +527,6 @@ Fixpoint app {A} {n m} (v : listn A n) (w : listn A m) : listn A (n + m) :=
 (* Testing regression of bug 2106 *)
 
 Set Implicit Arguments.
-Require Import List.
 
 Inductive nt := E.
 Definition root := E.

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -14,13 +14,13 @@
    Institution: LRI, CNRS UMR 8623 - University Paris Sud
 *)
 
-Require Import Coq.Program.Basics.
-Require Import Coq.Program.Tactics.
+Require Import Corelib.Program.Basics.
+Require Import Corelib.Program.Tactics.
 
-Require Import Coq.Classes.Init.
+Require Import Corelib.Classes.Init.
 Require Import Relation_Definitions.
-Require Export Coq.Classes.RelationClasses.
-Require Import Coq.Classes.Morphisms.
+Require Export Corelib.Classes.RelationClasses.
+Require Import Corelib.Classes.Morphisms.
 
 Set Implicit Arguments.
 Unset Strict Implicit.

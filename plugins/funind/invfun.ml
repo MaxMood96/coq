@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -54,7 +54,7 @@ let revert_graph kn post_tac hid =
           | Some f_complete ->
             let f_args, res = Array.chop (Array.length args - 1) args in
             tclTHENLIST
-              [ generalize
+              [ Generalize.generalize
                   [ applist
                       ( mkConst f_complete
                       , Array.to_list f_args @ [res.(0); mkVar hid] ) ]
@@ -100,7 +100,7 @@ let functional_inversion kn hid fconst f_correct =
         in
         tclTHENLIST
           [ pre_tac hid
-          ; generalize
+          ; Generalize.generalize
               [applist (f_correct, Array.to_list f_args @ [res; mkVar hid])]
           ; clear [hid]
           ; Simple.intro hid

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -15,7 +15,7 @@
 let vmCast = Constr.VMcast
 open Names
 open Pp
-open Pcoq
+open Procq
 open Ltac_plugin
 open Stdarg
 open Libnames
@@ -47,14 +47,14 @@ open Ssrmatching_plugin.G_ssrmatching
 
 }
 
-DECLARE PLUGIN "coq-core.plugins.ssreflect"
+DECLARE PLUGIN "rocq-runtime.plugins.ssreflect"
 {
 
 (* Defining grammar rules with "xx" in it automatically declares keywords too,
  * we thus save the lexer to restore it at the end of the file *)
-let frozen_lexer = ref (Pcoq.get_keyword_state ()) ;;
-let () = Mltop.add_init_function "coq-core.plugins.ssreflect" (fun () ->
-    frozen_lexer := Pcoq.get_keyword_state ())
+let frozen_lexer = ref (Procq.get_keyword_state ()) ;;
+let () = Mltop.add_init_function "rocq-runtime.plugins.ssreflect" (fun () ->
+    frozen_lexer := Procq.get_keyword_state ())
 
 }
 
@@ -77,7 +77,7 @@ let ssrautoprop =
       with Not_found -> Tacenv.locate_tactic (ssrqid "ssrautoprop") in
     let tacexpr = CAst.make @@ Tacexpr.Reference (ArgArg (Loc.tag @@ tacname)) in
     eval_tactic (CAst.make @@ Tacexpr.TacArg CAst.(tacexpr.v))
-  with Not_found -> Auto.full_trivial []
+  with Not_found -> Auto.gen_trivial [] None
   end
 
 let () = ssrautoprop_tac := ssrautoprop
@@ -338,7 +338,7 @@ END
 {
 
 let test_ssreqid =
-  let open Pcoq.Lookahead in
+  let open Procq.Lookahead in
   to_entry "test_ssreqid" begin
     ((lk_ident <+> lk_kws ["_"; "?"; "->"; "<-"]) >> lk_kw ":") <+> lk_kw ":"
   end
@@ -374,7 +374,7 @@ END
 (* Since all bookkeeping ssr commands have the same discharge-intro    *)
 (* argument format we use a single grammar entry point to parse them.  *)
 (* the entry point parses only non-empty arguments to avoid conflicts  *)
-(* with the basic Coq tactics.                                         *)
+(* with the basic Rocq tactics.                                         *)
 
 {
 
@@ -580,8 +580,8 @@ let pr_ssrcongrarg _ _ _ ((n, f), dgens) =
   (if n <= 0 then mt () else str " " ++ int n) ++
   pr_term f ++ pr_dgens pr_gen dgens
 
-open Pcoq.Constr
-open Pcoq.Prim
+open Procq.Constr
+open Procq.Prim
 
 }
 
@@ -607,7 +607,7 @@ END
 
 (** 7. Rewriting tactics (rewrite, unlock) *)
 
-(** Coq rewrite compatibility flag *)
+(** Rocq rewrite compatibility flag *)
 
 (** Rewrite clear/occ switches *)
 
@@ -749,7 +749,7 @@ let () =
     { optstage = Summary.Stage.Synterp;
       optkey   = ["SsrRewrite"];
       optread  = (fun _ -> !ssr_rw_syntax);
-      optdepr  = false;
+      optdepr  = None;
       optwrite = (fun b -> ssr_rw_syntax := b) })
 
 let lbrace = Char.chr 123
@@ -762,7 +762,7 @@ let test_ssr_rw_syntax =
     match LStream.peek_nth kwstate 0 strm with
     | Tok.KEYWORD key when List.mem key.[0] [lbrace; '['; '/'] -> ()
     | _ -> raise Stream.Failure in
-  Pcoq.Entry.(of_parser "test_ssr_rw_syntax" { parser_fun = test })
+  Procq.Entry.(of_parser "test_ssr_rw_syntax" { parser_fun = test })
 
 }
 
@@ -984,7 +984,7 @@ END
 {
 
 let test_idcomma =
-  let open Pcoq.Lookahead in
+  let open Procq.Lookahead in
   to_entry "test_idcomma" begin
     (lk_ident <+> lk_kw "_") >> lk_kw ","
   end
@@ -1057,8 +1057,8 @@ END
 (* The user is supposed to Require Import ssreflect or Require ssreflect   *)
 (* and Import ssreflect.SsrSyntax to obtain these keywords and as a         *)
 (* consequence the extended ssreflect grammar.                             *)
-let () = Mltop.add_init_function "coq-core.plugins.ssreflect" (fun () ->
-      Pcoq.set_keyword_state !frozen_lexer) ;;
+let () = Mltop.add_init_function "rocq-runtime.plugins.ssreflect" (fun () ->
+      Procq.set_keyword_state !frozen_lexer) ;;
 
 }
 

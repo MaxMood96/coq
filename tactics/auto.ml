@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -73,9 +73,8 @@ let exact h =
     let sigma, t = Typing.type_of env sigma c in
     let concl = Proofview.Goal.concl gl in
     if occur_existential sigma t || occur_existential sigma concl then
-      let sigma = Evd.clear_metas sigma in
       try
-        let sigma = Unification.w_unify env sigma CONV ~flags:auto_unif_flags concl t in
+        let _, sigma = Unification.w_unify env sigma CONV ~flags:auto_unif_flags concl t in
         Proofview.Unsafe.tclEVARSADVANCE sigma <*>
         exact_no_check c
       with e when CErrors.noncritical e -> Proofview.tclZERO e
@@ -114,18 +113,14 @@ let conclPattern concl pat tac =
      Proofview.tclProofInfo [@ocaml.warning "-3"] >>= fun (_name, poly) ->
      let open Genarg in
      let open Geninterp in
-     let inj c = match val_tag (topwit Stdarg.wit_constr) with
-     | Val.Base tag -> Val.Dyn (tag, c)
-     | _ -> assert false
-     in
+     let inj c = Geninterp.Val.inject (val_tag (topwit Stdarg.wit_constr)) c in
      let fold id c accu = Id.Map.add id (inj c) accu in
      let lfun = Id.Map.fold fold constr_bindings Id.Map.empty in
      let ist = { lfun
                ; poly
-               ; extra = TacStore.empty } in
-     match tac with
-     | GenArg (Glbwit wit, tac) ->
-      Ftactic.run (Geninterp.interp wit ist tac) (fun _ -> Proofview.tclUNIT ())
+               ; extra = TacStore.empty }
+     in
+     Ftactic.run (Geninterp.generic_interp ist tac) (fun _ -> Proofview.tclUNIT ())
   end
 
 (***********************************************************)
@@ -144,7 +139,7 @@ let global_info_auto = ref false
 let add_option ls refe =
   Goptions.(declare_bool_option
     { optstage = Summary.Stage.Interp;
-      optdepr  = false;
+      optdepr  = None;
       optkey   = ls;
       optread  = (fun () -> !refe);
       optwrite = (:=) refe })
@@ -274,8 +269,9 @@ let hintmap_of env sigma secvars hdc concl =
       else Hint_db.map_auto env sigma ~secvars hdc concl
 
 let exists_evaluable_reference env = function
-  | Tacred.EvalConstRef _ -> true
-  | Tacred.EvalVarRef v -> try ignore(Environ.lookup_named v env); true with Not_found -> false
+  | Evaluable.EvalConstRef _ -> true
+  | Evaluable.EvalProjectionRef _ -> true
+  | Evaluable.EvalVarRef v -> try ignore(Environ.lookup_named v env); true with Not_found -> false
 
 let dbg_intro dbg = tclLOG dbg (fun _ _ -> str "intro") intro
 let dbg_assumption dbg = tclLOG dbg (fun _ _ -> str "assumption") assumption
@@ -364,12 +360,6 @@ let gen_trivial ?(debug=Off) lems dbnames =
     tclTRY_dbg d (trivial_fail_db d db_list local_db)
   end
 
-let trivial ?(debug=Off) lems dbnames = gen_trivial ~debug lems (Some dbnames)
-
-let full_trivial ?(debug=Off) lems = gen_trivial ~debug lems None
-
-let h_trivial ?(debug=Off) lems dbnames = gen_trivial ~debug lems dbnames
-
 (**************************************************************************)
 (*                       The classical Auto tactic                        *)
 (**************************************************************************)
@@ -422,12 +412,12 @@ let search d n db_list lems =
     search d n (make_local_db gl)
   end
 
-let default_search_depth = ref 5
+let default_search_depth = 5
 
 let gen_auto ?(debug=Off) n lems dbnames =
   Hints.wrap_hint_warning @@
     Proofview.Goal.enter begin fun gl ->
-    let n = match n with None -> !default_search_depth | Some n -> n in
+    let n = match n with None -> default_search_depth | Some n -> n in
     let db_list =
       match dbnames with
       | Some dbnames -> make_db_list dbnames
@@ -439,10 +429,4 @@ let gen_auto ?(debug=Off) n lems dbnames =
 
 let auto ?(debug=Off) n lems dbnames = gen_auto ~debug (Some n) lems (Some dbnames)
 
-let default_auto = auto !default_search_depth [] []
-
-let full_auto ?(debug=Off) n lems = gen_auto ~debug (Some n) lems None
-
-let default_full_auto = full_auto !default_search_depth []
-
-let h_auto ?(debug=Off) n lems l = gen_auto ~debug n lems l
+let default_auto = auto default_search_depth [] []
