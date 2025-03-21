@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,11 +8,10 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-(** The type of token for the Coq lexer and parser *)
+(** The type of token for the Rocq lexer and parser *)
 
 type 'c p =
   | PKEYWORD : string -> string p
-  | PPATTERNIDENT : string option -> string p
   | PIDENT : string option -> string p
   | PFIELD : string option -> string p
   | PNUMBER : NumTok.Unsigned.t option -> NumTok.Unsigned.t p
@@ -26,7 +25,6 @@ val pattern_strings : 'c p -> string * string option
 
 type t =
   | KEYWORD of string
-  | PATTERNIDENT of string
   | IDENT of string
   | FIELD of string
   | NUMBER of NumTok.Unsigned.t
@@ -38,7 +36,6 @@ type t =
 
 val equal_p : 'a p -> 'b p -> ('a, 'b) Util.eq option
 
-val equal : t -> t -> bool
 (* pass true for diff_mode *)
 val extract_string : bool -> t -> string
 

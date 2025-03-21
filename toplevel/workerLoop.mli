@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,4 +11,5 @@
 (* Register a STM worker of a given executable name *)
 val start :
   init:(unit -> unit) ->
-  loop:(unit -> unit) -> unit
+  loop:(unit -> unit) ->
+  string list -> unit

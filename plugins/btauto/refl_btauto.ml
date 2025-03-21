@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -10,7 +10,7 @@
 
 open Constr
 
-let bt_lib_constr n = lazy (UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Coqlib.lib_ref n)
+let bt_lib_constr n = lazy (UnivGen.constr_of_monomorphic_global (Global.env ()) @@ Rocqlib.lib_ref n)
 
 let decomp_term sigma (c : Constr.t) =
   Constr.kind (EConstr.Unsafe.to_constr (Termops.strip_outer_cast sigma (EConstr.of_constr c)))
@@ -20,7 +20,7 @@ let lapp c v  = Constr.mkApp (Lazy.force c, v)
 let (===) = Constr.equal
 
 
-module CoqList = struct
+module RocqList = struct
   let _nil =  bt_lib_constr "core.list.nil"
   let _cons = bt_lib_constr "core.list.cons"
 
@@ -32,12 +32,12 @@ module CoqList = struct
 
 end
 
-module CoqPositive = struct
+module RocqPositive = struct
   let _xH = bt_lib_constr "num.pos.xH"
   let _xO = bt_lib_constr "num.pos.xO"
   let _xI = bt_lib_constr "num.pos.xI"
 
-  (* A coq nat from an int *)
+  (* A Rocq nat from an int *)
   let rec of_int n =
     if n <= 1 then Lazy.force _xH
     else
@@ -75,7 +75,7 @@ end
 
 module Bool = struct
 
-  let ind    = lazy (Globnames.destIndRef (Coqlib.lib_ref "core.bool.type"))
+  let ind    = lazy (Globnames.destIndRef (Rocqlib.lib_ref "core.bool.type"))
   let typ    = bt_lib_constr "core.bool.type"
   let trueb  = bt_lib_constr "core.bool.true"
   let falseb = bt_lib_constr "core.bool.false"
@@ -93,7 +93,7 @@ module Bool = struct
   | Negb of t
   | Ifb of t * t * t
 
-  let quote (env : Env.t) sigma (c : Constr.t) : t =
+  let quote (env : Env.t) genv sigma (c : Constr.t) : t =
     let trueb = Lazy.force trueb in
     let falseb = Lazy.force falseb in
     let andb = Lazy.force andb in
@@ -115,7 +115,7 @@ module Bool = struct
     | Case (info, _, _, _, _, arg, pats) ->
       let is_bool =
         let i = info.ci_ind in
-        Names.Ind.CanOrd.equal i (Lazy.force ind)
+        Environ.QInd.equal genv i (Lazy.force ind)
       in
       if is_bool then
         Ifb ((aux arg), (aux (snd pats.(0))), (aux (snd pats.(1))))
@@ -150,7 +150,7 @@ module Btauto = struct
   let soundness = bt_lib_constr "plugins.btauto.soundness"
 
   let rec convert = function
-  | Bool.Var n -> lapp f_var [|CoqPositive.of_int n|]
+  | Bool.Var n -> lapp f_var [|RocqPositive.of_int n|]
   | Bool.Const true -> Lazy.force f_top
   | Bool.Const false -> Lazy.force f_btm
   | Bool.Andb (b1, b2) -> lapp f_cnj [|convert b1; convert b2|]
@@ -160,14 +160,11 @@ module Btauto = struct
   | Bool.Ifb (b1, b2, b3) -> lapp f_ifb [|convert b1; convert b2; convert b3|]
 
   let convert_env env : Constr.t =
-    CoqList.of_list (Lazy.force Bool.typ) env
+    RocqList.of_list (Lazy.force Bool.typ) env
 
   let reify env t = lapp eval [|convert_env env; convert t|]
 
-  let print_counterexample p penv =
-  Proofview.Goal.enter begin fun gl ->
-    let env = Proofview.Goal.env gl in
-    let sigma = Proofview.Goal.sigma gl in
+  let print_counterexample env sigma p penv =
     let var = lapp witness [|p|] in
     let var = EConstr.of_constr var in
     (* Compute an assignment that dissatisfies the goal *)
@@ -175,39 +172,43 @@ module Btauto = struct
     let _, var = redfun env sigma var in
     let var = EConstr.Unsafe.to_constr var in
     let rec to_list l = match decomp_term sigma l with
-    | App (c, _)
-      when c === (Lazy.force CoqList._nil) -> []
-    | App (c, [|_; h; t|])
-      when c === (Lazy.force CoqList._cons) ->
-      if h === (Lazy.force Bool.trueb) then (true :: to_list t)
-      else if h === (Lazy.force Bool.falseb) then (false :: to_list t)
-      else invalid_arg "to_list"
-    | _ -> invalid_arg "to_list"
+      | App (c, _)
+        when c === (Lazy.force RocqList._nil) -> []
+      | App (c, [|_; h; t|])
+        when c === (Lazy.force RocqList._cons) ->
+        if h === (Lazy.force Bool.trueb) then (true :: to_list t)
+        else if h === (Lazy.force Bool.falseb) then (false :: to_list t)
+        else invalid_arg "to_list"
+      | _ -> invalid_arg "to_list"
     in
     let concat sep = function
-    | [] -> mt ()
-    | h :: t ->
-      let rec aux = function
       | [] -> mt ()
-      | x :: t -> (sep ++ x ++ aux t)
-      in
-      h ++ aux t
-    in
-    let msg =
-      try
-        let var = to_list var in
-        let assign = List.combine penv var in
-        let map_msg (key, v) =
-          let b = if v then str "true" else str "false" in
-          let term = Printer.pr_constr_env env sigma key in
-          term ++ spc () ++ str ":=" ++ spc () ++ b
+      | h :: t ->
+        let rec aux = function
+          | [] -> mt ()
+          | x :: t -> (sep ++ x ++ aux t)
         in
-        let assign = List.map map_msg assign in
-        let l = str "[" ++ (concat (str ";" ++ spc ()) assign) ++ str "]" in
-        str "Not a tautology:" ++ spc () ++ l
-      with e when CErrors.noncritical e -> (str "Not a tautology")
+        h ++ aux t
     in
-    Tacticals.tclFAIL msg
+    let var = to_list var in
+    let len = List.length var in
+    let penv = CList.firstn len penv in
+    let assign = List.combine penv var in
+    let map_msg (key,v) =
+      let b = bool v in
+      let term = Printer.pr_constr_env env sigma key in
+      term ++ spc () ++ str ":=" ++ spc () ++ b
+    in
+    let assign = List.map map_msg assign in
+    let l = str "[" ++ (concat (str ";" ++ spc ()) assign) ++ str "]" in
+    str "Not a tautology:" ++ spc () ++ l
+
+  let print_counterexample p penv =
+  Proofview.Goal.enter begin fun gl ->
+    let env = Proofview.Goal.env gl in
+    let sigma = Proofview.Goal.sigma gl in
+    let msg = lazy (print_counterexample env sigma p penv) in
+    Proofview.tclZERO ~info:(Exninfo.reify()) (Tacticals.FailError (0, msg))
   end
 
   let try_unification env =
@@ -238,8 +239,8 @@ module Btauto = struct
       | App (c, [|typ; tl; tr|])
           when typ === bool && c === eq ->
           let env = Env.empty () in
-          let fl = Bool.quote env sigma tl in
-          let fr = Bool.quote env sigma tr in
+          let fl = Bool.quote env (Tacmach.pf_env gl) sigma tl in
+          let fr = Bool.quote env (Tacmach.pf_env gl) sigma tr in
           let env = Env.to_list env in
           let fl = reify env fl in
           let fr = reify env fr in

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -15,7 +15,7 @@ type status
 (** Classify a unicode char into 3 classes or unknown. *)
 val classify : int -> status
 
-(** Return [None] if a given string can be used as a (Coq) identifier.
+(** Return [None] if a given string can be used as a (Rocq) identifier.
     Return [Some (b,s)] otherwise, where [s] is an explanation and [b] is severity. *)
 val ident_refutation : string -> (bool * string) option
 

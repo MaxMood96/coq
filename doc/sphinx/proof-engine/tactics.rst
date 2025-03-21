@@ -18,7 +18,7 @@ In :gdef:`backward reasoning`, the proof begins with the theorem statement
 as the goal, which is then gradually transformed until every subgoal generated
 along the way has been proven.  In this case, the proof of `A /\\ B` begins
 with that formula as the goal.  This can be transformed into two subgoals,
-`A` and `B`, followed by the proofs of `A` and `B`.  Coq and its tactics
+`A` and `B`, followed by the proofs of `A` and `B`.  Rocq and its tactics
 primarily use backward reasoning.
 
 A tactic may fully prove a goal, in which case the goal is removed
@@ -193,11 +193,11 @@ The :n:`eqn:` construct in various tactics uses :n:`@naming_intropattern`.
 Use these elementary patterns to specify a name:
 
 * :n:`@ident` — use the specified name
-* :n:`?` — let Coq generate a fresh name
+* :n:`?` — let Rocq generate a fresh name
 * :n:`?@ident` — generate a name that begins with :n:`@ident`
 * :n:`_` — discard the matched part (unless it is required for another
   hypothesis)
-* if a disjunction pattern omits a name, such as :g:`[|H2]`, Coq will choose a name
+* if a disjunction pattern omits a name, such as :g:`[|H2]`, Rocq will choose a name
 
 **Splitting patterns**
 
@@ -301,7 +301,7 @@ These patterns can be used when the hypothesis is an equality:
    These are defined in ``theories/Init/Logic.v``.  The "where" clauses define the
    infix notation for "or" and "and".
 
-   .. coqdoc::
+   .. rocqdoc::
 
       Inductive or (A B:Prop) : Prop :=
         | or_introl : A -> A \/ B
@@ -327,15 +327,15 @@ Examples:
 
    .. example:: intro pattern for /\\
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Goal forall (A: Prop) (B: Prop), (A /\ B) -> True.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          intros.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          destruct H as (HA & HB).
 
@@ -343,15 +343,15 @@ Examples:
 
    .. example:: intro pattern for \\/
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Goal forall (A: Prop) (B: Prop), (A \/ B) -> True.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          intros.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          destruct H as [HA|HB]. all: swap 1 2.
 
@@ -359,15 +359,15 @@ Examples:
 
    .. example:: -> intro pattern
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Goal forall (x:nat) (y:nat) (z:nat), (x = y) -> (y = z) -> (x = z).
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          intros * H.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          intros ->.
 
@@ -380,19 +380,19 @@ Examples:
       the contradiction :n:`1 = 2` (internally represented as :n:`(S O) = (S (S O))`)
       to complete the goal.
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Goal forall (n m:nat),  (S n) = (S m) -> (S O)=(S (S O)) -> False.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          intros *.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          intros [= H].
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          intros [=].
 
@@ -400,15 +400,15 @@ Examples:
 
    .. example:: (A & B & …) intro pattern
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Parameters (A : Prop) (B: nat -> Prop) (C: Prop).
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          Goal A /\ (exists x:nat, B x /\ C) -> True.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          intros (a & x & b & c).
 
@@ -416,11 +416,11 @@ Examples:
 
    .. example:: * intro pattern
 
-      .. coqtop:: reset out
+      .. rocqtop:: reset out
 
          Goal forall (A: Prop) (B: Prop), A -> B.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          intros *.
 
@@ -428,21 +428,21 @@ Examples:
 
    .. example:: ** pattern ("intros \**" is equivalent to "intros")
 
-      .. coqtop:: reset out
+      .. rocqtop:: reset out
 
          Goal forall (A: Prop) (B: Prop), A -> B.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          intros **.
 
    .. example:: compound intro pattern
 
-      .. coqtop:: reset out
+      .. rocqtop:: reset out
 
          Goal forall A B C:Prop, A \/ B /\ C -> (A -> C) -> C.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          intros * [a | (_,c)] f.
          all: swap 1 2.
@@ -451,18 +451,20 @@ Examples:
 
    .. example:: combined intro pattern using [=] -> and %
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
-         Require Import Coq.Lists.List.
+         Require Import ListDef.
          Section IntroPatterns.
          Variables (A : Type) (xs ys : list A).
+         Axiom length_zero_iff_nil :
+           forall [A] (l : list A), length l = 0 <-> l = nil.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          Example ThreeIntroPatternsCombined :
          S (length ys) = 1 -> xs ++ ys = xs.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          intros [=->%length_zero_iff_nil].
 
@@ -471,7 +473,7 @@ Examples:
       * `intros [=->%length_zero_iff_nil]` applies the theorem, making H the equality :g:`l=nil`,
         which is then applied as for :g:`->`.
 
-      .. coqdoc::
+      .. rocqdoc::
 
          Theorem length_zero_iff_nil (l : list A):
             length l = 0 <-> l=nil.
@@ -650,7 +652,7 @@ Applying theorems
 
    .. example::
 
-      .. coqtop:: reset all
+      .. rocqtop:: reset all
 
          Inductive Option : Set :=
          | Fail : Option
@@ -817,45 +819,45 @@ Applying theorems
    .. _apply_backward:
    .. example:: Backward reasoning in the goal with `apply`
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Goal forall A B C: Prop, (A -> B -> C) -> C.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          intros A B C H.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          apply H.  (* replace goal with new goals for unmatched premises of H *)
 
    .. _apply_backward_w_premises:
    .. example:: Backward reasoning in the goal with `apply` including a premise
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Goal forall A B C: Prop, (A -> B -> C) -> (B -> C).
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          intros A B C H.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          apply H.  (* match on "B -> C", replace goal with "A" *)
 
    .. _apply_forward:
    .. example:: Forward reasoning in hypotheses with `apply`
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Goal forall A B C: Prop, B -> (A -> B -> C) -> True.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          intros A B C H0 H1.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          apply H1 in H0.  (* change H0, create new goals for unmatched premises of H1 *)
 
@@ -868,21 +870,19 @@ Applying theorems
       to, repectively, `n` and `p` in theorem (backward reasoning).
       The `with` clause provides the binding for `m`:
 
-      .. coqtop:: reset in
+      .. rocqtop:: reset none
 
-         Require Import PeanoNat.
-
-      .. coqtop:: none
+         Axiom le_trans : forall n m p, n <= m -> m <= p -> n <= p.
 
          Goal forall (x y : nat), x <= y -> x * x <= y * y.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          intros x y H0.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
-         apply Nat.le_trans with (y * x).
+         apply le_trans with (y * x).
 
    .. _apply_with_binding_hyp:
    .. example:: Apply a theorem with a binding in a hypothesis
@@ -900,21 +900,19 @@ Applying theorems
       by name (as shown) or values for all the variables can be given
       positionally, i.e. `apply Nat.le_trans with (x * x) (y * y) (y * x) in H.`
 
-      .. coqtop:: reset in
+      .. rocqtop:: reset none
 
-         Require Import PeanoNat.
-
-      .. coqtop:: none
+         Axiom le_trans : forall n m p, n <= m -> m <= p -> n <= p.
 
          Goal forall (x y : nat), x * x <= y * y -> x <= y.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          intros x y H.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
-         apply Nat.le_trans with (p := y * x) in H.
+         apply le_trans with (p := y * x) in H.
 
    .. _apply_with_iff:
    .. example:: Applying theorems with `<->`
@@ -930,15 +928,15 @@ Applying theorems
       Theorems that use :n:`<->` to state a logical equivalence behave consistently
       when applied to goals and hypotheses.
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Goal forall (A B: Prop) (H1: A <-> B) (H: A), A.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          intros A B H1 H.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          apply H1.
          apply H1 in H.
@@ -951,15 +949,15 @@ Applying theorems
 
       Note that we usually use :tacn:`induction` rather than applying ``nat_ind`` directly.
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Goal forall x y, x + y = y + x.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          intros.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          Check nat_ind.
 
@@ -979,7 +977,7 @@ Applying theorems
 
       Behaves like :tacn:`apply`, but creates
       :ref:`existential variables <Existential-Variables>`
-      when Coq is unable to deduce instantiations for variables, rather than failing.
+      when Rocq is unable to deduce instantiations for variables, rather than failing.
 
    .. tacn:: rapply @one_term
 
@@ -995,9 +993,6 @@ Applying theorems
       :n:`@one_term` to arbitrarily many arguments without getting a type
       error, :tacn:`rapply` will loop.
 
-      Note that you must :n:`Require Import Coq.Program.Tactics` to
-      use :tacn:`rapply`.
-
    .. tacn:: simple apply {+, @one_term_with_bindings } {? @in_hyp_as }
 
       Behaves like :tacn:`apply` but it reasons modulo conversion only on subterms
@@ -1008,7 +1003,7 @@ Applying theorems
       .. _simple_apply_ex:
       .. example::
 
-         .. coqtop:: reset all
+         .. rocqtop:: reset all
 
             Definition id (x : nat) := x.
             Parameter H : forall x y, id x = y.
@@ -1036,7 +1031,7 @@ Applying theorems
 
    Assume we have a transitive relation ``R`` on ``nat``:
 
-   .. coqtop:: reset in
+   .. rocqtop:: reset in
 
       Parameter R : nat -> nat -> Prop.
       Axiom Rtrans : forall x y z:nat, R x y -> R y z -> R x z.
@@ -1046,46 +1041,46 @@ Applying theorems
 
    Consider the goal ``(R n p)`` provable using the transitivity of ``R``:
 
-   .. coqtop:: in
+   .. rocqtop:: in
 
       Goal R n p.
 
    The direct application of ``Rtrans`` with ``apply`` fails because no value
    for ``y`` in ``Rtrans`` is found by ``apply``:
 
-   .. coqtop:: all fail
+   .. rocqtop:: all fail
 
       apply Rtrans.
 
    A solution is to ``apply (Rtrans n m p)`` or ``(Rtrans n m)``.
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       apply (Rtrans n m p).
 
    Note that ``n`` can be inferred from the goal, so the following would work
    too.
 
-   .. coqtop:: in restart
+   .. rocqtop:: in restart
 
       apply (Rtrans _ m).
 
    More elegantly, ``apply Rtrans with (y:=m)`` allows only mentioning the
    unknown m:
 
-   .. coqtop:: in restart
+   .. rocqtop:: in restart
 
       apply Rtrans with (y := m).
 
    Another solution is to mention the proof of ``(R x y)`` in ``Rtrans``
 
-   .. coqtop:: all restart
+   .. rocqtop:: all restart
 
       apply Rtrans with (1 := Rnm).
 
    … or the proof of ``(R y z)``.
 
-   .. coqtop:: all restart
+   .. rocqtop:: all restart
 
       apply Rtrans with (2 := Rmp).
 
@@ -1093,7 +1088,7 @@ Applying theorems
    finding ``m``. Then one can apply the hypotheses ``Rnm`` and ``Rmp``. This
    instantiates the existential variable and completes the proof.
 
-   .. coqtop:: all restart abort
+   .. rocqtop:: all restart abort
 
       eapply Rtrans.
 
@@ -1115,7 +1110,7 @@ Managing the local context
    introduced in the context by removing certain constructs in the goal.
    If no item is found, the tactic fails.  The name used is
    :n:`@ident` (if specified) or from the construct, except that if the name from the
-   construct already exists in the :term:`local context`, Coq uses a fresh name
+   construct already exists in the :term:`local context`, Rocq uses a fresh name
    instead.  The constructs have these forms:
    (See examples :ref:`here <intro_examples>`.)
 
@@ -1134,7 +1129,7 @@ Managing the local context
 
    We recommend always specifying :n:`@ident` so that the names of hypotheses don't
    change as the proof is updated, making your proof easier to maintain.  For example,
-   if H exists in the context, Coq will consider using `H0`, `H1`, ... until it finds an
+   if H exists in the context, Rocq will consider using `H0`, `H1`, ... until it finds an
    unused name.  Modifications to a proof can change automatically assigned names
    that subsequent tactics likely refer to, making the proofs harder to maintain.  The
    :flag:`Mangle Names` flag gives some control over how fresh names are generated (see
@@ -1144,9 +1139,9 @@ Managing the local context
    the context with a single tactic.
 
    :n:`@ident`
-     The name to give to the introduced item.  If not given, Coq uses the
+     The name to give to the introduced item.  If not given, Rocq uses the
      variable name from the :n:`forall` or `H` for premises.
-     If a name such as `H` is already in use, Coq will consider using `H0`,
+     If a name such as `H` is already in use, Rocq will consider using `H0`,
      `H1`, ... until it finds a fresh name.
 
      .. note::
@@ -1171,11 +1166,11 @@ Managing the local context
    .. _intro_examples:
    .. example:: `intro` and `intros`
 
-      .. coqtop:: reset out
+      .. rocqtop:: reset out
 
          Goal forall m n, m < n -> (let x := 0 in True).
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          intro m.
          intro n.
@@ -1184,11 +1179,11 @@ Managing the local context
 
       This single `intros` tactic is equivalent to the 4 preceding `intro` tactics:
 
-      .. coqtop:: reset out
+      .. rocqtop:: reset out
 
          Goal forall m n, m < n -> (let x := 0 in True).
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          intros m n H x.
 
@@ -1218,21 +1213,21 @@ Managing the local context
 
       .. example:: intros until
 
-         .. coqtop:: reset out
+         .. rocqtop:: reset out
 
             Goal forall x y : nat, x = y -> y = x.
 
-         .. coqtop:: all
+         .. rocqtop:: all
 
             intros until y.
 
          Or:
 
-         .. coqtop:: reset out
+         .. rocqtop:: reset out
 
             Goal forall x y : nat, x = y -> y = x.
 
-         .. coqtop:: all
+         .. rocqtop:: all
 
             intros until 1.
 
@@ -1297,12 +1292,11 @@ Managing the local context
    to the goal, if this respects dependencies. This is
    the inverse of :tacn:`intro`.
 
-   .. exn:: @ident__1 is used in the hypothesis @ident__2.
-      :undocumented:
-
    .. tacn:: revert dependent @ident
 
-      Moves the named hypothesis and all the hypotheses that depend on it to the goal.
+      .. deprecated:: 8.18
+
+      An alias for :tacn:`generalize dependent`.
 
 .. tacn:: move @ident__from @where
 
@@ -1346,15 +1340,15 @@ Managing the local context
 
    .. example:: move
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Goal forall x :nat, x = 0 -> forall y z:nat, y=y-> 0=x.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
            intros x Hx y z Hy.
 
-      .. coqtop:: in
+      .. rocqtop:: in
 
            (*                    x Hx y z Hy *)
            move y after z.  (*    x Hx z y Hy   (z was left of y, intuitive case) *)
@@ -1375,9 +1369,6 @@ Managing the local context
    Renaming is done simultaneously, which permits swapping the names of 2 hypotheses.
    (Note that the renaming is applied in the context and the existential
    variables, but the proof term doesn't change.)
-
-   .. exn:: @ident is already used.
-      :undocumented:
 
 .. tacn:: set @alias_definition {? @occurrences }
           set @one_term {? @as_name } {? @occurrences }
@@ -1413,15 +1404,15 @@ Managing the local context
 
       :n:`set` does a simple syntactic replacement in the goal:
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Goal forall n, n = 0.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          intros.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          pattern n. (* without this, "set" won't replace anything in the goal *)
          set (f x := x = 0).
@@ -1535,7 +1526,7 @@ Controlling the proof flow
    with the added hypothesis (and otherwise fails).
 
    In the second form, if :n:`@as_ipat` isn't specified, the tactic adds a new
-   hypothesis :n:`@one_type` with a name chosen by Coq.  Otherwise, it transforms
+   hypothesis :n:`@one_type` with a name chosen by Rocq.  Otherwise, it transforms
    :n:`@one_type` as specified by :n:`@as_ipat` and adds the resulting new hypotheses.
    The :n:`@as_ipat` may also expand the current subgoal into multiple subgoals.
    Then, if :n:`@ltac_expr3` is specified, it is applied to and must succeed on all
@@ -1615,15 +1606,15 @@ Controlling the proof flow
 
    .. example:: partial application in :tacn:`specialize`
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Goal (forall n m: nat, n + m = m + n) -> True.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          intros.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          specialize (H 1). (* equivalent to: specialize H with (n := 1) *)
 
@@ -1633,16 +1624,16 @@ Controlling the proof flow
       :tacn:`apply`.  :tacn:`specialize` won't introduce new goals as
       :tacn:`apply` can.
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Goal forall A B C: Prop, B -> (A -> B -> C) -> True.
          Proof.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          intros A B C H0 H1.
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          specialize H1 with (2:=H0).
 
@@ -1666,16 +1657,16 @@ Controlling the proof flow
 
    .. example::
 
-      .. coqtop:: reset none
+      .. rocqtop:: reset none
 
          Goal forall x y:nat, 0 <= x + y + y.
          Proof. intros *.
 
-      .. coqtop:: out
+      .. rocqtop:: out
 
          Show.
 
-      .. coqtop:: all abort
+      .. rocqtop:: all abort
 
          generalize (x + y + y).   (* get a simpler goal that can be proven by induction *)
 
@@ -1703,7 +1694,7 @@ Controlling the proof flow
    The :n:`evar` tactic creates a new :term:`local definition <context-local definition>`
    named :n:`@ident` with type :n:`@type` or :n:`@one_type` in the context.
    The body of this binding is a fresh existential variable.  If the second
-   form is used, Coq chooses the name.
+   form is used, Rocq chooses the name.
 
 .. tacn:: instantiate ( @ident := @term )
           instantiate ( @natural := @term ) {? @hloc }
@@ -1725,7 +1716,7 @@ Controlling the proof flow
              must have given the name explicitly (see :ref:`Existential-Variables`).
 
    .. note:: When you are referring to hypotheses which you did not name
-             explicitly, be aware that Coq may make a different decision on how to
+             explicitly, be aware that Rocq may make a different decision on how to
              name the variable in the current goal and in the context of the
              existential variable. This can lead to surprising behaviors.
 
@@ -1741,7 +1732,7 @@ Controlling the proof flow
    Advanced users may want to define and use an Ltac tactic to get more consistent
    behavior, such as:
 
-   .. coqdoc::
+   .. rocqdoc::
 
       Ltac instantiate_ltac_variable ev term :=
         let H := fresh in
@@ -1807,7 +1798,7 @@ Controlling the proof flow
 
    Simple examples.  To see more detail, add `intros` after each `Goal`.
 
-   .. coqtop:: reset in
+   .. rocqtop:: reset in
 
       Inductive F :=. (* Another empty inductive type *)
 
@@ -1825,16 +1816,18 @@ Controlling the proof flow
 
    Apply a fact from the standard library:
 
-   .. coqtop:: in
+   .. rocqtop:: none
 
-      Require Import Arith.
+      Axiom lt_irrefl : forall x, ~ (x < x).
+
+   .. rocqtop:: in
 
       Goal forall (A : Prop), 0 < 0 -> A.
 
-   .. coqtop:: all
+   .. rocqtop:: all
 
       intros.
-      contradiction (Nat.lt_irrefl 0).
+      contradiction (lt_irrefl 0).
       Qed.
 
 .. tacn:: contradict @ident
@@ -1887,7 +1880,7 @@ Performance-oriented tactic variants
 
    .. example::
 
-      .. coqtop:: all abort
+      .. rocqtop:: all abort
 
          Goal False.
            exact_no_check I.
@@ -1901,7 +1894,7 @@ Performance-oriented tactic variants
 
       .. example::
 
-        .. coqtop:: all abort
+        .. rocqtop:: all abort
 
             Goal False.
               vm_cast_no_check I.
@@ -1915,7 +1908,7 @@ Performance-oriented tactic variants
 
       .. example::
 
-        .. coqtop:: all abort
+        .. rocqtop:: all abort
 
             Goal False.
               native_cast_no_check I.

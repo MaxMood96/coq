@@ -1,4 +1,4 @@
-Require Import Coq.Program.Tactics.
+Require Import Corelib.Program.Tactics.
 
 #[deprecated(note="deprecable")]
 Lemma depr1 : True.
@@ -30,3 +30,9 @@ Check depr3.
 Check depr4.
 Check depr5.
 Check depr6.
+
+#[deprecated(note="deprecable"),
+  warn(note="be careful", cats="careful, be careful"),
+  warn(note="also about bla", cats="careful, careful bla")]
+Definition depr7 := True.
+Check depr7.

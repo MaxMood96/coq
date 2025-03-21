@@ -1,5 +1,3 @@
-Require Import Coq.Arith.Arith.
-
 Module A.
 
   Fixpoint foo (n:nat) :=

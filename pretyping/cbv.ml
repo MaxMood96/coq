@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,7 +12,6 @@ open Util
 open Names
 open Constr
 open Vars
-open CClosure
 open Esubst
 
 (**** Call by value reduction ****)
@@ -26,18 +25,17 @@ open Esubst
  *  STACK(k,v,stk) represents an irreductible value [v] in the stack [stk].
  *          [k] is a delayed shift to be applied to both the value and
  *          the stack.
- *  CBN(t,S) is the term [S]t. It is used to delay evaluation. For
- *          instance products are evaluated only when actually needed
- *          (CBN strategy).
- *  LAM(n,a,b,S) is the term [S]([x:a]b) where [a] is a list of bindings and
+ *  LAMBDA(n,a,b,S) is the term [S]([x:a]b) where [a] is a list of bindings and
  *          [n] is the length of [a]. the environment [S] is propagated
  *          only when the abstraction is applied, and then we use the rule
  *                  ([S]([x:a]b) c) --> [S.c]b
  *          This corresponds to the usual strategy of weak reduction
- *  FIXP(op,bd,S,args) is the fixpoint (Fix or Cofix) of bodies bd under
+ *  PROD(na,t,u,S) is the term [S](forall na:t, u).
+ *  LETIN(na,b,t,S) is the term [S](let na:= b : t in.c).
+ *  FIX(op,bd,S,args) is the fixpoint (Fix or Cofix) of bodies bd under
  *          the bindings S, and then applied to args. Here again,
  *          weak reduction.
- *  CONSTR(c,args) is the constructor [c] applied to [args].
+ *  CONSTRUCT(c,args) is the constructor [c] applied to [args].
  *  PRIMITIVE(cop,args) represent a particial application of
  *          a primitive, or a fully applied primitive
  *          which does not reduce.
@@ -47,13 +45,15 @@ open Esubst
 type cbv_value =
   | VAL of int * constr
   | STACK of int * cbv_value * cbv_stack
-  | CBN of constr * cbv_value subs
-  | LAM of int * (Name.t Context.binder_annot * constr) list * constr * cbv_value subs
-  | FIXP of fixpoint * cbv_value subs * cbv_value array
-  | COFIXP of cofixpoint * cbv_value subs * cbv_value array
-  | CONSTR of constructor Univ.puniverses * cbv_value array
+  | LAMBDA of int * (Name.t Constr.binder_annot * types) list * constr * cbv_value subs
+  | PROD of Name.t Constr.binder_annot * types * types * cbv_value subs
+  | LETIN of Name.t Constr.binder_annot * cbv_value * types * constr * cbv_value subs
+  | FIX of fixpoint * cbv_value subs * cbv_value array
+  | COFIX of cofixpoint * cbv_value subs * cbv_value array
+  | CONSTRUCT of constructor UVars.puniverses * cbv_value array
   | PRIMITIVE of CPrimitives.t * pconstant * cbv_value array
-  | ARRAY of Univ.Instance.t * cbv_value Parray.t * cbv_value
+  | ARRAY of UVars.Instance.t * cbv_value Parray.t * cbv_value
+  | SYMBOL of { cst: Constant.t UVars.puniverses; unfoldfix: bool; rules: Declarations.rewrite_rule list; stk: cbv_stack }
 
 (* type of terms with a hole. This hole can appear only under App or Case.
  *   TOP means the term is considered without context
@@ -76,8 +76,8 @@ type cbv_value =
 and cbv_stack =
   | TOP
   | APP of cbv_value list * cbv_stack
-  | CASE of Univ.Instance.t * constr array * case_return * case_branch array * Constr.case_invert * case_info * cbv_value subs * cbv_stack
-  | PROJ of Projection.t * cbv_stack
+  | CASE of UVars.Instance.t * constr array * case_return * case_branch array * Constr.case_invert * case_info * cbv_value subs * cbv_stack
+  | PROJ of Projection.t * Sorts.relevance * cbv_stack
 
 (* les vars pourraient etre des constr,
    cela permet de retarder les lift: utile ?? *)
@@ -88,18 +88,26 @@ and cbv_stack =
 let rec shift_value n = function
   | VAL (k,t) -> VAL (k+n,t)
   | STACK(k,v,stk) -> STACK(k+n,v,stk)
-  | CBN (t,s) -> CBN(t,subs_shft(n,s))
-  | LAM (nlams,ctxt,b,s) -> LAM (nlams,ctxt,b,subs_shft (n,s))
-  | FIXP (fix,s,args) ->
-      FIXP (fix,subs_shft (n,s), Array.map (shift_value n) args)
-  | COFIXP (cofix,s,args) ->
-      COFIXP (cofix,subs_shft (n,s), Array.map (shift_value n) args)
-  | CONSTR (c,args) ->
-      CONSTR (c, Array.map (shift_value n) args)
+  | PROD (na,t,u,s) -> PROD(na,t,u,subs_shft(n,s))
+  | LETIN (na,b,t,c,s) -> LETIN(na,shift_value n b,t,c,subs_shft(n,s))
+  | LAMBDA (nlams,ctxt,b,s) -> LAMBDA (nlams,ctxt,b,subs_shft (n,s))
+  | FIX (fix,s,args) ->
+      FIX (fix,subs_shft (n,s), Array.map (shift_value n) args)
+  | COFIX (cofix,s,args) ->
+      COFIX (cofix,subs_shft (n,s), Array.map (shift_value n) args)
+  | CONSTRUCT (c,args) ->
+      CONSTRUCT (c, Array.map (shift_value n) args)
   | PRIMITIVE(op,c,args) ->
       PRIMITIVE(op,c,Array.map (shift_value n) args)
   | ARRAY (u,t,ty) ->
       ARRAY(u, Parray.map (shift_value n) t, shift_value n ty)
+  | SYMBOL s -> SYMBOL { s with stk = shift_stack n s.stk }
+
+and shift_stack n = function (* Slow *)
+  | TOP -> TOP
+  | APP (args, stk) -> APP (List.map (shift_value n) args, shift_stack n stk)
+  | CASE (u,pms,c,b,iv,i,s,stk) -> CASE (u,pms,c,b,iv,i,subs_shft(n,s), shift_stack n stk)
+  | PROJ (p, r, stk) -> PROJ (p, r, shift_stack n stk)
 
 let shift_value n v =
   if Int.equal n 0 then v else shift_value n v
@@ -116,12 +124,12 @@ let rec mk_fix_subs make_body n env i =
   else mk_fix_subs make_body n (subs_cons (make_body i) env) (i + 1)
 
 let contract_fixp env ((reci,i),(_,_,bds as bodies)) =
-  let make_body j = FIXP(((reci,j),bodies), env, [||]) in
+  let make_body j = FIX(((reci,j),bodies), env, [||]) in
   let n = Array.length bds in
   mk_fix_subs make_body n env 0, bds.(i)
 
 let contract_cofixp env (i,(_,_,bds as bodies)) =
-  let make_body j = COFIXP((j,bodies), env, [||]) in
+  let make_body j = COFIX((j,bodies), env, [||]) in
   let n = Array.length bds in
   mk_fix_subs make_body n env 0, bds.(i)
 
@@ -149,7 +157,7 @@ let rec stack_concat stk1 stk2 =
       TOP -> stk2
     | APP(v,stk1') -> APP(v,stack_concat stk1' stk2)
     | CASE(u,pms,c,b,iv,i,s,stk1') -> CASE(u,pms,c,b,iv,i,s,stack_concat stk1' stk2)
-    | PROJ (p,stk1') -> PROJ (p,stack_concat stk1' stk2)
+    | PROJ (p,r,stk1') -> PROJ (p,r,stack_concat stk1' stk2)
 
 (* merge stacks when there is no shifts in between *)
 let mkSTACK = function
@@ -157,11 +165,18 @@ let mkSTACK = function
   | STACK(0,v0,stk0), stk -> STACK(0,v0,stack_concat stk0 stk)
   | v,stk -> STACK(0,v,stk)
 
+module KeyTable = Hashtbl.Make(struct
+  type t = Constant.t UVars.puniverses tableKey
+  let equal = Names.eq_table_key (eq_pair eq_constant_key UVars.Instance.equal)
+  let hash = Names.hash_table_key (fun (c, _) -> Constant.UserOrd.hash c)
+end)
+
 type cbv_infos = {
   env : Environ.env;
-  tab : (cbv_value, Empty.t) Declarations.constant_def KeyTable.t;
+  tab : (cbv_value, Empty.t, bool * Declarations.rewrite_rule list) Declarations.constant_def KeyTable.t;
   reds : RedFlags.reds;
-  sigma : Evd.evar_map
+  sigma : Evd.evar_map;
+  strong : bool;
 }
 
 (* Change: zeta reduction cannot be avoided in CBV *)
@@ -179,12 +194,26 @@ let red_set_ref flags = function
  *)
 let strip_appl head stack =
   match head with
-    | FIXP (fix,env,app) -> (FIXP(fix,env,[||]), stack_vect_app app stack)
-    | COFIXP (cofix,env,app) -> (COFIXP(cofix,env,[||]), stack_vect_app app stack)
-    | CONSTR (c,app) -> (CONSTR(c,[||]), stack_vect_app app stack)
+    | FIX (fix,env,app) -> (FIX(fix,env,[||]), stack_vect_app app stack)
+    | COFIX (cofix,env,app) -> (COFIX(cofix,env,[||]), stack_vect_app app stack)
+    | CONSTRUCT (c,app) -> (CONSTRUCT(c,[||]), stack_vect_app app stack)
     | PRIMITIVE(op,c,app) -> (PRIMITIVE(op,c,[||]), stack_vect_app app stack)
-    | VAL _ | STACK _ | CBN _ | LAM _ | ARRAY _ -> (head, stack)
+    | LETIN _ | VAL _ | STACK _ | PROD _ | LAMBDA _ | ARRAY _ | SYMBOL _ -> (head, stack)
 
+let destack head stack =
+  match head with
+  | FIX (fix,env,app) -> (FIX(fix,env,[||]), stack_vect_app app stack)
+  | COFIX (cofix,env,app) -> (COFIX(cofix,env,[||]), stack_vect_app app stack)
+  | CONSTRUCT (c,app) -> (CONSTRUCT(c,[||]), stack_vect_app app stack)
+  | PRIMITIVE(op,c,app) -> (PRIMITIVE(op,c,[||]), stack_vect_app app stack)
+  | STACK (k, v, stk) -> (shift_value k v, stack_concat (shift_stack k stk) stack)
+  | SYMBOL ({ stk } as s) -> (SYMBOL { s with stk=TOP }, stack_concat stk stack)
+  | LETIN _ | VAL _ | PROD _ | LAMBDA _ | ARRAY _ -> (head, stack)
+
+let rec fixp_reducible_symb_stk = function
+  | TOP -> true
+  | APP (_, stk) -> fixp_reducible_symb_stk stk
+  | CASE _ | PROJ _ -> false
 
 (* Tests if fixpoint reduction is possible. *)
 let fixp_reducible flgs ((reci,i),_) stk =
@@ -195,7 +224,9 @@ let fixp_reducible flgs ((reci,i),_) stk =
         | [] -> false
         | v :: appl ->
           if Int.equal n 0 then match v with
-          | CONSTR _ -> true
+          | CONSTRUCT _ -> true
+          | SYMBOL { unfoldfix=true; stk; _ } ->
+              fixp_reducible_symb_stk stk
           | _ -> false
           else check (n - 1) appl
         in
@@ -224,7 +255,7 @@ module VNativeEntries =
     type elem = cbv_value
     type args = cbv_value array
     type evd = unit
-    type uinstance = Univ.Instance.t
+    type uinstance = UVars.Instance.t
 
     let get = Array.get
 
@@ -244,6 +275,14 @@ module VNativeEntries =
         | _ -> raise Primred.NativeDestKO)
       | _ -> raise Primred.NativeDestKO
 
+    let get_string () e =
+      match e with
+      | VAL(_, cf) ->
+        (match kind cf with
+        | String s -> s
+        | _ -> raise Primred.NativeDestKO)
+      | _ -> raise Primred.NativeDestKO
+
     let get_parray () e =
       match e with
       | ARRAY(_u,t,_ty) -> t
@@ -253,9 +292,11 @@ module VNativeEntries =
 
     let mkFloat env f = VAL(0, mkFloat f)
 
+    let mkString env s = VAL(0, mkString s)
+
     let mkBool env b =
       let (ct,cf) = get_bool_constructors env in
-      CONSTR(Univ.in_punivs (if b then ct else cf), [||])
+      CONSTRUCT(UVars.in_punivs (if b then ct else cf), [||])
 
     let int_ty env = VAL(0, UnsafeMonomorphic.mkConst @@ get_int_type env)
 
@@ -263,91 +304,91 @@ module VNativeEntries =
 
     let mkCarry env b e =
       let (c0,c1) = get_carry_constructors env in
-      CONSTR(Univ.in_punivs (if b then c1 else c0), [|int_ty env;e|])
+      CONSTRUCT(UVars.in_punivs (if b then c1 else c0), [|int_ty env;e|])
 
     let mkIntPair env e1 e2 =
       let int_ty = int_ty env in
       let c = get_pair_constructor env in
-      CONSTR(Univ.in_punivs c, [|int_ty;int_ty;e1;e2|])
+      CONSTRUCT(UVars.in_punivs c, [|int_ty;int_ty;e1;e2|])
 
     let mkFloatIntPair env f i =
       let float_ty = float_ty env in
       let int_ty = int_ty env in
       let c = get_pair_constructor env in
-      CONSTR(Univ.in_punivs c, [|float_ty;int_ty;f;i|])
+      CONSTRUCT(UVars.in_punivs c, [|float_ty;int_ty;f;i|])
 
     let mkLt env =
       let (_eq,lt,_gt) = get_cmp_constructors env in
-      CONSTR(Univ.in_punivs lt, [||])
+      CONSTRUCT(UVars.in_punivs lt, [||])
 
     let mkEq env =
       let (eq,_lt,_gt) = get_cmp_constructors env in
-      CONSTR(Univ.in_punivs eq, [||])
+      CONSTRUCT(UVars.in_punivs eq, [||])
 
     let mkGt env =
       let (_eq,_lt,gt) = get_cmp_constructors env in
-      CONSTR(Univ.in_punivs gt, [||])
+      CONSTRUCT(UVars.in_punivs gt, [||])
 
     let mkFLt env =
       let (_eq,lt,_gt,_nc) = get_f_cmp_constructors env in
-      CONSTR(Univ.in_punivs lt, [||])
+      CONSTRUCT(UVars.in_punivs lt, [||])
 
     let mkFEq env =
       let (eq,_lt,_gt,_nc) = get_f_cmp_constructors env in
-      CONSTR(Univ.in_punivs eq, [||])
+      CONSTRUCT(UVars.in_punivs eq, [||])
 
     let mkFGt env =
       let (_eq,_lt,gt,_nc) = get_f_cmp_constructors env in
-      CONSTR(Univ.in_punivs gt, [||])
+      CONSTRUCT(UVars.in_punivs gt, [||])
 
     let mkFNotComparable env =
       let (_eq,_lt,_gt,nc) = get_f_cmp_constructors env in
-      CONSTR(Univ.in_punivs nc, [||])
+      CONSTRUCT(UVars.in_punivs nc, [||])
 
     let mkPNormal env =
       let (pNormal,_nNormal,_pSubn,_nSubn,_pZero,_nZero,_pInf,_nInf,_nan) =
         get_f_class_constructors env in
-      CONSTR(Univ.in_punivs pNormal, [||])
+      CONSTRUCT(UVars.in_punivs pNormal, [||])
 
     let mkNNormal env =
       let (_pNormal,nNormal,_pSubn,_nSubn,_pZero,_nZero,_pInf,_nInf,_nan) =
         get_f_class_constructors env in
-      CONSTR(Univ.in_punivs nNormal, [||])
+      CONSTRUCT(UVars.in_punivs nNormal, [||])
 
     let mkPSubn env =
       let (_pNormal,_nNormal,pSubn,_nSubn,_pZero,_nZero,_pInf,_nInf,_nan) =
         get_f_class_constructors env in
-      CONSTR(Univ.in_punivs pSubn, [||])
+      CONSTRUCT(UVars.in_punivs pSubn, [||])
 
     let mkNSubn env =
       let (_pNormal,_nNormal,_pSubn,nSubn,_pZero,_nZero,_pInf,_nInf,_nan) =
         get_f_class_constructors env in
-      CONSTR(Univ.in_punivs nSubn, [||])
+      CONSTRUCT(UVars.in_punivs nSubn, [||])
 
     let mkPZero env =
       let (_pNormal,_nNormal,_pSubn,_nSubn,pZero,_nZero,_pInf,_nInf,_nan) =
         get_f_class_constructors env in
-      CONSTR(Univ.in_punivs pZero, [||])
+      CONSTRUCT(UVars.in_punivs pZero, [||])
 
     let mkNZero env =
       let (_pNormal,_nNormal,_pSubn,_nSubn,_pZero,nZero,_pInf,_nInf,_nan) =
         get_f_class_constructors env in
-      CONSTR(Univ.in_punivs nZero, [||])
+      CONSTRUCT(UVars.in_punivs nZero, [||])
 
     let mkPInf env =
       let (_pNormal,_nNormal,_pSubn,_nSubn,_pZero,_nZero,pInf,_nInf,_nan) =
         get_f_class_constructors env in
-      CONSTR(Univ.in_punivs pInf, [||])
+      CONSTRUCT(UVars.in_punivs pInf, [||])
 
     let mkNInf env =
       let (_pNormal,_nNormal,_pSubn,_nSubn,_pZero,_nZero,_pInf,nInf,_nan) =
         get_f_class_constructors env in
-      CONSTR(Univ.in_punivs nInf, [||])
+      CONSTRUCT(UVars.in_punivs nInf, [||])
 
     let mkNaN env =
       let (_pNormal,_nNormal,_pSubn,_nSubn,_pZero,_nZero,_pInf,_nInf,nan) =
         get_f_class_constructors env in
-      CONSTR(Univ.in_punivs nan, [||])
+      CONSTRUCT(UVars.in_punivs nan, [||])
 
     let mkArray env u t ty =
       ARRAY (u,t,ty)
@@ -366,10 +407,10 @@ let rec reify_stack t = function
       reify_stack (mkApp(t,Array.map_of_list reify_value args)) st
   | CASE (u,pms,ty,br,iv,ci,env,st) ->
       reify_stack
-        (mkCase (ci, u, pms, ty, iv, t,br))
+        (apply_env env @@ mkCase (ci, u, pms, ty, iv, t,br))
         st
-  | PROJ (p, st) ->
-       reify_stack (mkProj (p, t)) st
+  | PROJ (p, r, st) ->
+       reify_stack (mkProj (p, r, t)) st
 
 and reify_value = function (* reduction under binders *)
   | VAL (n,t) -> lift n t
@@ -377,25 +418,29 @@ and reify_value = function (* reduction under binders *)
       reify_stack (reify_value v) stk
   | STACK (n,v,stk) ->
       lift n (reify_stack (reify_value v) stk)
-  | CBN(t,env) ->
-    apply_env env t
-  | LAM (k,ctxt,b,env) ->
+  | PROD(na,t,u,env) ->
+    apply_env env (mkProd (na,t,u))
+  | LETIN(na,b,t,c,env) ->
+    apply_env env (mkLetIn (na,reify_value b,t,c))
+  | LAMBDA (k,ctxt,b,env) ->
     apply_env env @@
     List.fold_left (fun c (n,t) ->
         mkLambda (n, t, c)) b ctxt
-  | FIXP ((lij,fix),env,args) ->
+  | FIX ((lij,fix),env,args) ->
     let fix = mkFix (lij, fix) in
     mkApp (apply_env env fix, Array.map reify_value args)
-  | COFIXP ((j,cofix),env,args) ->
+  | COFIX ((j,cofix),env,args) ->
     let cofix = mkCoFix (j, cofix) in
     mkApp (apply_env env cofix, Array.map reify_value args)
-  | CONSTR (c,args) ->
+  | CONSTRUCT (c,args) ->
       mkApp(mkConstructU c, Array.map reify_value args)
   | PRIMITIVE(op,c,args) ->
       mkApp(mkConstU c, Array.map reify_value args)
   | ARRAY (u,t,ty) ->
     let t, def = Parray.to_array t in
       mkArray(u, Array.map reify_value t, reify_value def, reify_value ty)
+  | SYMBOL { cst; stk; _ } ->
+      reify_stack (mkConstU cst) stk
 
 and apply_env env t =
   match kind t with
@@ -408,6 +453,22 @@ and apply_env env t =
     end
   | _ ->
     map_with_binders subs_lift apply_env env t
+
+let apply_env_context e ctx =
+  let open Context.Rel.Declaration in
+  let rec subst_context ctx = match ctx with
+  | [] -> e, []
+  | LocalAssum (na, ty) :: ctx ->
+    let e, ctx = subst_context ctx in
+    let ty = apply_env e ty in
+    subs_lift e, LocalAssum (na, ty) :: ctx
+  | LocalDef (na, ty, bdy) :: ctx ->
+    let e, ctx = subst_context ctx in
+    let ty = apply_env e ty in
+    let bdy = apply_env e bdy in
+    subs_lift e, LocalDef (na, ty, bdy) :: ctx
+  in
+  snd @@ subst_context ctx
 
 let rec strip_app = function
   | APP (args,st) -> APP (args,strip_app st)
@@ -442,9 +503,11 @@ let cbv_subst_of_rel_context_instance_list mkclos sign args env =
  * constructor, a lambda or a fixp appear in the head. If not, it is a value
  * and is completely computed here. The head redexes are NOT reduced:
  * the function returns the pair of a cbv_value and its stack.  *
- * Invariant: if the result of norm_head is CONSTR or (CO)FIXP, it last
+ * Invariant: if the result of norm_head is CONSTRUCT or (CO)FIX, its last
  * argument is [].  Because we must put all the applied terms in the
  * stack. *)
+
+exception PatternFailure
 
 let rec norm_head info env t stack =
   (* no reduction under binders *)
@@ -462,14 +525,13 @@ let rec norm_head info env t stack =
   | Case (ci,u,pms,p,iv,c,v) -> norm_head info env c (CASE(u,pms,p,v,iv,ci,env,stack))
   | Cast (ct,_,_) -> norm_head info env ct stack
 
-  | Proj (p, c) ->
+  | Proj (p, r, c) ->
     let p' =
-      if red_set info.reds (fCONST (Projection.constant p))
-        && red_set info.reds fBETA
+      if red_set info.reds (fPROJ (Projection.repr p))
       then Projection.unfold p
       else p
     in
-      norm_head info env c (PROJ (p', stack))
+      norm_head info env c (PROJ (p', r, stack))
 
   (* constants, axioms
    * the first pattern is CRUCIAL, n=0 happens very often:
@@ -488,7 +550,7 @@ let rec norm_head info env t stack =
       (fst sp) (lazy (reify_stack t (strip_app stack)));
     norm_head_ref 0 info env stack (ConstKey sp) t
 
-  | LetIn (_, b, _, c) ->
+  | LetIn (na, b, u, c) ->
       (* zeta means letin are contracted; delta without zeta means we *)
       (* allow bindings but leave let's in place *)
       if red_set info.reds fZETA then
@@ -498,7 +560,8 @@ let rec norm_head info env t stack =
         let env' = subs_cons (cbv_stack_term info TOP env b) env in
         norm_head info env' c stack
       else
-        (CBN(t,env), stack) (* Should we consider a commutative cut ? *)
+        (* Note: we may also consider a commutative cut! *)
+        LETIN(na,cbv_stack_term info TOP env b,u,c,env), stack
 
   | Evar ((e, _) as ev) ->
       (match Evd.existential_opt_value0 info.sigma ev with
@@ -512,10 +575,10 @@ let rec norm_head info env t stack =
   (* non-neutral cases *)
   | Lambda _ ->
       let ctxt,b = Term.decompose_lambda t in
-      (LAM(List.length ctxt, List.rev ctxt,b,env), stack)
-  | Fix fix -> (FIXP(fix,env,[||]), stack)
-  | CoFix cofix -> (COFIXP(cofix,env,[||]), stack)
-  | Construct c -> (CONSTR(c, [||]), stack)
+      (LAMBDA(List.length ctxt, List.rev ctxt,b,env), stack)
+  | Fix fix -> (FIX(fix,env,[||]), stack)
+  | CoFix cofix -> (COFIX(cofix,env,[||]), stack)
+  | Construct c -> (CONSTRUCT(c, [||]), stack)
 
   | Array(u,t,def,ty) ->
     let ty = cbv_stack_term info TOP env ty in
@@ -527,8 +590,8 @@ let rec norm_head info env t stack =
     (ARRAY (u,t,ty), stack)
 
   (* neutral cases *)
-  | (Sort _ | Meta _ | Ind _ | Int _ | Float _) -> (VAL(0, t), stack)
-  | Prod _ -> (CBN(t,env), stack)
+  | (Sort _ | Meta _ | Ind _ | Int _ | Float _ | String _) -> (VAL(0, t), stack)
+  | Prod (na,t,u) -> (PROD(na,t,u,env), stack)
 
 and norm_head_ref k info env stack normt t =
   if red_set_ref info.reds normt then
@@ -542,6 +605,13 @@ and norm_head_ref k info env stack normt t =
           | RelKey _ | VarKey _ -> assert false
         in
         (PRIMITIVE(op,c,[||]),stack)
+      | Declarations.Symbol (unfoldfix, rules) ->
+        assert (k = 0);
+        let cst = match normt with
+          | ConstKey c -> c
+          | RelKey _ | VarKey _ -> assert false
+        in
+        (SYMBOL { cst; unfoldfix; rules; stk=TOP }, stack)
       | Declarations.OpaqueDef _ | Declarations.Undef _ ->
          debug_cbv (fun () -> Pp.(str "Not unfolding " ++ debug_pr_key normt));
          (VAL(0,make_constr_ref k normt t),stack)
@@ -562,7 +632,7 @@ and cbv_stack_term info stack env t =
 
 and cbv_stack_value info env = function
   (* a lambda meets an application -> BETA *)
-  | (LAM (nlams,ctxt,b,env), APP (args, stk))
+  | (LAMBDA (nlams,ctxt,b,env), APP (args, stk))
       when red_set info.reds fBETA ->
     let rec apply env lams args =
       if Int.equal lams 0 then
@@ -571,26 +641,26 @@ and cbv_stack_value info env = function
       else match args with
       | [] ->
         let ctxt' = List.skipn (nlams - lams) ctxt in
-        LAM (lams, ctxt', b, env)
+        LAMBDA (lams, ctxt', b, env)
       | v :: args ->
         let env = subs_cons v env in
         apply env (lams - 1) args
     in
     apply env nlams args
     (* a Fix applied enough -> IOTA *)
-    | (FIXP(fix,env,[||]), stk)
+    | (FIX(fix,env,[||]), stk)
         when fixp_reducible info.reds fix stk ->
         let (envf,redfix) = contract_fixp env fix in
         cbv_stack_term info stk envf redfix
 
     (* constructor guard satisfied or Cofix in a Case -> IOTA *)
-    | (COFIXP(cofix,env,[||]), stk)
+    | (COFIX(cofix,env,[||]), stk)
         when cofixp_reducible info.reds cofix stk->
         let (envf,redfix) = contract_cofixp env cofix in
         cbv_stack_term info stk envf redfix
 
     (* constructor in a Case -> IOTA *)
-    | (CONSTR(((sp,n),_),[||]), APP(args,CASE(u,pms,_p,br,iv,ci,env,stk)))
+    | (CONSTRUCT(((sp,n),_),[||]), APP(args,CASE(u,pms,_p,br,iv,ci,env,stk)))
             when red_set info.reds fMATCH ->
         let cargs = List.skipn ci.ci_npar args in
         let env =
@@ -604,7 +674,7 @@ and cbv_stack_value info env = function
         cbv_stack_term info stk env (snd br.(n-1))
 
     (* constructor of arity 0 in a Case -> IOTA *)
-    | (CONSTR(((sp, n), _),[||]), CASE(u,pms,_,br,_,ci,env,stk))
+    | (CONSTRUCT(((sp, n), _),[||]), CASE(u,pms,_,br,_,ci,env,stk))
             when red_set info.reds fMATCH ->
         let env =
           if (Int.equal ci.ci_cstr_ndecls.(n - 1) ci.ci_cstr_nargs.(n - 1)) then (* no lets *)
@@ -617,15 +687,15 @@ and cbv_stack_value info env = function
         cbv_stack_term info stk env (snd br.(n-1))
 
     (* constructor in a Projection -> IOTA *)
-    | (CONSTR(((sp,n),u),[||]), APP(args,PROJ(p,stk)))
+    | (CONSTRUCT(((sp,n),u),[||]), APP(args,PROJ(p,_,stk)))
         when red_set info.reds fMATCH && Projection.unfolded p ->
       let arg = List.nth args (Projection.npars p + Projection.arg p) in
         cbv_stack_value info env (strip_appl arg stk)
 
     (* may be reduced later by application *)
-    | (FIXP(fix,env,[||]), APP(appl,TOP)) -> FIXP(fix,env,Array.of_list appl)
-    | (COFIXP(cofix,env,[||]), APP(appl,TOP)) -> COFIXP(cofix,env,Array.of_list appl)
-    | (CONSTR(c,[||]), APP(appl,TOP)) -> CONSTR(c,Array.of_list appl)
+    | (FIX(fix,env,[||]), APP(appl,TOP)) -> FIX(fix,env,Array.of_list appl)
+    | (COFIX(cofix,env,[||]), APP(appl,TOP)) -> COFIX(cofix,env,Array.of_list appl)
+    | (CONSTRUCT(c,[||]), APP(appl,TOP)) -> CONSTRUCT(c,Array.of_list appl)
 
     (* primitive apply to arguments *)
     | (PRIMITIVE(op,(_,u as c),[||]), APP(appl,stk)) ->
@@ -634,9 +704,9 @@ and cbv_stack_value info env = function
       | (args, appl) ->
         let stk = if List.is_empty appl then stk else stack_app appl stk in
         begin match VredNative.red_prim info.env () op u (Array.of_list args) with
-        | Some (CONSTR (c, args)) ->
+        | Some (CONSTRUCT (c, args)) ->
           (* args must be moved to the stack to allow future reductions *)
-          cbv_stack_value info env (CONSTR(c, [||]), stack_vect_app args stk)
+          cbv_stack_value info env (CONSTRUCT(c, [||]), stack_vect_app args stk)
         | Some v ->  cbv_stack_value info env (v,stk)
         | None -> mkSTACK(PRIMITIVE(op,c,Array.of_list args), stk)
         end
@@ -644,7 +714,15 @@ and cbv_stack_value info env = function
         (* partial application *)
               (assert (stk = TOP);
                PRIMITIVE(op,c,Array.of_list appl))
-      end
+        end
+    | SYMBOL ({ cst; rules; stk } as s ), stk' ->
+        let stk = stack_concat stk stk' in
+        begin try
+          let rhs, stack = cbv_apply_rules info env (snd cst) rules stk in
+          cbv_stack_value info env (destack rhs stack)
+        with PatternFailure ->
+          SYMBOL { s with stk }
+        end
 
     (* definitely a value *)
     | (head,stk) -> mkSTACK(head, stk)
@@ -673,9 +751,158 @@ and cbv_value_cache info ref =
         Declarations.Def v
       with
       | Environ.NotEvaluableConst (Environ.IsPrimitive (_u,op)) -> Declarations.Primitive op
+      | Environ.NotEvaluableConst (Environ.HasRules (u, b, r)) -> Declarations.Symbol (b, r)
       | Not_found | Environ.NotEvaluableConst _ -> Declarations.Undef None
     in
     KeyTable.add info.tab ref v; v
+
+
+and it_mkLambda_or_LetIn info ctx t =
+  let open Context.Rel.Declaration in
+  match List.rev ctx with
+  | [] -> t
+  | LocalAssum (n, ty) :: ctx ->
+      let assums, ctx = List.map_until (function LocalAssum (n, ty) -> Some (n, ty) | LocalDef _ -> None) ctx in
+      let assums = (n, ty) :: assums in
+      LAMBDA (List.length assums, assums, Term.it_mkLambda_or_LetIn (reify_value t) (List.rev ctx), subs_id 0)
+  | LocalDef _ :: _ ->
+      cbv_stack_term info TOP (subs_id 0) (Term.it_mkLambda_or_LetIn (reify_value t) ctx)
+
+and cbv_match_arg_pattern info env ctx psubst p t =
+  let open Declarations in
+  let t' = it_mkLambda_or_LetIn info ctx t in
+  match p with
+  | EHole i -> Partial_subst.add_term i t' psubst
+  | EHoleIgnored -> psubst
+  | ERigid (ph, es) ->
+      let t, stk = destack t TOP in
+      let psubst = cbv_match_rigid_arg_pattern info env ctx psubst ph t in
+      let psubst, stk = cbv_apply_rule info env ctx psubst es stk in
+      match stk with
+      | TOP -> psubst
+      | APP _| CASE _ | PROJ _ -> raise PatternFailure
+
+and cbv_match_arg_pattern_lift info env ctx n psubst p t =
+  let env = subs_liftn n env in
+  cbv_match_arg_pattern info env ctx psubst p
+    (cbv_stack_term info TOP env t)
+
+and match_sort ps s subst =
+  match Sorts.pattern_match ps s subst with
+  | Some subst -> subst
+  | None -> raise PatternFailure
+
+and match_instance pu u psubst =
+  match UVars.Instance.pattern_match pu u psubst with
+  | Some subst -> subst
+  | None -> raise PatternFailure
+
+
+and cbv_match_rigid_arg_pattern info env ctx psubst p t =
+  let open Declarations in
+  match [@ocaml.warning "-4"] p, t with
+  | PHInd (ind, pu), VAL(0, t') ->
+    begin match kind t' with Ind (ind', u) when Environ.QInd.equal info.env ind ind' -> match_instance pu u psubst | _ -> raise PatternFailure end
+  | PHConstr (constr, pu), CONSTRUCT ((constr', u), [||]) ->
+    if Environ.QConstruct.equal info.env constr constr' then match_instance pu u psubst else raise PatternFailure
+  | PHRel i, VAL(k, t') ->
+    begin match kind t' with Rel n when Int.equal i (k + n) -> psubst | _ -> raise PatternFailure end
+  | PHSort ps, VAL(0, t') ->
+    begin match kind t' with Sort s -> match_sort ps s psubst | _ -> raise PatternFailure end
+  | PHSymbol (c, pu), SYMBOL { cst = c', u; _ } ->
+    if Environ.QConstant.equal info.env c c' then match_instance pu u psubst else raise PatternFailure
+  | PHInt i, VAL(0, t') ->
+    begin match kind t' with Int i' when Uint63.equal i i' -> psubst | _ -> raise PatternFailure end
+  | PHFloat f, VAL(0, t') ->
+    begin match kind t' with Float f' when Float64.equal f f' -> psubst | _ -> raise PatternFailure end
+  | PHString s, VAL(0, t') ->
+    begin match kind t' with String s' when Pstring.equal s s' -> psubst | _ -> raise PatternFailure end
+  | PHLambda (ptys, pbod), LAMBDA (nlam, ntys, body, env) ->
+    let np = Array.length ptys in
+    if np > nlam then raise PatternFailure;
+    let ntys, body =
+      if np = nlam then ntys, body
+      else (* np < nlam *)
+        let ntys, tys' = List.chop np ntys in
+        ntys, Term.compose_lam (List.rev tys') body
+    in
+    let ctx' = List.rev_map (fun (n, ty) -> Context.Rel.Declaration.LocalAssum (n, ty)) ntys in
+    let ctx' = apply_env_context env ctx' in
+    let tys = Array.of_list ntys in
+    let contexts_upto = Array.init np (fun i -> List.lastn i ctx' @ ctx) in
+    let psubst = Array.fold_left3_i (fun i psubst ctx pty (_, ty) -> cbv_match_arg_pattern_lift info env ctx i psubst pty ty) psubst contexts_upto ptys tys in
+    let psubst = cbv_match_arg_pattern_lift info env (ctx' @ ctx) np psubst pbod body in
+    psubst
+  | PHProd (ptys, pbod), PROD (na, ty, body, env) ->
+    let ntys, _ = Term.decompose_prod body in
+    let np = Array.length ptys in
+    let nprod = 1 + List.length ntys in
+    if np > nprod then raise PatternFailure;
+    let ntys, body = Term.decompose_prod_n (np-1) body in
+    let ctx' = List.map (fun (n, ty) -> Context.Rel.Declaration.LocalAssum (n, ty)) (ntys @ [na, ty]) in
+    let ctx' = apply_env_context env ctx' in
+    let tys = Array.of_list ((na, ty) :: List.rev ntys) in
+    let na = Array.length tys in
+    let contexts_upto = Array.init na (fun i -> List.lastn i ctx' @ ctx) in
+    let psubst = Array.fold_left3_i (fun i psubst ctx pty (_, ty) -> cbv_match_arg_pattern_lift info env ctx i psubst pty ty) psubst contexts_upto ptys tys in
+    let psubst = cbv_match_arg_pattern_lift info env (ctx' @ ctx) na psubst pbod body in
+    psubst
+  | (PHInd _ | PHConstr _ | PHRel _ | PHInt _ | PHFloat _ | PHString _ | PHSort _ | PHSymbol _ | PHLambda _ | PHProd _), _ -> raise PatternFailure
+
+
+and cbv_apply_rule info env ctx psubst es stk =
+  match [@ocaml.warning "-4"] es, stk with
+  | [], _ -> psubst, stk
+  | Declarations.PEApp pargs :: e, APP (args, s) ->
+      let args = Array.of_list args in
+      let np = Array.length pargs in
+      let na = Array.length args in
+      if np == na then
+        let psubst = Array.fold_left2 (cbv_match_arg_pattern info env ctx) psubst pargs args in
+        cbv_apply_rule info env ctx psubst e s
+      else if np < na then (* more real arguments *)
+        let usedargs, remargs = Array.chop np args in
+        let psubst = Array.fold_left2 (cbv_match_arg_pattern info env ctx) psubst pargs usedargs in
+        cbv_apply_rule info env ctx psubst e (APP (Array.to_list remargs, s))
+      else (* more pattern arguments *)
+        let usedpargs, rempargs = Array.chop na pargs in
+        let psubst = Array.fold_left2 (cbv_match_arg_pattern info env ctx) psubst usedpargs args in
+        cbv_apply_rule info env ctx psubst (PEApp rempargs :: e) s
+  | Declarations.PECase (pind, pu, pret, pbrs) :: e, CASE (u, pms, (p, _), brs, iv, ci, env, s) ->
+      if not @@ Environ.QInd.equal info.env pind ci.ci_ind then raise PatternFailure;
+      let specif = Inductive.lookup_mind_specif info.env ci.ci_ind in
+      let ntys_ret = Inductive.expand_arity specif (ci.ci_ind, u) pms (fst p) in
+      let ntys_ret = apply_env_context env ntys_ret in
+      let ntys_brs = Inductive.expand_branch_contexts specif u pms brs in
+      let psubst = match_instance pu u psubst in
+      let brs = Array.map2 (fun ctx' br -> List.length ctx', ctx' @ ctx, (snd br)) ntys_brs brs in
+      let psubst = cbv_match_arg_pattern_lift info env (ntys_ret @ ctx) (List.length ntys_ret) psubst pret (snd p) in
+      let psubst = Array.fold_left2 (fun psubst pat (n, ctx, br) -> cbv_match_arg_pattern_lift info env (apply_env_context env ctx) n psubst pat br) psubst pbrs brs in
+      cbv_apply_rule info env ctx psubst e s
+  | Declarations.PEProj proj :: e, PROJ (proj', r, s) ->
+      if not @@ Environ.QProjection.Repr.equal info.env proj (Projection.repr proj') then raise PatternFailure;
+      cbv_apply_rule info env ctx psubst e s
+  | _, _ -> raise PatternFailure
+
+
+and cbv_apply_rules info env u r stk =
+  match r with
+  | [] -> raise PatternFailure
+  | { lhs_pat = (pu, elims); nvars; rhs } :: rs ->
+    try
+      let psubst = Partial_subst.make nvars in
+      let psubst = match_instance pu u psubst in
+      let psubst, stk = cbv_apply_rule info env [] psubst elims stk in
+      let subst, qsubst, usubst = Partial_subst.to_arrays psubst in
+      let subst = Array.fold_right subs_cons subst env in
+      let usubst = UVars.Instance.of_array (qsubst, usubst) in
+      let rhsu = Vars.subst_instance_constr usubst rhs in
+      let rhs' = cbv_stack_term info TOP subst rhsu in
+      rhs', stk
+    with PatternFailure -> cbv_apply_rules info env u rs stk
+
+
+
 
 (* When we are sure t will never produce a redex with its stack, we
  * normalize (even under binders) the applied terms and we build the
@@ -684,16 +911,18 @@ and cbv_value_cache info ref =
 let rec apply_stack info t = function
   | TOP -> t
   | APP (args,st) ->
+    (* Note: should "theoretically" use a right-to-left version of map_of_list *)
       apply_stack info (mkApp(t,Array.map_of_list (cbv_norm_value info) args)) st
   | CASE (u,pms,ty,br,iv,ci,env,st) ->
     (* FIXME: Prevent this expansion by caching whether an inductive contains let-bindings *)
-    let (_, ty, _, _, br) = Inductive.expand_case info.env (ci, u, pms, ty, iv, mkProp, br) in
+    let (_, (ty,r), _, _, br) = Inductive.expand_case info.env (ci, u, pms, ty, iv, mkProp, br) in
     let ty =
       let (_, mip) = Inductive.lookup_mind_specif info.env ci.ci_ind in
       Term.decompose_lambda_n_decls (mip.Declarations.mind_nrealdecls + 1) ty
     in
     let mk_br c n = Term.decompose_lambda_n_decls n c in
     let br = Array.map2 mk_br br ci.ci_cstr_ndecls in
+    let aux = if info.strong then cbv_norm_term info else apply_env in
     let map_ctx (nas, c) =
       let open Context.Rel.Declaration in
       let fold decl e = match decl with
@@ -705,14 +934,14 @@ let rec apply_stack info t = function
       in
       let env = List.fold_right fold nas env in
       let nas = Array.of_list (List.rev_map get_annot nas) in
-      (nas, cbv_norm_term info env c)
+      (nas, aux env c)
     in
       apply_stack info
-        (mkCase (ci, u, Array.map (cbv_norm_term info env) pms, map_ctx ty, iv, t,
+        (mkCase (ci, u, Array.map (aux env) pms, (map_ctx ty,r), iv, t,
                     Array.map map_ctx br))
         st
-  | PROJ (p, st) ->
-       apply_stack info (mkProj (p, t)) st
+  | PROJ (p, r, st) ->
+       apply_stack info (mkProj (p, r, t)) st
 
 (* performs the reduction on a constr, and returns a constr *)
 and cbv_norm_term info env t =
@@ -720,35 +949,39 @@ and cbv_norm_term info env t =
   cbv_norm_value info (cbv_stack_term info TOP env t)
 
 (* reduction of a cbv_value to a constr *)
-and cbv_norm_value info = function (* reduction under binders *)
+and cbv_norm_value info = function
   | VAL (n,t) -> lift n t
   | STACK (0,v,stk) ->
       apply_stack info (cbv_norm_value info v) stk
   | STACK (n,v,stk) ->
       lift n (apply_stack info (cbv_norm_value info v) stk)
-  | CBN(t,env) ->
-      Constr.map_with_binders subs_lift (cbv_norm_term info) env t
-  | LAM (n,ctxt,b,env) ->
+  | PROD(na,t,u,env) ->
+      mkProd (na,cbv_norm_term info env t,cbv_norm_term info (subs_lift env) u)
+  | LETIN (na,b,t,c,env) ->
+      let aux = if info.strong then cbv_norm_term info else apply_env in
+      mkLetIn (na,cbv_norm_value info b,aux env t,aux (subs_lift env) c)
+  | LAMBDA (n,ctxt,b,env) ->
       let nctxt =
         List.map_i (fun i (x,ty) ->
           (x,cbv_norm_term info (subs_liftn i env) ty)) 0 ctxt in
-      Term.compose_lam (List.rev nctxt) (cbv_norm_term info (subs_liftn n env) b)
-  | FIXP ((lij,(names,lty,bds)),env,args) ->
+      let aux = if info.strong then cbv_norm_term info else apply_env in
+      Term.compose_lam (List.rev nctxt) (aux (subs_liftn n env) b)
+  | FIX ((lij,(names,lty,bds)),env,args) ->
+      let aux = if info.strong then cbv_norm_term info else apply_env in
       mkApp
         (mkFix (lij,
                 (names,
-                 Array.map (cbv_norm_term info env) lty,
-                 Array.map (cbv_norm_term info
-                              (subs_liftn (Array.length lty) env)) bds)),
+                 Array.map (aux env) lty,
+                 Array.map (aux (subs_liftn (Array.length lty) env)) bds)),
          Array.map (cbv_norm_value info) args)
-  | COFIXP ((j,(names,lty,bds)),env,args) ->
+  | COFIX ((j,(names,lty,bds)),env,args) ->
       mkApp
         (mkCoFix (j,
                   (names,Array.map (cbv_norm_term info env) lty,
                    Array.map (cbv_norm_term info
                                 (subs_liftn (Array.length lty) env)) bds)),
          Array.map (cbv_norm_value info) args)
-  | CONSTR (c,args) ->
+  | CONSTRUCT (c,args) ->
       mkApp(mkConstructU c, Array.map (cbv_norm_value info) args)
   | PRIMITIVE(op,c,args) ->
       mkApp(mkConstU c,Array.map (cbv_norm_value info) args)
@@ -757,6 +990,7 @@ and cbv_norm_value info = function (* reduction under binders *)
     let t, def = Parray.to_array t in
     let def = cbv_norm_value info def in
       mkArray(u, Array.map (cbv_norm_value info) t, def, ty)
+  | SYMBOL { cst; stk; _ } -> apply_stack info (mkConstU cst) stk
 
 (* with profiling *)
 let cbv_norm infos constr =
@@ -764,5 +998,5 @@ let cbv_norm infos constr =
   EConstr.of_constr (cbv_norm_term infos (subs_id 0) constr)
 
 (* constant bodies are normalized at the first expansion *)
-let create_cbv_infos reds env sigma =
-  { tab = KeyTable.create 91; reds; env; sigma }
+let create_cbv_infos reds ~strong env sigma =
+  { tab = KeyTable.create 91; reds; env; sigma; strong }

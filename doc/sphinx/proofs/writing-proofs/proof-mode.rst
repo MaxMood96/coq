@@ -5,16 +5,16 @@ Proof mode
 ----------
 
 :gdef:`Proof mode <proof mode>` is used to prove theorems.
-Coq enters proof mode when you begin a proof,
+Rocq enters proof mode when you begin a proof,
 such as with the :cmd:`Theorem` command.  It exits proof mode when
 you complete a proof, such as with the :cmd:`Qed` command.  Tactics,
 which are available only in proof mode, incrementally transform incomplete
 proofs to eventually generate a complete proof.
 
-When you run Coq interactively, such as through CoqIDE, Proof General or
-coqtop, Coq shows the current proof state (the incomplete proof) as you
-enter tactics.  This information isn't shown when you run Coq in batch
-mode with `coqc`.
+When you run Rocq interactively, such as through RocqIDE, Proof General or
+`rocq repl`, Rocq shows the current proof state (the incomplete proof) as you
+enter tactics.  This information isn't shown when you run Rocq in batch
+mode with `rocq compile`.
 
 Proof State
 -----------
@@ -57,11 +57,11 @@ When you begin proving a theorem, the proof state shows
 the statement of the theorem below the line and often nothing in the
 local context:
 
-.. coqtop:: none
+.. rocqtop:: none
 
    Parameter P: nat -> Prop.
 
-.. coqtop:: out
+.. rocqtop:: out
 
    Goal forall n m: nat, n > m -> P 1 /\ P 2.
 
@@ -70,7 +70,7 @@ The names of variables (`n` and `m`) and hypotheses (`H`) appear before a colon,
 their type.  The type doesn't have to be a provable statement.
 For example, `0 = 1` and `False` are both valid and useful types.
 
-.. coqtop:: all
+.. rocqtop:: all
 
    intros.
 
@@ -79,7 +79,7 @@ be referred to as :gdef:`subgoals <subgoal>` for clarity.
 Goals are numbered from 1 to N at each step of the proof to permit applying a
 tactic to specific goals.  The local context is only shown for the first goal.
 
-.. coqtop:: all
+.. rocqtop:: all
 
    split.
 
@@ -90,7 +90,7 @@ is `Set` or `Type`. :gdef:`"Hypotheses" <hypothesis>` refers to items that are
 for which the type of their type is `Prop` or `SProp`,
 but these terms are also used interchangeably.
 
-.. coqtop:: out
+.. rocqtop:: out
 
    let t_n := type of n in idtac "type of n :" t_n;
    let tt_n := type of t_n in idtac "type of" t_n ":" tt_n.
@@ -111,7 +111,7 @@ The :cmd:`Show Proof` command displays the incomplete proof term
 before you've completed the proof.  For example, here's the proof
 term after using the :tacn:`split` tactic above:
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Show Proof.
 
@@ -121,7 +121,7 @@ with names that begin with `?Goal`.  (Note that some existential variables
 are not goals.)  The :cmd:`Show Existentials` command shows each existential with
 the hypotheses and conclusion for the associated goal.
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Show Existentials.
 
@@ -137,15 +137,15 @@ to make them visible.  Other tactics may automatically resolve these goals
 user usually doesn't need to think about.  See :ref:`existential-variables`
 and :ref:`this example <automatic-evar-resolution>`.
 
-Coq's kernel verifies the correctness of proof terms when it exits
+Rocq's kernel verifies the correctness of proof terms when it exits
 proof mode by checking that the proof term is :term:`well-typed` and
 that its type is the same as the theorem statement.
 
 After a proof is completed, :cmd:`Print` `<theorem_name>`
 shows the proof term and its type.  The type appears after
-the colon (`forall ...`), as for this theorem from Coq's standard library:
+the colon (`forall ...`), as for this theorem from Rocq's standard library:
 
-.. coqtop:: all
+.. rocqtop:: all
 
    Print proj1.
 
@@ -165,8 +165,8 @@ the colon (`forall ...`), as for this theorem from Coq's standard library:
 Entering and exiting proof mode
 -------------------------------
 
-Coq enters :term:`proof mode` when you begin a proof through
-commands such as :cmd:`Theorem` or :cmd:`Goal`.  Coq user interfaces
+Rocq enters :term:`proof mode` when you begin a proof through
+commands such as :cmd:`Theorem` or :cmd:`Goal`.  Rocq user interfaces
 usually have a way to indicate that you're in proof mode.
 
 :term:`Tactics <tactic>` are available only in proof mode (currently they give syntax
@@ -186,7 +186,7 @@ When the proof is completed, you can exit proof mode with commands such as
 
 .. cmd:: Qed
 
-   Passes a completed :term:`proof term` to Coq's kernel
+   Passes a completed :term:`proof term` to Rocq's kernel
    to check that the proof term is :term:`well-typed` and
    to verify that its type matches the theorem statement.  If it's verified, the
    proof term is added to the global environment as an :term:`opaque` constant
@@ -245,9 +245,6 @@ When the proof is completed, you can exit proof mode with commands such as
 
    :n:`All`
      Aborts all current proofs.
-
-   .. exn:: No focused proof (No proof-editing in progress).
-      :undocumented:
 
 .. cmd:: Proof @term
    :name: Proof `term`
@@ -354,7 +351,7 @@ When the proof is completed, you can exit proof mode with commands such as
 
    .. example::
 
-      .. coqtop:: all reset
+      .. rocqtop:: all reset
 
          Section Test.
          Variable n : nat.
@@ -363,7 +360,7 @@ When the proof is completed, you can exit proof mode with commands such as
          #[using="Hn"]
          Lemma example : 0 < n.
 
-      .. coqtop:: in
+      .. rocqtop:: in
 
          Abort.
          End Test.
@@ -382,12 +379,11 @@ When the proof is completed, you can exit proof mode with commands such as
       Adding the unnecessary section variable `radixNotZero` changes how `foo'` can be
       applied.
 
-      .. coqtop :: in
+      .. rocqtop:: in
 
-         Require Import ZArith.
          Section bar.
-           Variable radix : Z.
-           Hypothesis radixNotZero : (0 < radix)%Z.
+           Variable radix : nat.
+           Hypothesis radixNotZero : 0 < radix.
 
            Lemma foo : 0 = 0.
            Proof. reflexivity. Qed.
@@ -395,7 +391,7 @@ When the proof is completed, you can exit proof mode with commands such as
            Lemma foo' : 0 = 0.
            Proof using radixNotZero. reflexivity. Qed.  (* radixNotZero is not needed *)
 
-      .. coqtop :: all
+      .. rocqtop:: all
 
            Print foo'.   (* Doesn't show radixNotZero yet *)
          End bar.
@@ -403,15 +399,15 @@ When the proof is completed, you can exit proof mode with commands such as
          Print foo'.     (* "End" added type radix (used by radixNotZero) and radixNotZero *)
          Goal 0 = 0.
 
-      .. coqtop :: in
+      .. rocqtop:: in
 
          Fail apply foo'.  (* Fails because of the extra variable *)
 
-      .. coqtop :: all
+      .. rocqtop:: all
 
          apply (foo' 5).   (* Can be used if the extra variable is provided explicitly *)
 
-      .. coqtop:: abort none
+      .. rocqtop:: abort none
 
 Proof using options
 ```````````````````
@@ -492,8 +488,8 @@ Proof modes
 -----------
 
 When entering proof mode through commands such as :cmd:`Goal` and :cmd:`Proof`,
-Coq picks by default the |Ltac| mode. Nonetheless, there exist other proof modes
-shipped in the standard Coq installation, and furthermore some plugins define
+Rocq picks by default the |Ltac| mode. Nonetheless, there exist other proof modes
+shipped in the standard Rocq installation, and furthermore some plugins define
 their own proof modes. The default proof mode used when opening a proof can
 be changed using the following option.
 
@@ -515,7 +511,7 @@ be changed using the following option.
    `"Noedit"`
      No tactic
      language is activated at all. This is the default when the :term:`prelude`
-     is not loaded, e.g. through the `-noinit` option for `coqc`.
+     is not loaded, e.g. through the `-noinit` option for `rocq`.
 
    `"Ltac2"`
      Activates the Ltac2 language and the Ltac2-specific variants of the documented
@@ -593,12 +589,12 @@ Curly braces
 
    .. example:: Working with named goals
 
-      .. coqtop:: in
+      .. rocqtop:: in
 
          Ltac name_goal name := refine ?[name].  (* for convenience *)
          Set Printing Goal Names.  (* show goal names, e.g. "(?base)" and "(?step)" *)
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          Goal forall n, n + 0 = n.
          Proof.
@@ -607,13 +603,13 @@ Curly braces
          [base]: {
            reflexivity.
 
-      .. coqtop:: in
+      .. rocqtop:: in
 
          }
 
       This can also be a way of focusing on a shelved goal, for instance:
 
-      .. coqtop:: all reset
+      .. rocqtop:: all reset
 
          Goal exists n : nat, n = n.
          eexists ?[x].
@@ -659,12 +655,12 @@ is made from ``-``, ``+`` or ``*`` characters (with no spaces and no period afte
    :undocumented:
    :name: bullet (- + *)
 
-When a focused goal is proved, Coq displays a message suggesting use of
+When a focused goal is proved, Rocq displays a message suggesting use of
 ``}`` or the correct matching bullet to unfocus the goal or focus the next subgoal.
 
 .. note::
 
-   In Proof General (``Emacs`` interface to Coq), you must use
+   In Proof General (``Emacs`` interface to Rocq), you must use
    bullets with the priority ordering shown above to have correct
    indentation. For example ``-`` must be the outer bullet and ``+`` the inner
    one in the example below.
@@ -675,7 +671,7 @@ When a focused goal is proved, Coq displays a message suggesting use of
   Note that the tactic following a bullet is frequently put on the same line with the bullet.
   Observe that this proof still works even if all the bullets in it are omitted.
 
-  .. coqtop:: in
+  .. rocqtop:: in
 
     Goal (1=1 /\ 2=2) /\ 3=3.
     Proof.
@@ -770,7 +766,7 @@ tactic that unshelves goals by name.
 
    .. example:: shelve_unifiable
 
-      .. coqtop:: all abort
+      .. rocqtop:: all abort
 
          Goal exists n, n=0.
          refine (ex_intro _ _ _).
@@ -811,11 +807,11 @@ Reordering goals
 
    .. example:: cycle
 
-      .. coqtop:: none reset
+      .. rocqtop:: none reset
 
          Parameter P : nat -> Prop.
 
-      .. coqtop:: in abort
+      .. rocqtop:: in abort
 
          Goal P 1 /\ P 2 /\ P 3 /\ P 4 /\ P 5.
          repeat split.    (*  P 1, P 2, P 3, P 4, P 5 *)
@@ -833,7 +829,7 @@ Reordering goals
 
    .. example:: swap
 
-      .. coqtop:: in abort
+      .. rocqtop:: in abort
 
          Goal P 1 /\ P 2 /\ P 3 /\ P 4 /\ P 5.
          repeat split.    (*   P 1, P 2, P 3, P 4, P 5 *)
@@ -848,7 +844,7 @@ Reordering goals
 
    .. example:: revgoals
 
-      .. coqtop:: in abort
+      .. rocqtop:: in abort
 
          Goal P 1 /\ P 2 /\ P 3 /\ P 4 /\ P 5.
          repeat split.    (*  P 1, P 2, P 3, P 4, P 5 *)
@@ -928,7 +924,7 @@ Requesting information
 
      .. example::
 
-        .. coqtop:: all abort
+        .. rocqtop:: all abort
 
            Goal exists n, n = 0.
            eexists ?[n].
@@ -990,7 +986,7 @@ Requesting information
 
    .. example::
 
-      .. coqtop:: all
+      .. rocqtop:: all
 
          Show Match nat.
 
@@ -1005,7 +1001,7 @@ Requesting information
 
 .. cmd:: Show Goal @natural at @natural
 
-   Available in coqtop.  Displays a goal at a
+   Available in `rocq repl`.  Displays a goal at a
    proof state using the goal ID number and the proof state ID number.
    It is primarily for use by tools such as Prooftree that need to fetch
    goal history in this way.  Prooftree is a tool for visualizing a proof
@@ -1035,10 +1031,10 @@ Requesting information
 Showing differences between proof steps
 ---------------------------------------
 
-Coq can automatically highlight the differences between successive proof steps
-and between values in some error messages.  Coq can also highlight differences
+Rocq can automatically highlight the differences between successive proof steps
+and between values in some error messages.  Rocq can also highlight differences
 in the proof term.
-For example, the following screenshots of CoqIDE and coqtop show the application
+For example, the following screenshots of RocqIDE and coqtop show the application
 of the same :tacn:`intros` tactic.  The tactic creates two new hypotheses, highlighted in green.
 The conclusion is entirely in pale green because although it’s changed, no tokens were added
 to it.  The second screenshot uses the "removed" option, so it shows the conclusion a
@@ -1061,25 +1057,25 @@ new, no line of old text is shown for them.
 
 ..
 
-  .. image:: ../../_static/diffs-coqide-on.png
-     :alt: CoqIDE with Set Diffs on
+  .. image:: ../../_static/diffs-rocqide-on.png
+     :alt: RocqIDE with Set Diffs on
 
 ..
 
-  .. image:: ../../_static/diffs-coqide-removed.png
-     :alt: CoqIDE with Set Diffs removed
+  .. image:: ../../_static/diffs-rocqide-removed.png
+     :alt: RocqIDE with Set Diffs removed
 
 ..
 
   .. image:: ../../_static/diffs-coqtop-on3.png
      :alt: coqtop with Set Diffs on
 
-This image shows an error message with diff highlighting in CoqIDE:
+This image shows an error message with diff highlighting in RocqIDE:
 
 ..
 
   .. image:: ../../_static/diffs-error-message.png
-     :alt: CoqIDE error message with diffs
+     :alt: RocqIDE error message with diffs
 
 How to enable diffs
 ```````````````````
@@ -1093,23 +1089,23 @@ How to enable diffs
    use red and green for the compared values; they appear regardless of the setting.
    (Colors are user-configurable.)
 
-For coqtop, showing diffs can be enabled when starting coqtop with the
+For `rocq repl`, showing diffs can be enabled when starting `rocq repl` with the
 ``-diffs on|off|removed`` command-line option or by setting the :opt:`Diffs` option
-within Coq.  You will need to provide the ``-color on|auto`` command-line option when
-you start coqtop in either case.
+within Rocq.  You will need to provide the ``-color on|auto`` command-line option when
+you start `rocq repl` in either case.
 
-Colors for coqtop can be configured by setting the ``COQ_COLORS`` environment
+Colors for `rocq repl` can be configured by setting the ``ROCQ_COLORS`` environment
 variable.  See section :ref:`customization-by-environment-variables`.  Diffs
 use the tags ``diff.added``, ``diff.added.bg``, ``diff.removed`` and ``diff.removed.bg``.
 
-In CoqIDE, diffs should be enabled from the ``View`` menu.  Don’t use the ``Set Diffs``
-command in CoqIDE.  You can change the background colors shown for diffs from the
+In RocqIDE, diffs should be enabled from the ``View`` menu.  Don’t use the ``Set Diffs``
+command in RocqIDE.  You can change the background colors shown for diffs from the
 ``Edit | Preferences | Tags`` panel by changing the settings for the ``diff.added``,
 ``diff.added.bg``, ``diff.removed`` and ``diff.removed.bg`` tags.  This panel also
 lets you control other attributes of the highlights, such as the foreground
 color, bold, italic, underline and strikeout.
 
-Proof General, VsCoq and Coqtail can also display Coq-generated proof diffs automatically.
+Proof General, VsCoq and Coqtail can also display Rocq-generated proof diffs automatically.
 Please see the PG documentation section
 `"Showing Proof Diffs" <https://proofgeneral.github.io/doc/master/userman/Coq-Proof-General#Showing-Proof-Diffs>`_
 and Coqtail's `"Proof Diffs" <https://github.com/whonore/Coqtail#proof-diffs>`_
@@ -1143,35 +1139,35 @@ Notes:
    hypotheses.  In the first one, notice that the goal ``P 1`` is not highlighted at
    all after the split because it has not changed.
 
-    .. todo: Use this script and remove the screenshots when COQ_COLORS
+    .. todo: Use this script and remove the screenshots when ROCQ_COLORS
       works for coqtop in sphinx
-    .. coqtop:: none
+    .. rocqtop:: none
 
       Set Diffs "on".
       Parameter P : nat -> Prop.
       Goal P 1 /\ P 2 /\ P 3.
 
-    .. coqtop:: out
+    .. rocqtop:: out
 
       split.
 
-    .. coqtop:: all abort
+    .. rocqtop:: all abort
 
       2: split.
 
   ..
 
-    .. coqtop:: none
+    .. rocqtop:: none
 
       Set Diffs "on".
       Goal forall n m : nat, n + m = m + n.
       Set Diffs "on".
 
-    .. coqtop:: out
+    .. rocqtop:: out
 
        intros n.
 
-    .. coqtop:: all abort
+    .. rocqtop:: all abort
 
       intros m.
 
@@ -1181,16 +1177,16 @@ the split because it has not changed.
 
 ..
 
-  .. image:: ../../_static/diffs-coqide-multigoal.png
-     :alt: coqide with Set Diffs on with multiple goals
+  .. image:: ../../_static/diffs-rocqide-multigoal.png
+     :alt: rocqide with Set Diffs on with multiple goals
 
 Diffs may appear like this after applying a :tacn:`intro` tactic that results
 in a compacted hypotheses:
 
 ..
 
-  .. image:: ../../_static/diffs-coqide-compacted.png
-     :alt: coqide with Set Diffs on with compacted hypotheses
+  .. image:: ../../_static/diffs-rocqide-compacted.png
+     :alt: rocqide with Set Diffs on with compacted hypotheses
 
 .. _showing_proof_diffs:
 
@@ -1199,9 +1195,9 @@ in a compacted hypotheses:
 
 To show differences in the proof term:
 
-- In coqtop and Proof General, use the :cmd:`Show Proof` `Diffs` command.
+- In `rocq repl` and Proof General, use the :cmd:`Show Proof` `Diffs` command.
 
-- In CoqIDE, position the cursor on or just after a tactic to compare the proof term
+- In RocqIDE, position the cursor on or just after a tactic to compare the proof term
   after the tactic with the proof term before the tactic, then select
   `View / Show Proof` from the menu or enter the associated key binding.
   Differences will be shown applying the current `Show Diffs` setting
@@ -1213,7 +1209,7 @@ To show differences in the proof term:
   ..
 
     .. image:: ../../_static/diffs-show-proof.png
-       :alt: coqide with Set Diffs on with compacted hypotheses
+       :alt: rocqide with Set Diffs on with compacted hypotheses
 
 Delaying solving unification constraints
 ----------------------------------------
@@ -1235,14 +1231,14 @@ Proof maintenance
 
 *Experimental.*  Many tactics, such as :tacn:`intros`, can automatically generate names, such
 as "H0" or "H1" for a new hypothesis introduced from a goal.  Subsequent proof steps
-may explicitly refer to these names.  However, future versions of Coq may not assign
+may explicitly refer to these names.  However, future versions of Rocq may not assign
 names exactly the same way, which could cause the proof to fail because the
 new names don't match the explicit references in the proof.
 
 The following :flag:`Mangle Names` settings let users find all the
 places where proofs rely on automatically generated names, which can
 then be named explicitly to avoid any incompatibility.  These
-settings cause Coq to generate different names, producing errors for
+settings cause Rocq to generate different names, producing errors for
 references to automatically generated names.
 
 .. flag:: Mangle Names
@@ -1278,10 +1274,10 @@ Controlling proof mode
 
    When turned on (it is off by default), this :term:`flag` enables support for nested
    proofs: a new assertion command can be inserted before the current proof is
-   finished, in which case Coq will temporarily switch to the proof of this
+   finished, in which case Rocq will temporarily switch to the proof of this
    *nested lemma*. When the proof of the nested lemma is finished (with :cmd:`Qed`
    or :cmd:`Defined`), its statement will be made available (as if it had been
-   proved before starting the previous proof) and Coq will switch back to the
+   proved before starting the previous proof) and Rocq will switch back to the
    proof of the previous assertion.
 
 .. flag:: Printing Goal Names
@@ -1307,7 +1303,7 @@ Controlling memory usage
    Words are 8 bytes or 4 bytes, respectively, for 64- and 32-bit executables.
 
 When experiencing high memory usage the following commands can be used
-to force Coq to optimize some of its internal data structures.
+to force Rocq to optimize some of its internal data structures.
 
 .. cmd:: Optimize Proof
 

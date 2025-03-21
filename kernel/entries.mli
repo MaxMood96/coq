@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -18,14 +18,18 @@ open Constr
 
 type universes_entry =
   | Monomorphic_entry
-  | Polymorphic_entry of Univ.UContext.t
+  | Polymorphic_entry of UVars.UContext.t
 
 type inductive_universes_entry =
   | Monomorphic_ind_entry
-  | Polymorphic_ind_entry of Univ.UContext.t
-  | Template_ind_entry of Univ.ContextSet.t
+  | Polymorphic_ind_entry of UVars.UContext.t
+  | Template_ind_entry of {
+      uctx : UVars.UContext.t;
+      (* The quality part of default_univs must be all qtype *)
+      default_univs : UVars.Instance.t;
+    }
 
-type variance_entry = Univ.Variance.t option array
+type variance_entry = UVars.Variance.t option array
 
 type 'a in_universes_entry = 'a * universes_entry
 
@@ -67,12 +71,12 @@ type mutual_inductive_entry = {
 (** {6 Constants (Definition/Axiom) } *)
 
 type definition_entry = {
-  const_entry_body : constr;
+  definition_entry_body : constr;
   (* List of section variables *)
-  const_entry_secctx : Id.Set.t option;
-  const_entry_type : types option;
-  const_entry_universes : universes_entry;
-  const_entry_inline_code : bool;
+  definition_entry_secctx : Id.Set.t option;
+  definition_entry_type : types option;
+  definition_entry_universes : universes_entry;
+  definition_entry_inline_code : bool;
 }
 
 type section_def_entry = {
@@ -102,16 +106,24 @@ type primitive_entry = {
   prim_entry_content : CPrimitives.op_or_type;
 }
 
+type symbol_entry = {
+  symb_entry_type : types;
+  symb_entry_unfold_fix: bool;
+  symb_entry_universes : universes_entry;
+}
+
 type 'a proof_output = constr Univ.in_universe_context_set * 'a
 
 type constant_entry =
   | DefinitionEntry : definition_entry -> constant_entry
+  | OpaqueEntry : unit opaque_entry -> constant_entry
   | ParameterEntry : parameter_entry -> constant_entry
   | PrimitiveEntry : primitive_entry -> constant_entry
+  | SymbolEntry : symbol_entry -> constant_entry
 
 (** {6 Modules } *)
 
-type module_struct_entry = (constr * Univ.AbstractContext.t option) Declarations.module_alg_expr
+type module_struct_entry = (constr * UVars.AbstractContext.t option) Declarations.module_alg_expr
 
 type module_params_entry =
   (MBId.t * module_struct_entry * inline) list (** older first *)

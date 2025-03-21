@@ -71,13 +71,15 @@ Fail Monomorphic Definition mono2@{uu} := Type@{uu}.
 
 Module SecLet.
   Unset Universe Polymorphism.
-  Section foo.
+  Section fooS.
     (* Fail Let foo@{} := Type@{uu}. (* doesn't parse: Let foo@{...} doesn't exist *) *)
+
     Unset Strict Universe Declaration.
-    Let tt : Type@{uu} := Type@{v}. (* names disappear in the ether *)
-    #[clearbody] Let ff : Type@{uu}. Proof. exact Type@{v}. Defined. (* names disappear into space *)
+    (* the names used disappear, and fresh names are generated instead of exposing raw ints *)
+    Let tt : Type@{uu} := Type@{v}.
+    #[clearbody] Let ff : Type@{uu}. Proof. exact Type@{v}. Defined.
     Definition bobmorane := tt -> ff.
-  End foo.
+  End fooS.
   Print bobmorane.
 End SecLet.
 
@@ -103,11 +105,11 @@ Fail Print foo@{E}.
 Fail Print mono@{E}.
 
 (* Not everything can be printed with custom universe names. *)
-Fail Print Coq.Init.Logic@{E}.
+Fail Print Stdlib.Init.Logic@{E}.
 
 (* Nice error when constraints are impossible. *)
 Monomorphic Universes gU gV. Monomorphic Constraint gU < gV.
-Fail Lemma foo@{u v|u < gU, gV < v, v < u} : nat.
+Fail Lemma foo'@{u v|u < gU, gV < v, v < u} : nat.
 
 Section SomeSec.
   Universe uu.
@@ -145,12 +147,13 @@ Print Applied.infunct.
 
    In polymorphic mode the domain Type gets separate universes for the
    different axioms, but all axioms have to declare all universes. In
-   monomorphic mode they get the same universes, ie the type is only
-   interpd once. *)
+   monomorphic mode they also get separate universes. *)
 Axiom axfoo@{i+} axbar : Type -> Type@{i}.
 Monomorphic Axiom axfoo'@{i+} axbar' : Type -> Type@{i}.
 
 About axfoo. About axbar. About axfoo'. About axbar'.
+
+Print axfoo. Print axbar. Print axfoo'. Print axbar'.
 
 Fail Axiom failfoo failbar@{i} : Type.
 
@@ -198,3 +201,51 @@ with MutualI2' (A:Type) := C2' (p2 : MutualI1' A).
 Print MutualI2'.
 
 End MutualTypes.
+
+Module Inconsistency.
+
+Set Universe Polymorphism.
+Definition g@{a b} := Type@{a} : Type@{b}.
+Fail Definition h@{a} := g@{a a}.
+
+End Inconsistency.
+
+Module PartialTemplate.
+
+Set Implicit Arguments.
+Unset Elimination Schemes.
+Unset Universe Polymorphism.
+
+Inductive JMeq (A:Type) (x:A) : forall B:Type, B -> Prop :=
+    JMeq_refl : JMeq x x.
+
+About JMeq.
+
+End PartialTemplate.
+
+Module Collision.
+  Unset Universe Polymorphism.
+
+  Module x.
+    Universe u0.
+    Definition a := Type@{u0}.
+  End x.
+
+  Fail Definition x@{u0} := Type@{u0}.
+  Definition x := Type.
+
+  Goal True.
+    Fail
+      let a := eval cbv in x.a in
+      let b := eval cbv in x in
+      constr_eq_strict a b.
+
+    let a := eval cbv in Type@{x.u1} in
+    let b := eval cbv in x in
+    constr_eq_strict a b.
+  Abort.
+End Collision.
+
+Module Schemes.
+  Check eq_rect.
+End Schemes.

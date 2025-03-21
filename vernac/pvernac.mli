@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,7 +8,7 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-open Pcoq
+open Procq
 open Genredexpr
 open Vernacexpr
 
@@ -53,3 +53,4 @@ val main_entry : proof_mode option -> vernac_control option Entry.t
 val register_proof_mode : string -> Vernacexpr.vernac_expr Entry.t -> proof_mode
 val lookup_proof_mode : string -> proof_mode option
 val proof_mode_to_string : proof_mode -> string
+val list_proof_modes : unit -> Vernacexpr.vernac_expr Entry.t CString.Map.t

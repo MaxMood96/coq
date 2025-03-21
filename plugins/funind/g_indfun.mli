@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -15,41 +15,26 @@ val wit_fun_ind_using :
   Genarg.genarg_type
 
 val fun_ind_using :
-  Constrexpr.constr_expr Tactypes.with_bindings option Pcoq.Entry.t
+  Constrexpr.constr_expr Tactypes.with_bindings option Procq.Entry.t
 
 val wit_with_names :
   (Constrexpr.constr_expr Tactypes.intro_pattern_expr CAst.t option,
    Genintern.glob_constr_and_expr Tactypes.intro_pattern_expr CAst.t option,
-   Ltac_plugin.Tacexpr.intro_pattern option)
+   Tactypes.intro_pattern option)
   Genarg.genarg_type
 
 val with_names :
   Constrexpr.constr_expr Tactypes.intro_pattern_expr CAst.t option
-  Pcoq.Entry.t
-
-val wit_constr_comma_sequence' :
-  (Constrexpr.constr_expr list, Genintern.glob_constr_and_expr list,
-   EConstr.constr list)
-  Genarg.genarg_type
-
-val constr_comma_sequence' : Constrexpr.constr_expr list Pcoq.Entry.t
-
-val wit_auto_using' :
-  (Constrexpr.constr_expr list, Genintern.glob_constr_and_expr list,
-   EConstr.constr list)
-  Genarg.genarg_type
-
-val auto_using' : Constrexpr.constr_expr list Pcoq.Entry.t
+  Procq.Entry.t
 
 val wit_function_fix_definition :
-  Vernacexpr.fixpoint_expr Loc.located Genarg.uniform_genarg_type
+  Vernacexpr.fixpoint_expr Loc.located Genarg.vernac_genarg_type
 
 val function_fix_definition :
-  Vernacexpr.fixpoint_expr Loc.located Pcoq.Entry.t
+  Vernacexpr.fixpoint_expr Loc.located Procq.Entry.t
 
 val wit_fun_scheme_arg :
-  (Names.Id.t * Libnames.qualid * Sorts.family, unit, unit)
-  Genarg.genarg_type
+  (Names.lident * Libnames.qualid * Sorts.family) Genarg.vernac_genarg_type
 
 val fun_scheme_arg :
-  (Names.Id.t * Libnames.qualid * Sorts.family) Pcoq.Entry.t
+  (Names.lident * Libnames.qualid * Sorts.family) Procq.Entry.t

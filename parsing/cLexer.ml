@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -212,7 +212,7 @@ let unlocated f x =
 
 let check_keyword str =
   let rec loop_symb s = match Stream.peek () s with
-    | Some (' ' | '\n' | '\r' | '\t' | '"') ->
+    | Some (' ' | '\n' | '\r' | '\t') ->
         Stream.junk () s;
         bad_token str
     | _ ->
@@ -366,33 +366,16 @@ let comm_loc bp = match !comment_begin with
 
 let comments = ref []
 let current_comment = Buffer.create 8192
-let between_commands = ref true
 
 let real_push_char c = Buffer.add_char current_comment c
 
-(* Add a char if it is between two commands, if it is a newline or
-   if the last char is not a space itself. *)
-let push_char c =
-  if
-    !between_commands || List.mem c ['\n';'\r'] ||
-    (List.mem c [' ';'\t']&&
-     (Int.equal (Buffer.length current_comment) 0 ||
-      not (let s = Buffer.contents current_comment in
-           List.mem s.[String.length s - 1] [' ';'\t';'\n';'\r'])))
-  then
-    real_push_char c
-
 let push_string s = Buffer.add_string current_comment s
 
-let null_comment s =
-  let rec null i =
-    i<0 || (List.mem s.[i] [' ';'\t';'\n';'\r'] && null (i-1)) in
-  null (String.length s - 1)
+let dbg = CDebug.create ~name:"comment-lexing" ()
 
 let comment_stop ep =
   let current_s = Buffer.contents current_comment in
-  (if !Flags.beautify && Buffer.length current_comment > 0 &&
-    (!between_commands || not(null_comment current_s)) then
+  (if !Flags.record_comments && Buffer.length current_comment > 0 then
     let bp = match !comment_begin with
         Some bp -> bp
       | None ->
@@ -401,10 +384,12 @@ let comment_stop ep =
              ++ str current_s ++str"' ending at  "
              ++ int ep);
           ep-1 in
+    dbg Pp.(fun () ->
+        str "comment at chars " ++ int bp ++ str "-" ++ int ep ++ str ":" ++ fnl() ++
+        str current_s);
     comments := ((bp,ep),current_s) :: !comments);
   Buffer.clear current_comment;
-  comment_begin := None;
-  between_commands := false
+  comment_begin := None
 
 let rec comment loc bp s =
   let bp2 = Stream.count s in
@@ -418,7 +403,7 @@ let rec comment loc bp s =
               Stream.junk () s;
               push_string "(*"; comment loc bp s
           | _ -> push_string "("; loc
-        with Stream.Failure -> raise (Stream.Error "")
+        with Stream.Failure -> raise (Gramlib.Grammar.Error "")
       in
       comment loc bp s
   | Some '*' ->
@@ -427,7 +412,7 @@ let rec comment loc bp s =
         match Stream.peek () s with
           Some ')' -> Stream.junk () s; push_string "*)"; loc
         | _ -> real_push_char '*'; comment loc bp s
-      with Stream.Failure -> raise (Stream.Error "")
+      with Stream.Failure -> raise (Gramlib.Grammar.Error "")
       end
   | Some '"' ->
       Stream.junk () s;
@@ -521,7 +506,7 @@ let parse_quotation loc bp s =
       let c = Stream.next () s in
       let len =
         try ident_tail loc (store 0 c) s with
-          Stream.Failure -> raise (Stream.Error "")
+          Stream.Failure -> raise (Gramlib.Grammar.Error "")
       in
       get_buff len, set_loc_pos loc bp (Stream.count s)
   | Delimited (lenmarker, bmarker, emarker) ->
@@ -563,9 +548,9 @@ let peek_string v s =
     if Int.equal i l then true
     else
       let l' = Stream.npeek () (i + 1) s in
-      match List.nth l' i with
-      | c -> Char.equal c v.[i] && aux (i + 1)
-      | exception _ -> false (* EOF *) in
+      match List.nth_opt l' i with
+      | Some c -> Char.equal c v.[i] && aux (i + 1)
+      | None -> false (* EOF *) in
   aux 0
 
 let find_keyword ttree loc id bp s =
@@ -637,23 +622,26 @@ let parse_after_qmark ~diff_mode ttree loc bp s =
 
 (* Parse a token in a char stream *)
 
+(* between_commands is used to parse bullets and { and } differently depending on the context. *)
+let between_commands = ref true
+
 let rec next_token ~diff_mode ttree loc s =
   let bp = Stream.count s in
   match Stream.peek () s with
-  | Some ('\n' as c) ->
+  | Some '\n' ->
       Stream.junk () s;
       let ep = Stream.count s in
-      comm_loc bp; push_char c; next_token ~diff_mode ttree (bump_loc_line loc ep) s
-  | Some (' ' | '\t' | '\r' as c) ->
+      next_token ~diff_mode ttree (bump_loc_line loc ep) s
+  | Some (' ' | '\t' | '\r') ->
       Stream.junk () s;
-      comm_loc bp; push_char c; next_token ~diff_mode ttree loc s
+      next_token ~diff_mode ttree loc s
   | Some ('.' as c) ->
       Stream.junk () s;
       let t, newloc =
         try parse_after_dot ~diff_mode ttree loc c bp s with
-          Stream.Failure -> raise (Stream.Error "")
+          Stream.Failure -> raise (Gramlib.Grammar.Error "")
       in
-      comment_stop bp;
+      between_commands := false;
       (* We enforce that "." should either be part of a larger keyword,
          for instance ".(", or followed by a blank or eof. *)
       let () = match t with
@@ -672,27 +660,28 @@ let rec next_token ~diff_mode ttree loc s =
         if !between_commands then process_sequence loc bp c s, true
         else process_chars ~diff_mode ttree loc bp [c] s,false
       in
-      comment_stop bp; between_commands := new_between_commands; t
+      between_commands := new_between_commands; t
   | Some '?' ->
       Stream.junk () s;
       let ep = Stream.count s in
       let t = parse_after_qmark ~diff_mode ttree loc bp s in
-      comment_stop bp; (t, set_loc_pos loc bp ep)
+      between_commands := false;
+      (t, set_loc_pos loc bp ep)
   | Some ('a'..'z' | 'A'..'Z' | '_' as c) ->
       Stream.junk () s;
       let len =
         try ident_tail loc (store 0 c) s with
-          Stream.Failure -> raise (Stream.Error "")
+          Stream.Failure -> raise (Gramlib.Grammar.Error "")
       in
       let id = get_buff len in
-      comment_stop bp;
+      between_commands := false;
       begin try find_keyword ttree loc id bp s
       with Not_found ->
         let ep = Stream.count s in
         IDENT id, set_loc_pos loc bp ep end
   | Some ('0'..'9') ->
       let n = NumTok.Unsigned.parse s in
-      comment_stop bp;
+      between_commands := false;
       begin try find_keyword ttree loc (NumTok.Unsigned.sprint n) bp s
       with Not_found ->
         let ep = Stream.count s in
@@ -701,11 +690,14 @@ let rec next_token ~diff_mode ttree loc s =
       Stream.junk () s;
       let (loc, len) =
         try string loc ~comm_level:None bp 0 s with
-          Stream.Failure -> raise (Stream.Error "")
+          Stream.Failure -> raise (Gramlib.Grammar.Error "")
       in
       let ep = Stream.count s in
-      comment_stop bp;
-      (STRING (get_buff len), set_loc_pos loc bp ep)
+      between_commands := false;
+      let str = get_buff len in
+      begin try find_keyword ttree loc (CString.quote_coq_string str) bp s
+      with Not_found ->
+      (STRING str, set_loc_pos loc bp ep) end
   | Some ('(' as c) ->
       Stream.junk () s;
       begin try
@@ -718,9 +710,14 @@ let rec next_token ~diff_mode ttree loc s =
             Stream.junk () s;
             comm_loc bp;
             push_string "(*";
-            let loc = comment loc bp s in next_token ~diff_mode ttree loc s
-        | _ -> let t = process_chars ~diff_mode ttree loc bp [c] s in comment_stop bp; t
-      with Stream.Failure -> raise (Stream.Error "")
+            let loc = comment loc bp s in
+            comment_stop (Stream.count s);
+            next_token ~diff_mode ttree loc s
+        | _ ->
+          let t = process_chars ~diff_mode ttree loc bp [c] s in
+          between_commands := false;
+          t
+      with Stream.Failure -> raise (Gramlib.Grammar.Error "")
       end
   | Some ('{' | '}' as c) ->
       Stream.junk () s;
@@ -729,14 +726,14 @@ let rec next_token ~diff_mode ttree loc s =
         if !between_commands then (KEYWORD (String.make 1 c), set_loc_pos loc bp ep), true
         else process_chars ~diff_mode ttree loc bp [c] s, false
       in
-      comment_stop bp; between_commands := new_between_commands; t
+      between_commands := new_between_commands; t
   | _ ->
       let l = lookup_utf8_char loc 0 s in
       match status_of_utf8 l with
         | Utf8Token (st, n) when Unicode.is_valid_ident_initial st ->
             let len = ident_tail loc (nstore n 0 s) s in
             let id = get_buff len in
-            comment_stop bp;
+            between_commands := false;
             begin try find_keyword ttree loc id bp s
             with Not_found ->
               let ep = Stream.count s in
@@ -744,11 +741,19 @@ let rec next_token ~diff_mode ttree loc s =
         | Utf8Token (_, n) ->
             Stream.njunk () n s;
             let t = process_chars ~diff_mode ttree loc bp l s in
-            comment_stop bp; t
+            between_commands := false;
+            t
         | EmptyStream ->
-            comment_stop bp; (EOI, set_loc_pos loc bp (bp+1))
+            between_commands := false;
+            (EOI, set_loc_pos loc bp (bp+1))
 
-(** {6 The lexer of Coq} *)
+(* Reify exceptions for next_token, it would be really nice if we
+   could actually delimit what this function raises, for now Error.E *)
+let next_token ~diff_mode ttree loc s : (Tok.t * Loc.t, Exninfo.iexn) Result.t =
+  let f (diff_mode, ttree, loc, s) = next_token ~diff_mode ttree loc s in
+  CErrors.to_result ~f (diff_mode, ttree, loc, s)
+
+(** {6 The lexer of Rocq} *)
 
 module MakeLexer (Diff : sig val mode : bool end)
   : Gramlib.Plexing.S
@@ -765,9 +770,19 @@ module MakeLexer (Diff : sig val mode : bool end)
     let cur_loc = ref loc in
     Gramlib.LStream.from ~loc
       (fun ttree ->
-         let (tok, loc) = next_token ~diff_mode:Diff.mode ttree !cur_loc cs in
-         cur_loc := after loc;
-         Some (tok,loc))
+         match next_token ~diff_mode:Diff.mode ttree !cur_loc cs with
+         | Ok (tok, loc) ->
+           cur_loc := after loc;
+           Some (tok,loc)
+         | Error (exn, info) ->
+           (* If the error contains the location of the failing token,
+              we still need to update [cur_loc] as to resume parsing
+              correctly after the error. See
+              https://github.com/ejgallego/coq-lsp/issues/633 for an
+              example. *)
+           let loc = Loc.get_loc info in
+           Option.iter (fun loc -> cur_loc := after loc) loc;
+           Exninfo.iraise (exn, info))
   let tok_match = Tok.match_pattern
   let tok_text = Tok.token_text
 

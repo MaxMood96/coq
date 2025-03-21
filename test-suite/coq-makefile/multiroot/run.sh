@@ -4,7 +4,7 @@
 
 cp -r theories theories2
 mv src/test_plugin.mlpack src/test_plugin.mllib
-coq_makefile -f _CoqProject -o Makefile
+rocq makefile -f _CoqProject -o Makefile
 cat Makefile.conf
 make
 make html mlihtml
@@ -27,7 +27,6 @@ sort > desired <<EOT
 ./test/test.glob
 ./test/test.v
 ./test/test.vo
-./test/test_plugin.cmxs
 ./test2
 ./test2/.coq-native
 ./test2/.coq-native/Ntest2_test.cmi

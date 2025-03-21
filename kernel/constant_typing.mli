@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -24,17 +24,26 @@ type 'a effect_handler =
 
 type typing_context
 
-val translate_local_def : env -> Id.t -> section_def_entry ->
+val infer_local_def : env -> Id.t -> section_def_entry ->
   constr * Sorts.relevance * types
 
-val translate_local_assum : env -> types -> types * Sorts.relevance
+val infer_local_assum : env -> types -> types * Sorts.relevance
 
-val translate_constant :
-  sec_univs:Univ.Level.t array option -> env -> Constant.t -> constant_entry ->
-    'a pconstant_body
+val infer_primitive : env -> primitive_entry -> ('a, unit) pconstant_body
 
-val translate_opaque :
-  sec_univs:Univ.Level.t array option -> env -> Constant.t -> 'a opaque_entry ->
-    unit pconstant_body * typing_context
+val infer_symbol : env -> symbol_entry -> ('a, unit) pconstant_body
 
-val check_delayed : 'a effect_handler -> typing_context -> 'a proof_output -> (Constr.t * Univ.ContextSet.t Opaqueproof.delayed_universes)
+val infer_parameter :
+  sec_univs:UVars.Instance.t option -> env -> parameter_entry ->
+    ('a, unit) pconstant_body
+
+val infer_definition :
+  sec_univs:UVars.Instance.t option -> env -> definition_entry ->
+    HConstr.t option * ('a, unit) pconstant_body
+
+val infer_opaque :
+  sec_univs:UVars.Instance.t option -> env -> 'a opaque_entry ->
+    (unit, unit) pconstant_body * typing_context
+
+val check_delayed : 'a effect_handler -> typing_context -> 'a proof_output ->
+  HConstr.t option * Constr.t * Univ.ContextSet.t Opaqueproof.delayed_universes

@@ -79,7 +79,7 @@ Defined.
 
 Definition ClaimA := forall (X Y:Setoid) (f: extSetoid X Y) x, f x= f x.
 
-Coercion irrelevent := (fun _ => I) : True -> car (Build_Setoid True).
+Coercion irrelevant := (fun _ => I) : True -> car (Build_Setoid True).
 
 Definition ClaimB := forall (X Y:Setoid) (f: extSetoid X Y) (x:X), f x= f x.
 
@@ -163,12 +163,12 @@ End TestPropAsSourceCoercion.
 
 Module TestTypeAsSourceCoercion.
 
-  Require Import Coq.Setoids.Setoid.
+  Definition relation A := A -> A -> Prop.
 
-  Record setoid := { A : Type ; R : relation A ; eqv : Equivalence R }.
+  Record setoid := { A : Type ; R : relation A }.
 
   Definition default_setoid (T : Type) : setoid
-    := {| A := T ; R := eq ; eqv := _ |}.
+    := {| A := T ; R := eq |}.
 
   Coercion default_setoid : Sortclass >-> setoid.
 

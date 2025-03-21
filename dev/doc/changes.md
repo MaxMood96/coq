@@ -1,3 +1,12 @@
+## Changes between Coq 8.17 and Coq 8.18
+
+### XML protocol
+
+Version 20230413, see xml-protocol.md for details.
+
+- Coq locations are now fully transmitted, including line and column
+  information vs the previous start/end offset.
+
 ## Changes between Coq 8.15 and Coq 8.16
 
 ### Plugin Interface
@@ -58,7 +67,7 @@ In general, code can be adapted by:
 
 ### Universes
 
-- Type `Univ.UContext` now embeds universe user names, generally
+- Type `UVars.UContext` now embeds universe user names, generally
   resulting in more concise code.
 
 - Renaming `Univ.Constraint` into `Univ.Constraints`
@@ -1810,7 +1819,7 @@ module_type_body).
 
 1. tables
 [Summaries] - the only change is the special treatment of the
-global environmet.
+global environment.
 
 2. objects 
 [Libobject] declares persistent objects, given with methods:

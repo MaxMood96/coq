@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,6 +12,7 @@ open Names
 open Constr
 open Environ
 open Declarations
+open Mod_declarations
 open Entries
 open Mod_subst
 
@@ -28,24 +29,19 @@ val destr_nofunctor : ModPath.t -> ('ty,'a) functorize -> 'a
 (** Conversions between [module_body] and [module_type_body] *)
 
 val module_type_of_module : module_body -> module_type_body
-val module_body_of_type : ModPath.t -> module_type_body -> module_body
+val module_body_of_type : module_type_body -> module_body
 
 val check_modpath_equiv : env -> ModPath.t -> ModPath.t -> unit
 
-val implem_smart_map :
-  (structure_body -> structure_body) ->
-  (module_expression -> module_expression) ->
-  (module_implementation -> module_implementation)
-
 val annotate_module_expression : module_expression -> module_signature ->
-  (module_type_body, (constr * Univ.AbstractContext.t option) module_alg_expr) functorize
+  (module_type_body, (constr * UVars.AbstractContext.t option) module_alg_expr) functorize
 
 val annotate_struct_body : structure_body -> module_signature -> module_signature
 
 (** {6 Substitutions } *)
 
-val subst_signature : substitution -> module_signature -> module_signature
-val subst_structure : substitution -> structure_body -> structure_body
+val subst_signature : substitution -> ModPath.t -> module_signature -> module_signature
+val subst_structure : substitution -> ModPath.t -> structure_body -> structure_body
 
 (** {6 Adding to an environment } *)
 
@@ -53,22 +49,22 @@ val add_structure :
   ModPath.t -> structure_body -> delta_resolver -> env -> env
 
 (** adds a module and its components, but not the constraints *)
-val add_module : module_body -> env -> env
+val add_module : ModPath.t -> module_body -> env -> env
 
 (** same as add_module, but for a module whose native code has been linked by
 the native compiler. The linking information is updated. *)
-val add_linked_module : module_body -> link_info -> env -> env
+val add_linked_module : ModPath.t -> module_body -> link_info -> env -> env
 
-(** same, for a module type *)
-val add_module_type : ModPath.t -> module_type_body -> env -> env
+(** add an abstract module parameter to the environment *)
+val add_module_parameter : MBId.t -> module_type_body -> env -> env
 
-val add_retroknowledge : module_implementation module_retroknowledge -> env -> env
+val add_retroknowledge : Retroknowledge.action list -> env -> env
 
 (** {6 Strengthening } *)
 
 val strengthen : module_type_body -> ModPath.t -> module_type_body
 
-val strengthen_and_subst_module_body : module_body -> ModPath.t -> bool -> module_body
+val strengthen_and_subst_module_body : ModPath.t -> module_body -> ModPath.t -> bool -> module_body
 
 val subst_modtype_signature_and_resolver : ModPath.t -> ModPath.t ->
   module_signature -> delta_resolver -> module_signature * delta_resolver
@@ -112,8 +108,9 @@ type signature_mismatch_error =
   | NotEqualInductiveAliases
   | IncompatibleUniverses of UGraph.univ_inconsistency
   | IncompatiblePolymorphism of env * types * types
-  | IncompatibleConstraints of { got : Univ.AbstractContext.t; expect : Univ.AbstractContext.t }
+  | IncompatibleConstraints of { got : UVars.AbstractContext.t; expect : UVars.AbstractContext.t }
   | IncompatibleVariance
+  | NoRewriteRulesSubtyping
 
 type subtyping_trace_elt =
   | Submodule of Label.t

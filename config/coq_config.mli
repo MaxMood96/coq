@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,11 +8,16 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
+type relocatable_path =
+  | NotRelocatable of string (* absolute path *)
+  | Relocatable of string (* relative to the inferred prefix *)
+
 (* The fields below are absolute paths *)
-val coqlib : string     (* where the std library is installed *)
-val configdir : string  (* where configuration files are installed *)
-val datadir : string    (* where extra data files are installed *)
-val docdir : string     (* where the doc is installed *)
+val install_prefix : relocatable_path   (* Install prefix passed by the user *)
+val coqlib : relocatable_path     (* where the std library is installed *)
+val configdir : relocatable_path  (* where configuration files are installed *)
+val datadir : relocatable_path    (* where extra data files are installed *)
+val docdir : relocatable_path     (* where the doc is installed *)
 
 (* The fields below are paths relative to the installation prefix *)
 (* However, if an absolute path, it means discarding the actual prefix *)
@@ -27,15 +32,15 @@ val ocamlfind : string
 (* used in envars for coq_makefile *)
 val caml_flags : string     (* arguments passed to ocamlc (ie. CAMLFLAGS) *)
 
-(* Used in coqide *)
+(* Used in rocqide *)
 val arch : string       (* architecture *)
 
 (* dubious use in envars, use in coqmakefile *)
 val arch_is_win32 : bool
 
-val version : string    (* version number of Coq *)
-val caml_version : string    (* OCaml version used to compile Coq *)
-val caml_version_nums : int list    (* OCaml version used to compile Coq by components *)
+val version : string    (* version number of Rocq *)
+val caml_version : string    (* OCaml version used to compile Rocq *)
+val caml_version_nums : int list    (* OCaml version used to compile Rocq by components *)
 val vo_version : int32
 
 (* used in envars for coq_makefile *)
@@ -44,7 +49,7 @@ val all_src_dirs : string list
 (* Used in micromega *)
 val exec_extension : string (* "" under Unix, ".exe" under MS-windows *)
 
-(* Used in coqide *)
+(* Used in rocqide *)
 val browser : string
 (** default web browser to use, may be overridden by environment
     variable COQREMOTEBROWSER *)
@@ -56,7 +61,7 @@ val has_natdynlink : bool
 val wwwcoq : string
 val wwwstdlib : string
 
-(* used in coqide *)
+(* used in rocqide *)
 val wwwrefman : string
 
 (* for error reporting *)

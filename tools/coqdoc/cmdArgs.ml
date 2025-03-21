@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,7 +12,7 @@
 open Common
 
 let banner () =
-  Printf.eprintf "This is coqdoc version %s\n" Coq_config.version;
+  Printf.eprintf "This is rocq doc version %s\n" Coq_config.version;
   flush stderr
 
 let normalize_path p =
@@ -70,21 +70,25 @@ let arg_string f = Arg.String (fun s -> prefs := f !prefs s)
 let arg_file f = Arg.String (fun s -> FileUtil.check_if_file_exists s; prefs := f !prefs s)
 let arg_int f = Arg.Int (fun d -> prefs := f !prefs d)
 
-(* TODO: replace these hacks with Arg.Rest_all, when coq moves to a newer version of OCaml stdlib *)
+let current = Arg.current
+
+let argv = ref [||]
+
+(* TODO: replace these hacks with Arg.Rest_all, when rocq moves to a newer version of OCaml stdlib *)
 let arg_path f = Arg.String (fun s ->
-  if Array.length Sys.argv < !Arg.current + 3 ||
-    Sys.argv.(!Arg.current + 2).[0] = '-' then
+  if Array.length !argv < !current + 3 ||
+    CString.is_prefix "-" !argv.(!current + 2) then
     raise (Arg.Bad ("Two arguments expected: <dir> and <name>"))
   else
-    Arg.current := !Arg.current + 1;
-    prefs := f !prefs (normalize_path s, Sys.argv.(!Arg.current + 1)))
+    Arg.current := !current + 1;
+    prefs := f !prefs (normalize_path s, !argv.(!current + 1)))
 let arg_url_path f = Arg.String (fun s ->
-  if Array.length Sys.argv < !Arg.current + 3 ||
-    Sys.argv.(!Arg.current + 2).[0] = '-' then
+  if Array.length !argv < !current + 3 ||
+    CString.is_prefix "-" !argv.(!current + 2) then
     raise (Arg.Bad ("Two arguments expected: <url> and <path>"))
   else
-    Arg.current := !Arg.current + 1;
-    f s Sys.argv.(!Arg.current + 1))
+    current := !current + 1;
+    f s !argv.(!current + 1))
 
 let args_options = Arg.align [
   "--html", arg_set (fun p -> { p with targetlang = HTML }),
@@ -139,7 +143,7 @@ let args_options = Arg.align [
   "--with-header", arg_file (fun p f -> { p with header_trailer = true;
                                                  header_file_spec = true;
                                                  header_file = f }),
-  "<file> Prepend <file> as html reader";
+  "<file> Prepend <file> as html header";
   "--with-footer", arg_file (fun p f -> { p with header_trailer = true;
                                                  footer_file_spec = true;
                                                  footer_file = f }),
@@ -179,17 +183,17 @@ let args_options = Arg.align [
   "--quiet", arg_set (fun p -> { p with quiet = true }), " Quiet mode (default)";
   "--verbose", arg_set (fun p -> { p with quiet = false }), " Verbose mode";
   "--no-externals", arg_set (fun p -> { p with externals = false }),
-  " No links to Coq standard library";
-  "--external", arg_url_path Index.add_external_library,
+  " No links to Rocq standard library";
+  "--external", arg_url_path (fun url lp -> Index.add_external_library lp url),
   "<url>+<d> set URL for external library <d>";
   "--coqlib_url", arg_string (fun p u -> { p with coqlib_url = u }),
-  "<url> Set URL for Coq standard library (default: " ^ Coq_config.wwwstdlib ^ ")";
+  "<url> Set URL for Rocq standard library (default: " ^ Coq_config.wwwstdlib ^ ")";
   "--coqlib", Arg.String (fun d -> Boot.Env.set_coqlib d),
-  "<dir> Set the path where Coq files are installed";
+  "<dir> Set the path where Rocq files are installed";
   "-R", arg_path (fun p l -> { p with paths = l :: !prefs.paths }),
-  "<dir>+<coqdir> map physical dir to Coq dir";
+  "<dir>+<coqdir> map physical dir to Rocq dir";
   "-Q", arg_path (fun p l -> { p with paths = l :: !prefs.paths }),
-  "<dir>+<coqdir> Map physical dir to Coq dir";
+  "<dir>+<coqdir> Map physical dir to Rocq dir";
   "--latin1", arg_set (fun p -> {p with encoding = { charset = "iso-8859-1";
                                                      inputenc = "latin1";
                                                      latin1 = true;
@@ -222,23 +226,31 @@ let args_options = Arg.align [
   " First line comments of the form (** * ModuleName : text *) will be interpreted as subtitles";
   "--inline-notmono", arg_set (fun p -> { p with inline_notmono = true }),
   " Use a proportional width font for inline code (possibly with a different color)";
-  "--version", Arg.Unit (fun () -> banner()), " Display coqdoc version";
+  "--version", Arg.Unit (fun () -> banner()), " Display rocq doc version";
 ]
 
 let add_input_files f = prefs := { !prefs with files = what_file f :: !prefs.files }
-let usage_msg = "coqdoc [options] <input file>...\nAvailable options are:"
+let usage_msg = "rocq doc [options] <input file>...\nAvailable options are:"
 
-let parse_args () =
-(* Deprecated options *)
 let single_hyphen_opts =
-  ["-html"; "-latex"; "-texmacs"; "-raw"; "-dvi"; "-ps"; "-pdf"; "-stdout"; "-output"; "-directory"; "-gallina"; "-short"; "-light"; "-title"; "-body-only"; "-no-preamble"; "-with-header"; "-with-footer"; "-no-index"; "-multi-index"; "-index"; "-toc"; "-table-of-contents"; "-vernac-file"; "-tex-file"; "-preamble"; "-files-from"; "-files"; "-glob-from"; "-no-glob"; "-quiet"; "-verbose"; "-no-externals"; "-external"; "-coqlib_url"; "-coqlib"; "-latin1"; "-utf8"; "-charset"; "-inputenc"; "-interpolate"; "-raw-comments"; "-parse-comments"; "-plain-comments"; "-toc-depth"; "-no-lib-name"; "-lib-name"; "-lib-subtitles"; "-inline-notmono"; "-version"] in
+  ["-html"; "-latex"; "-texmacs"; "-raw"; "-dvi"; "-ps"; "-pdf"; "-stdout"; "-output"; "-directory"; "-gallina"; "-short"; "-light"; "-title"; "-body-only"; "-no-preamble"; "-with-header"; "-with-footer"; "-no-index"; "-multi-index"; "-index"; "-toc"; "-table-of-contents"; "-vernac-file"; "-tex-file"; "-preamble"; "-files-from"; "-files"; "-glob-from"; "-no-glob"; "-quiet"; "-verbose"; "-no-externals"; "-external"; "-coqlib_url"; "-coqlib"; "-latin1"; "-utf8"; "-charset"; "-inputenc"; "-interpolate"; "-raw-comments"; "-parse-comments"; "-plain-comments"; "-toc-depth"; "-no-lib-name"; "-lib-name"; "-lib-subtitles"; "-inline-notmono"; "-version"]
+
 let deprecated_mapper_opts =
-  [("-noindex", "--no-index"); ("-nopreamble", "--no-preamble"); ("-noexternals", "--no-externals"); ("-V", "--version")] in
-  let new_argv = Array.map (fun s -> match List.find_opt (fun m -> m = s) single_hyphen_opts with
-    | Some _ -> Printf.sprintf "-%s" s
-    | None -> (match List.assoc_opt s deprecated_mapper_opts with
-               | Some b -> b
-               | None -> s)) Sys.argv in
+  [("-noindex", "--no-index"); ("-nopreamble", "--no-preamble"); ("-noexternals", "--no-externals"); ("-V", "--version")]
+
+let translate_arg s =
+  match List.find_opt (fun m -> m = s) single_hyphen_opts with
+  | Some _ -> Printf.sprintf "-%s" s
+  | None -> (match List.assoc_opt s deprecated_mapper_opts with
+      | Some b -> b
+      | None -> s)
+
+let parse_args ~prog args =
+(* Deprecated options *)
+  let new_argv = List.map translate_arg args in
+  let new_argv = Array.of_list (prog::new_argv) in
+  argv := new_argv;
+  current := 0;
   try
     Arg.parse_argv new_argv args_options add_input_files usage_msg
   with

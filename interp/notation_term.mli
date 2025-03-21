@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -21,11 +21,11 @@ open Glob_term
 
 type notation_constr =
   (* Part common to [glob_constr] and [cases_pattern] *)
-  | NRef of GlobRef.t * glob_level list option
+  | NRef of GlobRef.t * glob_instance option
   | NVar of Id.t
   | NApp of notation_constr * notation_constr list
-  | NProj of (Constant.t * glob_level list option) * notation_constr list * notation_constr
-  | NHole of Evar_kinds.t * Namegen.intro_pattern_naming_expr
+  | NProj of (Constant.t * glob_instance option) * notation_constr list * notation_constr
+  | NHole of glob_evar_kind
   | NGenarg of Genarg.glob_generic_argument
   | NList of Id.t * Id.t * notation_constr * notation_constr * (* associativity: *) bool
   (* Part only in [glob_constr] *)
@@ -47,6 +47,7 @@ type notation_constr =
   | NCast of notation_constr * Constr.cast_kind option * notation_constr
   | NInt of Uint63.t
   | NFloat of Float64.t
+  | NString of Pstring.t
   | NArray of notation_constr array * notation_constr * notation_constr
 
 (** Note concerning NList: first constr is iterator, second is terminator;
@@ -98,12 +99,24 @@ type notation_var_internalization_type =
   | NtnInternTypeAny of scope_name option
   | NtnInternTypeOnlyBinder
 
+(** The set of other notation variables that are bound to a binder or
+    binder list and that bind the given notation variable, for
+    instance, in ["{ x | P }" := (sigT (fun x => P)], "x" is under an
+    empty set of binders and "P" is under the binders bound to "x",
+    that is, its notation_var_binders set is "x" *)
+type notation_var_binders = Id.Set.t
+
 (** This characterizes to what a notation is interpreted to *)
 type interpretation =
-    (Id.t * (extended_subscopes * notation_var_instance_type)) list *
+    (Id.t * (extended_subscopes * notation_var_binders * notation_var_instance_type)) list *
     notation_constr
 
-type reversibility_status = APrioriReversible | HasLtac | NonInjective of Id.t list
+type forgetfulness = { forget_ltac : bool; forget_volatile_cast : bool }
+
+type reversibility_status =
+  | APrioriReversible
+  | Forgetful of forgetfulness
+  | NonInjective of Id.t list
 
 type notation_interp_env = {
   ninterp_var_type : notation_var_internalization_type Id.Map.t;

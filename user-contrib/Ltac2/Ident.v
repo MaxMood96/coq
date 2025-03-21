@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -12,8 +12,8 @@ Require Import Ltac2.Init.
 
 Ltac2 Type t := ident.
 
-Ltac2 @ external equal : t -> t -> bool := "coq-core.plugins.ltac2" "ident_equal".
+Ltac2 @ external equal : t -> t -> bool := "rocq-runtime.plugins.ltac2" "ident_equal".
 
-Ltac2 @ external of_string : string -> t option := "coq-core.plugins.ltac2" "ident_of_string".
+Ltac2 @ external of_string : string -> t option := "rocq-runtime.plugins.ltac2" "ident_of_string".
 
-Ltac2 @ external to_string : t -> string := "coq-core.plugins.ltac2" "ident_to_string".
+Ltac2 @ external to_string : t -> string := "rocq-runtime.plugins.ltac2" "ident_to_string".

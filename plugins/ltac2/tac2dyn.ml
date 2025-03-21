@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -16,6 +16,7 @@ struct
   let eq = DYN.eq
   let repr = DYN.repr
   let create = DYN.create
+  type glb = Glb : (_,'a) tag * 'a  -> glb
 end
 
 module type Param = sig type ('raw, 'glb) t end

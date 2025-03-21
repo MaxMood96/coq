@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -8,9 +8,11 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
+DECLARE GLOBAL PLUGIN
+
 {
-open Pcoq
-open Pcoq.Prim
+open Procq
+open Procq.Prim
 open Vernacexpr
 
 (* Vernaculars specific to the toplevel *)
@@ -27,7 +29,7 @@ let vernac_toplevel = Entry.make "toplevel:vernac_toplevel"
 let err () = raise Gramlib.Stream.Failure
 
 let test_show_goal =
-  let open Pcoq.Lookahead in
+  let open Procq.Lookahead in
   to_entry "test_show_goal" begin
    lk_kw "Show" >> lk_kw "Goal" >> lk_nat
   end

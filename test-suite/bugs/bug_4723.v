@@ -1,5 +1,5 @@
 
-Require Coq.Program.Tactics.
+Require Corelib.Program.Tactics.
 
 Record Matrix (m n : nat).
 

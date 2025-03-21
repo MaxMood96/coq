@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -70,8 +70,14 @@ type force_inference = bool (** true = always infer, never turn into evar/subgoa
 
 type implicit_position = Name.t * int * int option
 
-type implicit_status = (implicit_position * implicit_explanation *
-                          (maximal_insertion * force_inference)) option
+type implicit_status_info = {
+  impl_pos : implicit_position;
+  impl_expl : implicit_explanation;
+  impl_max : maximal_insertion;
+  impl_force : force_inference;
+}
+
+type implicit_status = implicit_status_info option
     (** [None] = Not implicit *)
 
 type implicit_side_condition
@@ -92,7 +98,7 @@ val positions_of_implicits : implicits_list -> int list
 
 type manual_implicits = (Name.t * bool) option CAst.t list
 
-val compute_implicits_with_manual : env -> Evd.evar_map -> types -> bool ->
+val compute_implicits_with_manual : env -> Evd.evar_map -> ?silent:bool -> types -> bool ->
   manual_implicits -> implicit_status list
 
 val compute_implicits_names : env -> Evd.evar_map -> types -> implicit_position list

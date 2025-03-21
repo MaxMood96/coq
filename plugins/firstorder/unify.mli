@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -10,8 +10,6 @@
 
 open Constr
 open EConstr
-
-exception UFAIL of constr*constr
 
 module Item :
 sig
@@ -25,6 +23,6 @@ type instance=
     Real of Item.t * int (* terme * valeur heuristique *)
   | Phantom of constr        (* domaine de quantification *)
 
-val unif_atoms : Environ.env -> Evd.evar_map -> metavariable -> constr -> Formula.atom -> Formula.atom -> instance option
+val unif_atoms : check:bool -> Formula.Env.t -> Environ.env -> Evd.evar_map -> metavariable -> constr -> Formula.atom -> Formula.atom -> instance option
 
 val more_general : Environ.env -> Evd.evar_map -> Item.t -> Item.t -> bool

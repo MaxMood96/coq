@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -22,21 +22,14 @@
 open NumCompat
 module Z_ = NumCompat.Z
 
-module Int = struct
-  type t = int
-
-  let compare : int -> int -> int = compare
-  let equal : int -> int -> bool = ( = )
-end
-
 module ISet = struct
-  include Set.Make (Int)
+  include Int.Set
 
   let pp o s = iter (fun i -> Printf.fprintf o "%i " i) s
 end
 
 module IMap = struct
-  include Map.Make (Int)
+  include Int.Map
 
   let from k m =
     let _, _, r = split (k - 1) m in
@@ -56,11 +49,6 @@ let finally f rst =
   with reraise ->
     (try rst () with any -> raise reraise);
     raise reraise
-
-let rec try_any l x =
-  match l with
-  | [] -> None
-  | (f, s) :: l -> ( match f x with None -> try_any l x | x -> x )
 
 let all_pairs f l =
   let pair_with acc e l = List.fold_left (fun acc x -> f e x :: acc) acc l in
@@ -85,28 +73,6 @@ let extract pred l =
         )
       | _ -> (fd, e :: sys))
     (None, []) l
-
-let extract_best red lt l =
-  let rec extractb c e rst l =
-    match l with
-    | [] -> (Some (c, e), rst)
-    | e' :: l' -> (
-      match red e' with
-      | None -> extractb c e (e' :: rst) l'
-      | Some c' ->
-        if lt c' c then extractb c' e' (e :: rst) l'
-        else extractb c e (e' :: rst) l' )
-  in
-  match extract red l with
-  | None, _ -> (None, l)
-  | Some (c, e), rst -> extractb c e [] rst
-
-let rec find_option pred l =
-  match l with
-  | [] -> raise Not_found
-  | e :: l -> ( match pred e with Some r -> r | None -> find_option pred l )
-
-let find_some pred l = try Some (find_option pred l) with Not_found -> None
 
 let extract_all pred l =
   List.fold_left
@@ -143,25 +109,6 @@ let saturate p f sys =
     Printexc.print_backtrace stdout;
     raise x
 
-let saturate_bin (type a) (module Set : Set.S with type elt = a)
-    (f : a -> a -> a option) (l : a list) =
-  let rec map_with (acc : Set.t) e l =
-    match l with
-    | [] -> acc
-    | e' :: l -> (
-      match f e e' with
-      | None -> map_with acc e l
-      | Some r -> map_with (Set.add r acc) e l )
-  in
-  let map2_with acc l' = Set.fold (fun e' acc -> map_with acc e' l) l' acc in
-  let rec iterate acc l' =
-    let res = map2_with Set.empty l' in
-    if Set.is_empty res then Set.union l' acc
-    else iterate (Set.union l' acc) res
-  in
-  let s0 = List.fold_left (fun acc e -> Set.add e acc) Set.empty l in
-  Set.elements (Set.diff (iterate Set.empty s0) s0)
-
 let iterate_until_stable f x =
   let rec iter x = match f x with None -> x | Some x' -> iter x' in
   iter x
@@ -172,7 +119,7 @@ let rec app_funs l x =
   | f :: fl -> ( match f x with None -> app_funs fl x | Some x' -> Some x' )
 
 (**
-  * MODULE: Coq to Caml data-structure mappings
+  * MODULE: Rocq to Caml data-structure mappings
   *)
 
 module CoqToCaml = struct
@@ -212,7 +159,7 @@ module CoqToCaml = struct
 end
 
 (**
-  * MODULE: Caml to Coq data-structure mappings
+  * MODULE: Caml to Rocq data-structure mappings
   *)
 
 module CamlToCoq = struct
@@ -289,7 +236,7 @@ end
 (**
   * MODULE: Labels for atoms in propositional formulas.
   * Tags are used to identify unused atoms in CNFs, and propagate them back to
-  * the original formula. The translation back to Coq then ignores these
+  * the original formula. The translation back to Rocq then ignores these
   * superfluous items, which speeds the translation up a bit.
   *)
 
@@ -413,10 +360,11 @@ let command exe_path args vl =
       | Unix.WEXITED 0 -> (
         let inch = Unix.in_channel_of_descr stdout_read in
         try Marshal.from_channel inch
-        with any ->
+        with (End_of_file | Failure _) as exn ->
           failwith
-            (Printf.sprintf "command \"%s\" exited %s" exe_path
-               (Printexc.to_string any)) )
+            (Printf.sprintf "command \"%s\" exited with code 0 but result could not be read back: %s"
+               exe_path
+               (Printexc.to_string exn)) )
       | Unix.WEXITED i ->
         failwith (Printf.sprintf "command \"%s\" exited %i" exe_path i)
       | Unix.WSIGNALED i ->
@@ -426,7 +374,7 @@ let command exe_path args vl =
     (* Cleanup  *)
       (fun () ->
       List.iter
-        (fun x -> try Unix.close x with any -> ())
+        (fun x -> try Unix.close x with Unix.Unix_error _ -> ())
         [ stdin_read
         ; stdin_write
         ; stdout_read

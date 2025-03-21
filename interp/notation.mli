@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -22,9 +22,9 @@ val notation_cat : Libobject.category
 val pr_notation : notation -> Pp.t
 (** Printing *)
 
-module NotationSet : Set.S with type elt = notation
+module NotationSet : CSet.ExtS with type elt = notation
 module NotationMap : CMap.ExtS with type key = notation and module Set := NotationSet
-module SpecificNotationSet : Set.S with type elt = specific_notation
+module SpecificNotationSet : CSet.ExtS with type elt = specific_notation
 module SpecificNotationMap : CMap.ExtS with type key = specific_notation and module Set := SpecificNotationSet
 
 (** {6 Scopes } *)
@@ -60,6 +60,8 @@ val push_scope : scope_name -> scopes -> scopes
 
 val find_scope : scope_name -> scope
 
+val scope_delimiters : scope -> delimiters option
+
 (** Declare delimiters for printing *)
 
 val declare_delimiters : scope_name -> delimiters -> unit
@@ -78,7 +80,7 @@ type notation_location = (DirPath.t * DirPath.t) * string
     2nd dirpath: module and section-only dirpath (ie [Lib.current_dirpath true])
     string: string used to generate the notation
 
-    dirpaths are used for dumpglob, string for printing (pr_notation_info)
+    dirpaths are used for dumpglob and for Locate, string for printing (pr_notation_info)
 *)
 
 type required_module = full_path * string list
@@ -142,16 +144,17 @@ type pos_neg_int63_ty =
   { pos_neg_int63_ty : Names.inductive }
 
 type target_kind =
-  | Int of int_ty (* Coq.Init.Number.int + uint *)
-  | UInt of int_ty (* Coq.Init.Number.uint *)
-  | Z of z_pos_ty (* Coq.Numbers.BinNums.Z and positive *)
-  | Int63 of pos_neg_int63_ty (* Coq.Numbers.Cyclic.Int63.PrimInt63.pos_neg_int63 *)
-  | Float64 (* Coq.Floats.PrimFloat.float *)
-  | Number of number_ty (* Coq.Init.Number.number + uint + int *)
+  | Int of int_ty (* Corelib.Init.Number.int + uint *)
+  | UInt of int_ty (* Corelib.Init.Number.uint *)
+  | Z of z_pos_ty (* Corelib.Numbers.BinNums.Z and positive *)
+  | Int63 of pos_neg_int63_ty (* Corelib.Numbers.Cyclic.Int63.PrimInt63.pos_neg_int63 *)
+  | Float64 (* Corelib.Floats.PrimFloat.float *)
+  | Number of number_ty (* Corelib.Init.Number.number + uint + int *)
 
 type string_target_kind =
   | ListByte
   | Byte
+  | PString
 
 type option_kind = Option | Direct
 type 'target conversion_kind = 'target * option_kind
@@ -207,27 +210,13 @@ type prim_token_infos = {
 
 val enable_prim_token_interpretation : prim_token_infos -> unit
 
-(** Compatibility.
-    Avoid the next two functions, they will now store unnecessary
-    objects in the library segment. Instead, combine
-    [register_*_interpretation] and [enable_prim_token_interpretation]
-    (the latter inside a [Mltop.declare_cache_obj]).
-*)
-
-val declare_numeral_interpreter : ?local:bool -> scope_name -> required_module ->
-  Z.t prim_token_interpreter ->
-  glob_constr list * Z.t prim_token_uninterpreter * bool -> unit
-val declare_string_interpreter : ?local:bool -> scope_name -> required_module ->
-  string prim_token_interpreter ->
-  glob_constr list * string prim_token_uninterpreter * bool -> unit
-
 (** Return the [term]/[cases_pattern] bound to a primitive token in a
    given scope context*)
 
 val interp_prim_token : ?loc:Loc.t -> prim_token -> subscopes ->
   glob_constr * scope_name option
 (* This function returns a glob_const representing a pattern *)
-val interp_prim_token_cases_pattern_expr : ?loc:Loc.t -> (GlobRef.t -> unit) -> prim_token ->
+val interp_prim_token_cases_pattern_expr : ?loc:Loc.t -> (Glob_term.glob_constr -> unit) -> prim_token ->
   subscopes -> glob_constr * scope_name option
 
 (** Return the primitive token associated to a [term]/[cases_pattern];
@@ -243,6 +232,8 @@ val availability_of_prim_token :
 
 (** {6 Declare and interpret back and forth a notation } *)
 
+val warning_overridden_name : string
+
 type entry_coercion_kind =
   | IsEntryCoercion of notation_entry_level * notation_entry_relative_level
   | IsEntryGlobal of string * int
@@ -250,9 +241,8 @@ type entry_coercion_kind =
 
 val declare_notation : notation_with_optional_scope * notation ->
   interpretation -> notation_location -> use:notation_use ->
-  also_in_cases_pattern:bool ->
   entry_coercion_kind option ->
-  Deprecation.t option -> unit
+  UserWarn.t option -> unit
 
 
 (** Return the interpretation bound to a notation *)
@@ -277,16 +267,28 @@ type 'a notation_query_pattern_gen = {
 
 type notation_query_pattern = qualid notation_query_pattern_gen
 
-val toggle_notations : on:bool -> all:bool -> (glob_constr -> Pp.t) -> notation_query_pattern -> unit
+val toggle_notations : on:bool -> all:bool -> ?verbose:bool -> (glob_constr -> Pp.t) -> notation_query_pattern -> unit
 
 (** {6 Miscellaneous} *)
 
 (** Take a notation string and turn it into a notation key. eg. ["x +  y"] becomes ["_ + _"]. *)
 val interpret_notation_string : string -> string
 
-(** If head is true, also allows applied global references. *)
-val interp_notation_as_global_reference : ?loc:Loc.t -> head:bool -> (GlobRef.t -> bool) ->
-      notation_key -> delimiters option -> GlobRef.t
+type notation_as_reference_error =
+  | AmbiguousNotationAsReference of notation_key
+  | NotationNotReference of Environ.env * Evd.evar_map * notation_key * (notation_key * notation_constr) list
+
+exception NotationAsReferenceError of notation_as_reference_error
+
+(** If head is true, also allows applied global references.
+    Raise NotationAsReferenceError if not resolvable as a global reference *)
+val interp_notation_as_global_reference : ?loc:Loc.t -> head:bool ->
+      (GlobRef.t -> bool) -> notation_key -> delimiters option -> GlobRef.t
+
+(** Same together with the full notation *)
+val interp_notation_as_global_reference_expanded : ?loc:Loc.t -> head:bool ->
+      (GlobRef.t -> bool) -> notation_key -> delimiters option ->
+  (notation_entry * notation_key) * notation_key * notation_with_optional_scope * interpretation * GlobRef.t
 
 (** Declares and looks for scopes associated to arguments of a global ref *)
 val declare_arguments_scope :
@@ -304,11 +306,12 @@ val subst_scope_class :
 
 type add_scope_where = AddScopeTop | AddScopeBottom
 (** add new scope at top or bottom of existing stack (default is reset) *)
-val declare_scope_class : scope_name -> ?where:add_scope_where -> scope_class -> unit
+val declare_scope_class : (* local: *) bool -> scope_name -> ?where:add_scope_where -> scope_class -> unit
 val declare_ref_arguments_scope : GlobRef.t -> unit
 
 val compute_arguments_scope : Environ.env -> Evd.evar_map -> EConstr.types -> scope_name list list
 val compute_type_scope : Environ.env -> Evd.evar_map -> EConstr.types -> scope_name list
+val compute_glob_type_scope : 'a Glob_term.glob_constr_g -> scope_name list
 
 (** Get the current scopes bound to Sortclass *)
 val current_type_scope_names : unit -> scope_name list
@@ -335,6 +338,9 @@ type notation_symbols = {
   symbols : symbol list; (* the decomposition of the notation into terminals and nonterminals *)
 }
 
+val is_prim_token_constant_in_constr :
+  notation_entry * symbol list -> bool
+
 (** Decompose a notation of the form "a 'U' b" together with the lists
     of pairs of recursive variables and the list of all variables
     binding in the notation *)
@@ -360,7 +366,7 @@ val declare_entry_coercion : specific_notation -> notation_entry_level -> notati
   (** Add a coercion from some-entry to some-relative-entry *)
 
 type entry_coercion = (notation_with_optional_scope * notation) list
-val availability_of_entry_coercion : notation_entry_relative_level -> notation_entry_level -> entry_coercion option
+val availability_of_entry_coercion : ?non_included:bool -> notation_entry_relative_level -> notation_entry_level -> entry_coercion option
   (** Return a coercion path from some-relative-entry to some-entry if there is one *)
 
 (** Special properties of entries *)
@@ -370,6 +376,11 @@ val declare_custom_entry_has_ident : string -> int -> unit
 
 val entry_has_global : notation_entry_relative_level -> bool
 val entry_has_ident : notation_entry_relative_level -> bool
+
+val app_level : int
+
+val prec_less : entry_level -> entry_relative_level -> bool
+val may_capture_cont_after : entry_level option -> entry_relative_level -> bool
 
 (** {6 Declare and test the level of a (possibly uninterpreted) notation } *)
 

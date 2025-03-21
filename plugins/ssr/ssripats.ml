@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -151,6 +151,7 @@ let empty_state = {
 include Ssrcommon.MakeState(struct
   type state = istate
   let init = empty_state
+  let name = "ssripats"
 end)
 
 let print_name_seed env sigma = function
@@ -370,7 +371,7 @@ end end
 
 (*** [=> [: id]] ************************************************************)
 let mk_abstract_id =
-  let open Coqlib in
+  let open Rocqlib in
   let ssr_abstract_id = Summary.ref ~name:"SSR:abstractid" 0 in
 begin fun env sigma ->
   let sigma, zero = EConstr.fresh_global env sigma (lib_ref "num.nat.O") in
@@ -394,12 +395,12 @@ let tclMK_ABSTRACT_VAR id = Goal.enter begin fun gl ->
       let sigma, m = Evarutil.new_evar env sigma abstract_ty in
       sigma, (m, abstract_ty) in
     let sigma, kont =
-      let rd = Context.Rel.Declaration.LocalAssum (make_annot (Name id) Sorts.Relevant, abstract_ty) in
+      let rd = Context.Rel.Declaration.LocalAssum (make_annot (Name id) EConstr.ERelevance.relevant, abstract_ty) in
       let sigma, ev = Evarutil.new_evar (EConstr.push_rel rd env) sigma concl in
       sigma, ev
     in
     let term =
-      EConstr.(mkApp (mkLambda(make_annot (Name id) Sorts.Relevant,abstract_ty,kont),[|abstract_proof|])) in
+      EConstr.(mkApp (mkLambda(make_annot (Name id) ERelevance.relevant,abstract_ty,kont),[|abstract_proof|])) in
     let sigma, _ = Typing.type_of env sigma term in
     sigma, term
   end in
@@ -438,7 +439,11 @@ let notTAC = tclUNIT false
 
 let duplicate_clear =
   CWarnings.create ~name:"duplicate-clear" ~category:CWarnings.CoreCategories.ssr
-    (fun id -> Pp.(str "Duplicate clear of " ++ Id.print id))
+    (fun id -> Pp.(
+      str "Duplicate clear of" ++ spc () ++ Id.print id ++ str "." ++ spc ()
+      ++ str "Use {}" ++ Id.print id ++ spc ()
+      ++ str "instead of {" ++ Id.print id ++ str "}" ++ Id.print id
+    ))
 
 (* returns true if it was a tactic (eg /ltac:tactic) *)
 let rec ipat_tac1 ipat : bool tactic =
@@ -625,12 +630,12 @@ let with_dgens { dgens; gens; clr } maintac = match gens with
       Ssrcommon.genstac (gens, clr) <*> maintac dgens gen
 
 let mkCoqEq env sigma =
-  let eq = Coqlib.((build_coq_eq_data ()).eq) in
+  let eq = Rocqlib.((build_rocq_eq_data ()).eq) in
   let sigma, eq = EConstr.fresh_global env sigma eq in
   eq, sigma
 
 let mkCoqRefl t c env sigma =
-  let refl = Coqlib.((build_coq_eq_data()).refl) in
+  let refl = Rocqlib.((build_rocq_eq_data()).refl) in
   let sigma, refl = EConstr.fresh_global env sigma refl in
   EConstr.mkApp (refl, [|t; c|]), sigma
 
@@ -669,7 +674,7 @@ let elim_intro_tac ipats ?seed what eqid ssrelim is_rec clr =
        let rec gen_eq_tac () = Goal.enter begin fun g ->
          let sigma, env, concl = Goal.(sigma g, env g, concl g) in
          let sigma, eq =
-           EConstr.fresh_global env sigma (Coqlib.lib_ref "core.eq.type") in
+           EConstr.fresh_global env sigma (Rocqlib.lib_ref "core.eq.type") in
          let ctx, last = EConstr.decompose_prod_decls sigma concl in
          let open EConstr in
          let args = match kind_of_type sigma last with
@@ -689,7 +694,7 @@ let elim_intro_tac ipats ?seed what eqid ssrelim is_rec clr =
            let name = Ssrcommon.mk_anon_id "K" (Tacmach.pf_ids_of_hyps g) in
 
            let new_concl =
-             mkProd (make_annot (Name name) Sorts.Relevant, case_ty, mkArrow refl Sorts.Relevant (Vars.lift 2 concl)) in
+             mkProd (make_annot (Name name) ERelevance.relevant, case_ty, mkArrow refl ERelevance.relevant (Vars.lift 2 concl)) in
            let erefl, sigma = mkCoqRefl case_ty case env sigma in
            Proofview.Unsafe.tclEVARS sigma <*>
            Tactics.apply_type ~typecheck:true new_concl [case;erefl]
@@ -713,7 +718,7 @@ let mkEq dir cl c t n env sigma =
   eqargs.(Ssrequality.dir_org dir) <- mkRel n;
   let eq, sigma = mkCoqEq env sigma in
   let refl, sigma = mkCoqRefl t c env sigma in
-  mkArrow (mkApp (eq, eqargs)) Sorts.Relevant (Vars.lift 1 cl), refl, sigma
+  mkArrow (mkApp (eq, eqargs)) ERelevance.relevant (Vars.lift 1 cl), refl, sigma
 
 (** in [tac/v: last gens..] the first (last to be run) generalization is
     "special" in that is it also the main argument of [tac] and is eventually
@@ -733,7 +738,7 @@ let tclLAST_GEN ~to_ind ((oclr, occ), t) conclusion = tclINDEPENDENTL begin
   let sigma, c, cl = Ssrmatching.fill_rel_occ_pattern env sigma cl pat occ in
   let clr =
     Ssrcommon.interp_clr sigma (oclr, (Ssrmatching.tag_of_cpattern t,c)) in
-  (* Historically in Coq, and hence in ssr, [case t] accepts [t] of type
+  (* Historically in Rocq, and hence in ssr, [case t] accepts [t] of type
      [A.. -> Ind] and opens new goals for [A..] as well as for the branches
      of [Ind], see the [~to_ind] argument *)
   if not(Termops.occur_existential sigma c) then
@@ -757,7 +762,7 @@ let tclLAST_GEN ~to_ind ((oclr, occ), t) conclusion = tclINDEPENDENTL begin
       Unsafe.tclEVARS sigma <*>
       Ssrcommon.tacTYPEOF p >>= fun pty ->
       (* TODO: check bug: cl0 no lift? *)
-      let ccl = EConstr.mkProd (make_annot (Ssrcommon.constr_name sigma c) Sorts.Relevant, pty, cl0) in
+      let ccl = EConstr.mkProd (make_annot (Ssrcommon.constr_name sigma c) EConstr.ERelevance.relevant, pty, cl0) in
       tclUNIT (false, ccl, p, clr)
   else
     Ssrcommon.errorstrm Pp.(str "generalized term didn't match")

@@ -1,6 +1,6 @@
 (* -*- coding: utf-8 -*- *)
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -17,10 +17,10 @@
    Institution: LRI, CNRS UMR 8623 - University Paris Sud
 *)
 
-Require Export Coq.Classes.Init.
-Require Import Coq.Program.Basics.
-Require Import Coq.Program.Tactics.
-Require Import Coq.Relations.Relation_Definitions.
+Require Export Corelib.Classes.Init.
+Require Import Corelib.Program.Basics.
+Require Import Corelib.Program.Tactics.
+Require Import Corelib.Relations.Relation_Definitions.
 
 Generalizable Variables A B C D R S T U l eqA eqB eqC eqD.
 
@@ -126,7 +126,7 @@ Section Defs.
     Program Definition flip_Transitive `(Transitive R) : Transitive (flip R) :=
       fun x y z H H' => transitivity (R:=R) H' H.
 
-    Program Definition flip_Antisymmetric `(Antisymmetric eqA R) :
+    Program Lemma flip_Antisymmetric `(Antisymmetric eqA R) :
       Antisymmetric eqA (flip R).
     Proof. firstorder. Qed.
 
@@ -148,11 +148,11 @@ Section Defs.
 
   Section complement.
 
-    Definition complement_Irreflexive `(Reflexive R)
+    Lemma complement_Irreflexive `(Reflexive R)
       : Irreflexive (complement R).
     Proof. firstorder. Qed.
 
-    Definition complement_Symmetric `(Symmetric R) : Symmetric (complement R).
+    Lemma complement_Symmetric `(Symmetric R) : Symmetric (complement R).
     Proof. firstorder. Qed.
   End complement.
 
@@ -528,3 +528,14 @@ Qed.
 
 Global Typeclasses Opaque arrows predicate_implication predicate_equivalence
             relation_equivalence pointwise_lifting.
+
+(* Register bindings for the generalized rewriting tactic *)
+
+Register relation as rewrite.prop.relation.
+Register subrelation as rewrite.prop.subrelation.
+Register Reflexive as rewrite.prop.Reflexive.
+Register reflexivity as rewrite.prop.reflexivity.
+Register Symmetric as rewrite.prop.Symmetric.
+Register symmetry as rewrite.prop.symmetry.
+Register Transitive as rewrite.prop.Transitive.
+Register transitivity as rewrite.prop.transitivity.

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -40,8 +40,18 @@ let rec ptrans p1 p3=
       Refl _, _ ->p3
     | _, Refl _ ->p1
     | Trans(p1,p2), _ ->ptrans p1 (ptrans p2 p3)
-    | Congr(p1,p2), Congr(p3,p4) ->pcongr (ptrans p1 p3) (ptrans p2 p4)
+    | Congr(p1,p2), Congr(p3,p4) ->
+      (* FIXME: there is no reason for this to be well-typed, even if the
+         functions considered are not dependent. The two congruences need not
+         occur at the same function type, e.g. when taking distinct prefixes, e.g.
+          Congr(f = h ∘ g, t = u) : f t = h (g u)
+          Congr(h = k, g u = g u) : h (g u) = k (g u)
+         but
+          Congr (f = k, t = g u) is ill-typed
+      *)
+      pcongr (ptrans p1 p3) (ptrans p2 p4)
     | Congr(p1,p2), Trans({p_rule=Congr(p3,p4)},p5) ->
+      (* FIXME: same remark *)
         ptrans (pcongr (ptrans p1 p3) (ptrans p2 p4)) p5
   | _, _ ->
       {p_lhs=p1.p_lhs;
@@ -142,6 +152,3 @@ let build_proof env sigma uf=
   function
   | `Prove (i,j) -> equal_proof env sigma uf i j
   | `Discr (i,ci,j,cj)-> ind_proof env sigma uf i ci j cj
-
-
-

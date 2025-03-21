@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -29,7 +29,7 @@ sig
   val mkSymb : constr -> t
   val mkProduct : (Sorts.t * Sorts.t) -> t
   val mkAppli : (t * t) -> t
-  val mkConstructor : cinfo -> t
+  val mkConstructor : Environ.env -> cinfo -> t
   val constr : t -> constr
   val nth_arg : t -> int -> t
 end
@@ -71,15 +71,13 @@ type state
 type explanation =
     Discrimination of (int*pa_constructor*int*pa_constructor)
   | Contradiction of disequality
-  | Incomplete
+  | Incomplete of (EConstr.t * int) list
 
 val debug_congruence : CDebug.t
 
 val forest : state -> forest
 
 val axioms : forest -> axiom -> ATerm.t * ATerm.t
-
-val epsilons : forest -> pa_constructor list
 
 val empty : Environ.env -> Evd.evar_map -> int -> state
 

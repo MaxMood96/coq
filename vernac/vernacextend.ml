@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -11,6 +11,7 @@
 open Util
 open Pp
 open CErrors
+open Vernactypes
 
 type vernac_keep_as = VtKeepAxiom | VtKeepDefined | VtKeepOpaque
 
@@ -51,150 +52,6 @@ and anon_abstracting_tac = bool (** abstracting anonymously its result *)
 
 and proof_block_name = string (** open type of delimiters *)
 
-module InProg = struct
-  type _ t =
-    | Ignore : unit t
-    | Use : Declare.OblState.t t
-
-  let cast (type a) (x:Declare.OblState.t) (ty:a t) : a =
-    match ty with
-    | Ignore -> ()
-    | Use -> x
-end
-
-module OutProg = struct
-  type _ t =
-    | No : unit t
-    | Yes : Declare.OblState.t t
-    | Push
-    | Pop
-
-  let cast (type a) (x:a) (ty:a t) (orig:Declare.OblState.t NeList.t) : Declare.OblState.t NeList.t  =
-    match ty with
-    | No -> orig
-    | Yes -> NeList.map_head (fun _ -> x) orig
-    | Push -> NeList.push Declare.OblState.empty (Some orig)
-    | Pop -> (match NeList.tail orig with Some tl -> tl | None -> assert false)
-end
-
-module InProof = struct
-  type _ t =
-    | Ignore : unit t
-    | Reject : unit t
-    | Use : Declare.Proof.t t
-    | UseOpt : Declare.Proof.t option t
-
-  let cast (type a) (x:Declare.Proof.t option) (ty:a t) : a =
-    match x, ty with
-    | _, Ignore -> ()
-    | None, Reject -> ()
-    | Some _, Reject -> CErrors.user_err (Pp.str "Command not supported (Open proofs remain).")
-    | Some x, Use -> x
-    | None, Use -> CErrors.user_err (Pp.str "Command not supported (No proof-editing in progress).")
-    | _, UseOpt -> x
-end
-
-module OutProof = struct
-  type _ t =
-    | No : unit t
-    | Close : unit t
-    | Update : Declare.Proof.t t
-    | New : Declare.Proof.t t
-
-end
-
-type ('inprog,'outprog,'inproof,'outproof) vernac_type = {
-  inprog : 'inprog InProg.t;
-  outprog : 'outprog InProg.t;
-  inproof : 'inproof InProof.t;
-  outproof : 'outproof OutProof.t;
-}
-
-type typed_vernac =
-    TypedVernac : {
-      inprog : 'inprog InProg.t;
-      outprog : 'outprog OutProg.t;
-      inproof : 'inproof InProof.t;
-      outproof : 'outproof OutProof.t;
-      run : pm:'inprog -> proof:'inproof -> 'outprog * 'outproof;
-    } -> typed_vernac
-
-let vtdefault f =
-  TypedVernac { inprog = Ignore; outprog = No; inproof = Ignore; outproof = No;
-                run = (fun ~pm:() ~proof:() ->
-                    let () = f () in
-                    (), ()) }
-
-let vtnoproof f =
-  TypedVernac { inprog = Ignore; outprog = No; inproof = Ignore; outproof = No;
-                run = (fun ~pm:() ~proof:() ->
-                    let () = f () in
-                    (), ())
-              }
-
-let vtcloseproof f =
-  TypedVernac { inprog = Use; outprog = Yes; inproof = Use; outproof = Close;
-                run = (fun ~pm ~proof ->
-                    let pm = f ~lemma:proof ~pm in
-                    pm, ())
-              }
-
-let vtopenproof f =
-  TypedVernac { inprog = Ignore; outprog = No; inproof = Ignore; outproof = New;
-                run = (fun ~pm:() ~proof:() ->
-                    let proof = f () in
-                    (), proof)
-              }
-
-let vtmodifyproof f =
-  TypedVernac { inprog = Ignore; outprog = No; inproof = Use; outproof = Update;
-                run = (fun ~pm:() ~proof ->
-                    let proof = f ~pstate:proof in
-                    (), proof)
-              }
-
-let vtreadproofopt f =
-  TypedVernac { inprog = Ignore; outprog = No; inproof = UseOpt; outproof = No;
-                run = (fun ~pm:() ~proof ->
-                    let () = f ~pstate:proof in
-                    (), ())
-              }
-
-let vtreadproof f =
-  TypedVernac { inprog = Ignore; outprog = No; inproof = Use; outproof = No;
-                run = (fun ~pm:() ~proof ->
-                    let () = f ~pstate:proof in
-                    (), ())
-              }
-
-let vtreadprogram f =
-  TypedVernac { inprog = Use; outprog = No; inproof = Ignore; outproof = No;
-                run = (fun ~pm ~proof:() ->
-                    let () = f ~pm in
-                    (), ())
-              }
-
-let vtmodifyprogram f =
-  TypedVernac { inprog = Use; outprog = Yes; inproof = Ignore; outproof = No;
-                run = (fun ~pm ~proof:() ->
-                    let pm = f ~pm in
-                    pm, ())
-              }
-
-let vtdeclareprogram f =
-  TypedVernac { inprog = Use; outprog = No; inproof = Ignore; outproof = New;
-                run = (fun ~pm ~proof:() ->
-                    let proof = f ~pm in
-                    (), proof)
-              }
-
-let vtopenproofprogram f =
-  TypedVernac { inprog = Use; outprog = Yes; inproof = Ignore; outproof = New;
-                run = (fun ~pm ~proof:() ->
-                    let pm, proof = f ~pm in
-                    pm, proof)
-              }
-
 type vernac_command = ?loc:Loc.t -> atts:Attributes.vernac_flags -> unit -> typed_vernac
 
 type plugin_args = Genarg.raw_generic_argument list
@@ -204,19 +61,14 @@ let vernac_tab =
   (Hashtbl.create 211 :
     (Vernacexpr.extend_name, bool * (plugin_args -> vernac_command)) Hashtbl.t)
 
-let vinterp_add depr s f =
-  try
-    Hashtbl.add vernac_tab s (depr, f)
-  with Failure _ ->
-    user_err
-      (str"Cannot add the vernac command " ++ str (fst s) ++ str" twice.")
+let vinterp_add depr s f = Hashtbl.replace vernac_tab s (depr, f)
 
 let vinterp_map s =
   try
     Hashtbl.find vernac_tab s
-  with Failure _ | Not_found ->
+  with Not_found ->
     user_err
-      (str"Cannot find vernac command " ++ str (fst s) ++ str".")
+      (str"Cannot find vernac command " ++ str s.ext_entry ++ str".")
 
 let warn_deprecated_command =
   let open CWarnings in
@@ -243,13 +95,24 @@ let type_vernac opn converted_args ?loc ~atts =
 type classifier = Genarg.raw_generic_argument list -> vernac_classification
 
 (** Classifiers  *)
-let classifiers : classifier array String.Map.t ref = ref String.Map.empty
+module StringPair =
+struct
+  type t = string * string
+  let compare (s1, s2) (t1, t2) =
+    let c = String.compare s1 t1 in
+    if Int.equal c 0 then String.compare s2 t2 else c
+end
 
-let get_vernac_classifier (name, i) args =
-  (String.Map.find name !classifiers).(i) args
+module StringPairMap = Map.Make(StringPair)
+
+let classifiers : classifier array StringPairMap.t ref = ref StringPairMap.empty
+
+let get_vernac_classifier e args =
+  let open Vernacexpr in
+  (StringPairMap.find (e.ext_plugin, e.ext_entry) !classifiers).(e.ext_index) args
 
 let declare_vernac_classifier name f =
-  classifiers := String.Map.add name f !classifiers
+  classifiers := StringPairMap.add name f !classifiers
 
 let classify_as_query = VtQuery
 let classify_as_sideeff = VtSideff ([], VtLater)
@@ -299,15 +162,15 @@ let rec untype_command : type r s. (r, s) ty_sig -> r -> plugin_args -> vernac_c
     | Some Refl -> untype_command ty (f v) args
   end
 
-let rec untype_user_symbol : type s a b c. (a, b, c) Extend.ty_user_symbol -> (s, Gramlib.Grammar.norec, a) Pcoq.Symbol.t =
+let rec untype_user_symbol : type s a b c. (a, b, c) Extend.ty_user_symbol -> (s, Gramlib.Grammar.norec, a) Procq.Symbol.t =
   let open Extend in function
-  | TUlist1 l -> Pcoq.Symbol.list1 (untype_user_symbol l)
-  | TUlist1sep (l, s) -> Pcoq.Symbol.list1sep (untype_user_symbol l) (Pcoq.Symbol.tokens [Pcoq.TPattern (Pcoq.terminal s)]) false
-  | TUlist0 l -> Pcoq.Symbol.list0 (untype_user_symbol l)
-  | TUlist0sep (l, s) -> Pcoq.Symbol.list0sep (untype_user_symbol l) (Pcoq.Symbol.tokens [Pcoq.TPattern (Pcoq.terminal s)]) false
-  | TUopt o -> Pcoq.Symbol.opt (untype_user_symbol o)
-  | TUentry a -> Pcoq.Symbol.nterm (Pcoq.genarg_grammar (Genarg.ExtraArg a))
-  | TUentryl (a, i) -> Pcoq.Symbol.nterml (Pcoq.genarg_grammar (Genarg.ExtraArg a)) (string_of_int i)
+  | TUlist1 l -> Procq.Symbol.list1 (untype_user_symbol l)
+  | TUlist1sep (l, s) -> Procq.Symbol.list1sep (untype_user_symbol l) (Procq.Symbol.tokens [Procq.TPattern (Procq.terminal s)]) false
+  | TUlist0 l -> Procq.Symbol.list0 (untype_user_symbol l)
+  | TUlist0sep (l, s) -> Procq.Symbol.list0sep (untype_user_symbol l) (Procq.Symbol.tokens [Procq.TPattern (Procq.terminal s)]) false
+  | TUopt o -> Procq.Symbol.opt (untype_user_symbol o)
+  | TUentry a -> Procq.Symbol.nterm (Procq.genarg_grammar (Genarg.ExtraArg a))
+  | TUentryl (a, i) -> Procq.Symbol.nterml (Procq.genarg_grammar (Genarg.ExtraArg a)) (string_of_int i)
 
 let rec untype_grammar : type r s. (r, s) ty_sig -> 'a Egramml.grammar_prod_item list = function
 | TyNil -> []
@@ -317,7 +180,21 @@ let rec untype_grammar : type r s. (r, s) ty_sig -> 'a Egramml.grammar_prod_item
   let symb = untype_user_symbol tu in
   Egramml.GramNonTerminal (Loc.tag (t, symb)) :: untype_grammar ty
 
-let vernac_extend ?plugin ~command ?classifier ?entry ext =
+let declare_dynamic_vernac_extend ~command ?entry ~depr cl ty f =
+  let cl = untype_classifier ty cl in
+  let f = untype_command ty f in
+  let r = untype_grammar ty in
+  let ext = { command with Vernacexpr.ext_index = 0 } in
+  vinterp_add depr ext f;
+  Egramml.declare_vernac_command_grammar ~allow_override:true ext entry r;
+  declare_vernac_classifier (ext.ext_plugin, ext.ext_entry) [|cl|];
+  ext
+
+let is_static_linking_done = ref false
+
+let static_linking_done () = is_static_linking_done := true
+
+let static_vernac_extend ~plugin ~command ?classifier ?entry ext =
   let get_classifier (TyML (_, ty, _, cl)) = match cl with
   | Some cl -> untype_classifier ty cl
   | None ->
@@ -326,7 +203,7 @@ let vernac_extend ?plugin ~command ?classifier ?entry ext =
     | None ->
       let e = match entry with
       | None -> "COMMAND"
-      | Some e -> Pcoq.Entry.name e
+      | Some e -> Procq.Entry.name e
       in
       let msg = Printf.sprintf "\
         Vernac entry \"%s\" misses a classifier. \
@@ -349,35 +226,36 @@ let vernac_extend ?plugin ~command ?classifier ?entry ext =
       CErrors.user_err (Pp.strbrk msg)
   in
   let cl = Array.map_of_list get_classifier ext in
+  let ext_plugin = Option.default "__" plugin in
   let iter i (TyML (depr, ty, f, _)) =
     let f = untype_command ty f in
     let r = untype_grammar ty in
-    let () = vinterp_add depr (command, i) f in
-    let () =
-      (* allow_override is a hack for Elpi Command, since it takes
-         effect at Import time it gets called multiple times.
-         Eventually we will need a better API to support this and also
-         to support backtracking over it. *)
-      Egramml.declare_vernac_command_grammar ~allow_override:(Option.is_empty plugin)
-        (command, i) entry r
-    in
+    let ext = Vernacexpr.{ ext_plugin; ext_entry = command; ext_index = i } in
+    let () = vinterp_add depr ext f in
+    let () = Egramml.declare_vernac_command_grammar ~allow_override:false ext entry r in
     let () = match plugin with
-      | None -> Egramml.extend_vernac_command_grammar ~undoable:false (command, i)
+      | None ->
+        let () =
+          if !is_static_linking_done
+          then CErrors.anomaly
+              Pp.(str "static_vernac_extend in dynlinked code must pass non-None plugin.")
+        in
+        Egramml.extend_vernac_command_grammar ~undoable:false ext
       | Some plugin ->
         Mltop.add_init_function plugin (fun () ->
-            Egramml.extend_vernac_command_grammar ~undoable:true (command, i))
+            Egramml.extend_vernac_command_grammar ~undoable:true ext)
     in
     ()
   in
-  let () = declare_vernac_classifier command cl in
+  let () = declare_vernac_classifier (ext_plugin, command) cl in
   let () = List.iteri iter ext in
   ()
 
 (** VERNAC ARGUMENT EXTEND registering *)
 
 type 'a argument_rule =
-| Arg_alias of 'a Pcoq.Entry.t
-| Arg_rules of 'a Pcoq.Production.t list
+| Arg_alias of 'a Procq.Entry.t
+| Arg_rules of 'a Procq.Production.t list
 
 type 'a vernac_argument = {
   arg_printer : Environ.env -> Evd.evar_map -> 'a -> Pp.t;
@@ -388,13 +266,13 @@ let vernac_argument_extend ~plugin ~name arg =
   let wit = Genarg.create_arg name in
   let entry = match arg.arg_parsing with
   | Arg_alias e ->
-    let () = Pcoq.register_grammar wit e in
+    let () = Procq.register_grammar wit e in
     e
   | Arg_rules rules ->
-    let e = Pcoq.create_generic_entry2 name (Genarg.rawwit wit) in
+    let e = Procq.create_generic_entry2 name (Genarg.rawwit wit) in
     let plugin_uid = (plugin, "vernacargextend:"^name) in
     let () = Egramml.grammar_extend ~plugin_uid e
-        (Pcoq.Fresh (Gramlib.Gramext.First, [None, None, rules]))
+        (Procq.Fresh (Gramlib.Gramext.First, [None, None, rules]))
     in
     e
   in

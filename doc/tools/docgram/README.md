@@ -6,7 +6,7 @@ It also updates `tacn` and `cmd` directives when they can be unambiguously match
 productions of the grammar (in practice, that's probably almost always).
 `tacv` and `cmdv` directives are not updated because matching them appears to require
 human judgement.  `doc_grammar` generates a few files that may be useful to
-developers and documentors.
+developers and documenters.
 
 The mlg grammars present several challenges to generating an accurate grammar
 for documentation purposes:
@@ -44,7 +44,7 @@ for documentation purposes:
     ```
     ltac_expr:
       [ "5" RIGHTA
-        [ te = binder_tactic -> { te } ]
+        [ ... ]
       [ "4"   ...
     ```
 
@@ -52,7 +52,7 @@ for documentation purposes:
 
     ```
     tactic_expr5: [
-    | binder_tactic
+    | ...
     | tactic_expr4
     ]
     ```
@@ -170,8 +170,8 @@ in the order they appear.  There are two types of editing operations:
 * Local edits - edit rules that apply to the productions of a single non-terminal.
   The rule is a local edit if the non-terminal name isn't reserved.  Individual
   productions within a local edit that begin with a different set of reserved names
-  edit existing productions.  For  example `binders: [ | DELETE Pcoq.Constr.binders ]`
-  deletes the production `binders: [ | Pcoq.Constr.binders]`
+  edit existing productions.  For  example `binders: [ | DELETE Procq.Constr.binders ]`
+  deletes the production `binders: [ | Procq.Constr.binders]`
 
 Productions that don't begin with a reserved name are added to the grammar,
 such as `empty: [ | ]`, which adds a new non-terminal `empty` with an

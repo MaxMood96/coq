@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -61,28 +61,57 @@ let clear_global=function
 
 (* connection rules *)
 
-let axiom_tac seq =
+let find_hyp ~flags seq env sigma typ =
+  let ts = RedFlags.red_transparent flags.reds in
+  let rec find conv = function
+  | [] -> None
+  | decl :: rest ->
+    let id = NamedDecl.get_id decl in
+    let t = NamedDecl.get_type decl in
+    if not (Sequent.mem_hyp id seq) then find conv rest
+    else if conv then match Reductionops.infer_conv ~ts ~pb:CUMUL env sigma t typ with
+    | None -> find conv rest
+    | Some sigma -> Some (sigma, id)
+    else
+      if EConstr.eq_constr sigma t typ then Some (sigma, id)
+      else find conv rest
+  in
+  let hyps = EConstr.named_context env in
+  match find false hyps with
+  | Some ans -> Some ans
+  | None -> find true hyps
+
+let axiom_tac ~flags seq =
   Proofview.Goal.enter begin fun gl ->
-  match Sequent.find_goal (project gl) seq with
-  | gr -> pf_constr_of_global gr >>= fun c -> exact_no_check c
-  | exception Not_found -> tclFAIL (Pp.str "No axiom link")
+    let env = Proofview.Goal.env gl in
+    let sigma = Proofview.Goal.sigma gl in
+    let concl = Proofview.Goal.concl gl in
+    match find_hyp ~flags seq env sigma concl with
+    | Some (sigma, hyp) ->
+      Proofview.Unsafe.tclEVARS sigma <*>
+      exact_no_check (mkVar hyp)
+    | None -> tclFAIL (Pp.str "No axiom link")
   end
 
-let ll_atom_tac ~flags a backtrack id continue seq =
+let ll_atom_tac ~flags backtrack id continue seq =
   let open EConstr in
+  let tac =
+    Proofview.Goal.enter begin fun gl ->
+      let env = Proofview.Goal.env gl in
+      let sigma = Proofview.Goal.sigma gl in
+      let (sigma, id) = Evd.fresh_global env sigma id in
+      let typ = Retyping.get_type_of env sigma id in
+      let typ = Reductionops.clos_whd_flags flags.reds env sigma typ in
+      let _, dom, _ = destProd sigma typ in
+      match find_hyp ~flags seq env sigma dom with
+      | Some (sigma, hyp) ->
+        Proofview.Unsafe.tclEVARS sigma <*>
+        Generalize.generalize [mkApp (id, [|mkVar hyp|])]
+      | None -> tclFAIL (Pp.str "No link")
+    end
+  in
   tclIFTHENELSE
-      (tclTHENLIST
-        [(Proofview.tclEVARMAP >>= fun sigma ->
-          let gr =
-            try Proofview.tclUNIT (find_left sigma a seq)
-            with Not_found -> tclFAIL (Pp.str "No link")
-          in
-          gr >>= fun gr ->
-          pf_constr_of_global gr >>= fun left ->
-          pf_constr_of_global id >>= fun id ->
-            generalize [(mkApp(id, [|left|]))]);
-         clear_global id;
-         intro])
+    (tclTHENLIST [tac; clear_global id; intro])
     (wrap ~flags 1 false continue seq) backtrack
 
 (* right connectives rules *)
@@ -153,7 +182,7 @@ let ll_ind_tac ~flags (ind,u as indu) largs backtrack id continue seq =
        let newhyps idc =List.init lp (myterm idc) in
          tclIFTHENELSE
            (tclTHENLIST
-              [(pf_constr_of_global id >>= fun idc -> generalize (newhyps idc));
+              [(pf_constr_of_global id >>= fun idc -> Generalize.generalize (newhyps idc));
                clear_global id;
                tclDO lp intro])
            (wrap ~flags lp false continue seq) backtrack
@@ -162,9 +191,9 @@ let ll_ind_tac ~flags (ind,u as indu) largs backtrack id continue seq =
 let ll_arrow_tac ~flags a b c backtrack id continue seq=
   let open EConstr in
   let open Vars in
-  let cc=mkProd(Context.make_annot Anonymous Sorts.Relevant,a,(lift 1 b)) in
-  let d idc = mkLambda (Context.make_annot Anonymous Sorts.Relevant,b,
-                  mkApp (idc, [|mkLambda (Context.make_annot Anonymous Sorts.Relevant,(lift 1 a),(mkRel 2))|])) in
+  let cc=mkProd(Context.make_annot Anonymous ERelevance.relevant,a,(lift 1 b)) in
+  let d idc = mkLambda (Context.make_annot Anonymous ERelevance.relevant,b,
+                  mkApp (idc, [|mkLambda (Context.make_annot Anonymous ERelevance.relevant,(lift 1 a),(mkRel 2))|])) in
     tclORELSE
       (tclTHENS (cut c)
          [tclTHENLIST
@@ -174,7 +203,7 @@ let ll_arrow_tac ~flags a b c backtrack id continue seq=
           tclTHENS (cut cc)
             [(pf_constr_of_global id >>= fun c -> exact_no_check c);
              tclTHENLIST
-               [(pf_constr_of_global id >>= fun idc -> generalize [d idc]);
+               [(pf_constr_of_global id >>= fun idc -> Generalize.generalize [d idc]);
                 clear_global id;
                 introf;
                 introf;
@@ -189,10 +218,7 @@ let forall_tac ~flags backtrack continue seq=
        (tclORELSE
           (tclTHEN introf (tclCOMPLETE (wrap ~flags 0 true continue seq)))
           backtrack))
-    (if flags.qflag then
-       tclFAIL (Pp.str "reversible in 1st order mode")
-     else
-       backtrack)
+    (tclFAIL (Pp.str "reversible in 1st order mode"))
 
 let left_exists_tac ~flags ind backtrack id continue seq =
   Proofview.Goal.enter begin fun gl ->
@@ -215,7 +241,7 @@ let ll_forall_tac ~flags prod backtrack id continue seq=
               let open EConstr in
               let id0 = List.nth (pf_ids_of_hyps gls) 0 in
               let term=mkApp(idc,[|mkVar(id0)|]) in
-              tclTHEN (generalize [term]) (clear [id0])
+              tclTHEN (Generalize.generalize [term]) (clear [id0])
            end);
            clear_global id;
            intro;

@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -23,6 +23,12 @@ Ltac2 map (f : 'a -> 'b) (ov : 'a option) :=
   match ov with
   | Some v => Some (f v)
   | None => None
+  end.
+
+Ltac2 iter (f : 'a -> unit) (ov : 'a option) :=
+  match ov with
+  | Some v => f v
+  | None => ()
   end.
 
 Ltac2 default (def : 'a) (ov : 'a option) :=
@@ -55,6 +61,12 @@ Ltac2 bind (x : 'a option) (f : 'a -> 'b option) :=
   | None => None
   end.
 
+Ltac2 join (x : 'a option option) :=
+  match x with
+  | Some x => x
+  | None => None
+  end.
+
 Ltac2 ret (x : 'a) := Some x.
 
 Ltac2 lift (f : 'a -> 'b) (x : 'a option) := map f x.
@@ -70,3 +82,24 @@ Ltac2 equal (eq : 'a -> 'b -> bool) (a : 'a option) (b : 'b option) : bool
                  | _ => false
                  end
      end.
+
+Ltac2 compare (cmp : 'a -> 'b -> int) (a : 'a option) (b : 'b option) :=
+  match a, b with
+  | Some a, Some b => cmp a b
+  | None, None => 0
+  | None, Some _ => -1
+  | Some _, None => 1
+  end.
+
+
+Ltac2 is_some (a : 'a option) :=
+  match a with
+  | Some _ => true
+  | None => false
+  end.
+
+Ltac2 is_none (a : 'a option) :=
+  match a with
+  | Some _ => false
+  | None => true
+  end.

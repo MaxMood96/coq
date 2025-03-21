@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -35,7 +35,6 @@ type reloc_table = (tag * arity) array
 
 type annot_sw = {
     asw_ind : inductive;
-    asw_ci : case_info;
     asw_reloc : reloc_table;
     asw_finite : bool;
     asw_prefix : string
@@ -73,7 +72,7 @@ type symbol =
   | SymbMatch of annot_sw
   | SymbInd of inductive
   | SymbEvar of Evar.t
-  | SymbLevel of Univ.Level.t
+  | SymbInstance of UVars.Instance.t
   | SymbProj of (inductive * int)
 
 type symbols = symbol array
@@ -85,9 +84,9 @@ val empty_symbols : symbols
 val mk_accu : atom -> t
 val mk_rel_accu : int -> t
 val mk_rels_accu : int -> int -> t array
-val mk_constant_accu : Constant.t -> Univ.Level.t array -> t
-val mk_ind_accu : inductive -> Univ.Level.t array -> t
-val mk_sort_accu : Sorts.t -> Univ.Level.t array -> t
+val mk_constant_accu : Constant.t -> UVars.Instance.t -> t
+val mk_ind_accu : inductive -> UVars.Instance.t -> t
+val mk_sort_accu : Sorts.t -> UVars.Instance.t -> t
 val mk_var_accu : Id.t -> t
 val mk_sw_accu : annot_sw -> accumulator -> t -> (t -> t)
 val mk_fix_accu : rec_pos  -> int -> t array -> t array -> t
@@ -101,27 +100,24 @@ val mk_block : tag -> t array -> t
 val mk_prod : Name.t -> t -> t -> t
 
 val mk_bool : bool -> t
-[@@ocaml.inline always]
 
 val mk_int : int -> t
-[@@ocaml.inline always]
 
 val mk_uint : Uint63.t -> t
-[@@ocaml.inline always]
 
 val mk_float : Float64.t -> t
-[@@ocaml.inline always]
+
+val mk_string : Pstring.t -> t
 
 val napply : t -> t array -> t
 (* Functions over accumulators *)
 
 val dummy_value : unit -> t
 val atom_of_accu : accumulator -> atom
-val args_of_accu : accumulator -> t array
+val args_of_accu : accumulator -> t list
 val accu_nargs : accumulator -> int
 
 val cast_accu : t -> accumulator
-[@@ocaml.inline always]
 
 (* Functions over block: i.e constructors *)
 
@@ -145,7 +141,6 @@ val str_decode : string -> 'a
 val val_to_int : t -> int
 
 val is_int : t -> bool
-[@@ocaml.inline always]
 
 (* function with check *)
 val head0 : t -> t -> t
@@ -189,88 +184,60 @@ val print : t -> t
 
 (* Function without check *)
 val no_check_head0 : t -> t
-[@@ocaml.inline always]
 
 val no_check_tail0 : t -> t
-[@@ocaml.inline always]
 
 val no_check_add : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_sub : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_mul : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_div : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_rem : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_divs : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_rems : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_l_sr  : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_l_sl  : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_a_sr  : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_l_and : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_l_xor : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_l_or  : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_addc      : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_subc      : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_addCarryC : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_subCarryC : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_mulc    : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_diveucl : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_div21     : t -> t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_addMulDiv : t -> t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_eq      : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_lt      : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_le      : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_lts     : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_les     : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_compare : t -> t -> t
 
@@ -279,7 +246,6 @@ val no_check_compares : t -> t -> t
 (** Support for machine floating point values *)
 
 val is_float : t -> bool
-[@@ocaml.inline always]
 
 val fopp : t -> t -> t
 val fabs : t -> t -> t
@@ -303,61 +269,60 @@ val next_down : t -> t -> t
 
 (* Function without check *)
 val no_check_fopp : t -> t
-[@@ocaml.inline always]
 
 val no_check_fabs : t -> t
-[@@ocaml.inline always]
 
 val no_check_feq : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_flt : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_fle : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_fcompare : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_fequal : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_fclassify : t -> t
-[@@ocaml.inline always]
 
 val no_check_fadd : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_fsub : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_fmul : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_fdiv : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_fsqrt : t -> t
-[@@ocaml.inline always]
 
 val no_check_float_of_int : t -> t
-[@@ocaml.inline always]
 
 val no_check_normfr_mantissa : t -> t
-[@@ocaml.inline always]
 
 val no_check_frshiftexp : t -> t
-[@@ocaml.inline always]
 
 val no_check_ldshiftexp : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_next_up : t -> t
-[@@ocaml.inline always]
 
 val no_check_next_down : t -> t
-[@@ocaml.inline always]
+
+(** Support for strings *)
+
+val is_string : t -> bool
+
+val no_check_string_make : t -> t -> t
+val no_check_string_length : t -> t
+val no_check_string_get : t -> t -> t
+val no_check_string_sub : t -> t -> t -> t
+val no_check_string_cat : t -> t -> t
+val no_check_string_compare : t -> t -> t
+
+val string_make : t -> t -> t -> t
+val string_length : t -> t -> t
+val string_get : t -> t -> t -> t
+val string_sub : t -> t -> t -> t -> t
+val string_cat : t -> t -> t -> t
+val string_compare : t -> t -> t -> t
 
 (** Support for arrays *)
 
@@ -372,19 +337,13 @@ val arraycopy : t -> t -> t -> t (* accu A t *)
 val arraylength : t -> t -> t -> t (* accu A t *)
 
 val no_check_arraymake : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_arrayget : t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_arraydefault : t -> t
-[@@ocaml.inline always]
 
 val no_check_arrayset : t -> t -> t -> t
-[@@ocaml.inline always]
 
 val no_check_arraycopy : t -> t
-[@@ocaml.inline always]
 
 val no_check_arraylength : t -> t
-[@@ocaml.inline always]

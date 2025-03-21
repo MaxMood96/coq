@@ -1,6 +1,6 @@
 (* File reduced by coq-bug-finder from original input, then from 5752 lines to 3828 lines, then from 2707 lines to 558 lines, then from 472 lines to 168 lines, then from 110 lines to 101 lines, then from 96 lines to 77 lines, then from 80 lines to 64 lines *)
-Require Coq.Setoids.Setoid.
-Import Coq.Setoids.Setoid.
+Require Corelib.Setoids.Setoid.
+Import Corelib.Setoids.Setoid.
 Generalizable All Variables.
 Axiom admit : forall {T}, T.
 Class Equiv (A : Type) := equiv : relation A.
@@ -10,7 +10,7 @@ Class ILogicOps Frm := { lentails: relation Frm;
                          land: Frm -> Frm -> Frm;
                          lor: Frm -> Frm -> Frm }.
 Infix "|--"  := lentails (at level 79, no associativity).
-Class ILogic Frm {ILOps: ILogicOps Frm} := { lentailsPre:> PreOrder lentails }.
+Class ILogic Frm {ILOps: ILogicOps Frm} := { lentailsPre :: PreOrder lentails }.
 Definition lequiv `{ILogic Frm} P Q := P |-- Q /\ Q |-- P.
 Infix "-|-"  := lequiv (at level 85, no associativity).
 #[export] Instance lequiv_inverse_lentails `{ILogic Frm} {inverse} : subrelation lequiv (inverse lentails) := admit.

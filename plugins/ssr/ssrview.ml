@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -26,7 +26,7 @@ module AdaptorDb = struct
 
   module AdaptorKind = struct
     type t = kind
-    let compare = pervasives_compare
+    let compare = Stdlib.compare
   end
   module AdaptorMap = Map.Make(AdaptorKind)
 
@@ -85,6 +85,7 @@ type vstate = {
 include Ssrcommon.MakeState(struct
   type state = vstate option
   let init = None
+  let name = "ssrview"
 end)
 
 let vsINIT ~view ~subject_name ~to_clear =
@@ -164,14 +165,16 @@ let is_tac_in_term ?extra_scope { annotation; body; glob_env; interp_env } =
     let body =
       match extra_scope with
       | None -> body
-      | Some s -> CAst.make (Constrexpr.CDelimiters(s,body))
+      | Some s -> CAst.make Constrexpr.(CDelimiters(DelimUnboundedScope,s,body))
     in
     (* We unravel notations *)
     let g = intern_constr_expr ist sigma body in
     match DAst.get g with
     | Glob_term.GGenarg x
-      when Genarg.has_type x (Genarg.glbwit Tacarg.wit_tactic)
-        -> tclUNIT (`Tac (Genarg.out_gen (Genarg.glbwit Tacarg.wit_tactic) x))
+      when Genarg.has_type x (Genarg.glbwit Tacarg.wit_ltac_in_term)
+      ->
+      let _, tac = Genarg.out_gen (Genarg.glbwit Tacarg.wit_ltac_in_term) x in
+      tclUNIT (`Tac tac)
     | _ -> tclUNIT (`Term (annotation, interp_env, g))
 end)
 
@@ -185,7 +188,7 @@ let tclINJ_CONSTR_IST ist p =
 
 let mkGHole =
   DAst.make
-    (Glob_term.GHole(Evar_kinds.InternalHole, Namegen.IntroAnonymous))
+    (Glob_term.GHole (GInternalHole))
 let rec mkGHoles n = if n > 0 then mkGHole :: mkGHoles (n - 1) else []
 let mkGApp f args =
   if args = [] then f
@@ -237,14 +240,14 @@ let guess_max_implicits ist glob =
   Proofview.tclORELSE
     (interp_glob ist (mkGApp glob (mkGHoles 6)) >>= fun (env,sigma,term) ->
      let term_ty = Retyping.get_type_of env sigma term in
-     let ctx, _ = Reductionops.hnf_decompose_prod env sigma term_ty in
+     let ctx, _ = Reductionops.whd_decompose_prod env sigma term_ty in
      tclUNIT (List.length ctx + 6))
   (fun _ -> tclUNIT 5)
 
 let pad_to_inductive ist glob = Goal.enter_one ~__LOC__ begin fun goal ->
   interp_glob ist glob >>= fun (env, sigma, term as ot) ->
   let term_ty = Retyping.get_type_of env sigma term in
-  let ctx, i = Reductionops.hnf_decompose_prod env sigma term_ty in
+  let ctx, i = Reductionops.whd_decompose_prod env sigma term_ty in
   let rel_ctx =
     List.map (fun (a,b) -> Context.Rel.Declaration.LocalAssum(a,b)) ctx in
   if not (Ssrcommon.isAppInd (EConstr.push_rel_context rel_ctx env) sigma i)
@@ -336,7 +339,7 @@ Goal.enter_one ~__LOC__ begin fun g ->
 end
 
 let pose_proof subject_name p =
-  Tactics.generalize [p] <*>
+  Generalize.generalize [p] <*>
   begin match subject_name with
   | id :: _ -> Ssrcommon.tclRENAME_HD_PROD (Name.Name id)
   | _ -> tclUNIT() end

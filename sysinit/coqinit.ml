@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -41,7 +41,7 @@ let gc_set : Gc.control -> unit =
     fixed_set
   | _ -> Gc.set
 
-(** Coq is a heavy user of persistent data structures and symbolic ASTs, so the
+(** Rocq is a heavy user of persistent data structures and symbolic ASTs, so the
     minor heap is heavily solicited. Unfortunately, the default size is far too
     small, so we enlarge it a lot (128 times larger).
 
@@ -76,31 +76,34 @@ let init_gc () =
     if Coq_config.caml_version_nums >= [4;10;0] then set_gc_best_fit () else ()
 
 let init_ocaml () =
-  CProfile.init_profile ();
   init_gc ();
-  Sys.catch_break false (* Ctrl-C is fatal during the initialisation *)
+  (* Get error message (and backtrace if enabled) on Ctrl-C instead of just exiting the process *)
+  Sys.catch_break true
 
 let init_coqlib opts = match opts.Coqargs.config.Coqargs.coqlib with
   | None -> ()
   | Some s ->
     Boot.Env.set_coqlib s
 
-let print_query = let open Coqargs in function
-  | PrintVersion -> Boot.Usage.version ()
-  | PrintMachineReadableVersion -> Boot.Usage.machine_readable_version ()
-  | PrintWhere ->
-    let env = Boot.Env.init () in
-    let coqlib = Boot.Env.coqlib env |> Boot.Path.to_string in
-    print_endline coqlib
-  | PrintHelp h -> Boot.Usage.print_usage stderr h
-  | PrintConfig ->
-    Envars.print_config stdout
+let dirpath_of_file f =
+  let ldir0 =
+    try
+      let lp = Loadpath.find_load_path (Filename.dirname f) in
+      Loadpath.logical lp
+    with Not_found -> Libnames.default_root_prefix
+  in
+  let f = try Filename.chop_extension (Filename.basename f) with Invalid_argument _ -> f in
+  let id = Names.Id.of_string f in
+  let ldir = Libnames.add_dirpath_suffix ldir0 id in
+  ldir
 
-let parse_arguments ~parse_extra ~usage ?(initial_args=Coqargs.default) () =
-  let opts, extras =
-    Coqargs.parse_args ~usage ~init:initial_args
-      (List.tl (Array.to_list Sys.argv)) in
-  let customopts, extras = parse_extra extras in
+let dirpath_of_top = function
+  | Coqargs.TopPhysical f -> dirpath_of_file f
+  | TopLogical dp -> Libnames.dirpath_of_string dp
+
+let parse_arguments ~parse_extra ?(initial_args=Coqargs.default) args =
+  let opts, extras = Coqargs.parse_args ~init:initial_args args in
+  let customopts, extras = parse_extra opts extras in
   if not (CList.is_empty extras) then begin
     prerr_endline ("Don't know what to do with "^String.concat " " extras);
     prerr_endline "See -help for the list of supported options";
@@ -120,7 +123,14 @@ let print_memory_stat () =
     let oc = open_out fn in
     Gc.print_stat oc;
     close_out oc
-  with _ -> ()
+  with exn when CErrors.noncritical exn -> ()
+
+let to_vo_path (x:Coqargs.vo_path) : Loadpath.vo_path = {
+  implicit = x.implicit;
+  unix_path = x.unix_path;
+  coq_path = Libnames.dirpath_of_string x.rocq_path;
+  recursive = true;
+  }
 
 let init_load_paths opts =
   let open Coqargs in
@@ -133,7 +143,6 @@ let init_load_paths opts =
   let ml_path = opts.pre.ml_includes @ boot_ml_path in
   List.iter Mltop.add_ml_dir (List.rev ml_path);
   List.iter Loadpath.add_vo_path boot_vo_path;
-  List.iter Loadpath.add_vo_path opts.pre.vo_includes;
   let env_ocamlpath =
     try [Sys.getenv "OCAMLPATH"]
     with Not_found -> []
@@ -143,36 +152,92 @@ let init_load_paths opts =
   let env_ocamlpath = String.concat ocamlpathsep env_ocamlpath in
   Findlib.init ~env_ocamlpath ()
 
-let init_runtime opts =
+let init_profile ~file =
+  let ch = open_out file in
+  let fname = Filename.basename file in
+  NewProfile.init { output = Format.formatter_of_out_channel ch; fname; };
+  at_exit (fun () ->
+      NewProfile.finish ();
+      close_out ch)
+
+let init_runtime ~usage opts =
   let open Coqargs in
+  Vernacextend.static_linking_done ();
+  Option.iter (fun file -> init_profile ~file) opts.config.profile;
   Lib.init ();
   init_coqlib opts;
   if opts.post.memory_stat then at_exit print_memory_stat;
 
-  (* Configuration *)
-  Global.set_impredicative_set opts.config.logic.impredicative_set;
-  Global.set_indices_matter opts.config.logic.indices_matter;
-  Global.set_check_universes (not opts.config.logic.type_in_type);
-  Global.set_VM opts.config.enable_VM;
-  Global.set_native_compiler (match opts.config.native_compiler with NativeOff -> false | NativeOn _ -> true);
-
-  (* Native output dir *)
-  Nativelib.output_dir := opts.config.native_output_dir;
-  Nativelib.include_dirs := opts.config.native_include_dirs;
+  (* excluded directories *)
+  List.iter System.exclude_directory opts.config.exclude_dirs;
 
   (* Paths for loading stuff *)
   init_load_paths opts;
 
   match opts.Coqargs.main with
-  | Coqargs.Queries q -> List.iter print_query q; exit 0
-  | Coqargs.Run ->
-      injection_commands opts
+  | Coqargs.Queries q -> List.iter (Boot.Env.print_query (Some usage)) q; exit 0
+  | Coqargs.Run -> ()
 
-let require_file ~prefix ~lib ~export =
+let init_document opts =
+  let open Coqargs in
+
+  (* this isn't in init_load_paths because processes (typically
+     vscoqtop) are allowed to have states with differing vo paths (but
+     not with differing -boot or ml paths) *)
+  List.iter (fun x -> Loadpath.add_vo_path @@ to_vo_path x) opts.pre.vo_includes;
+
+  (* Kernel configuration *)
+  Global.set_impredicative_set opts.config.logic.impredicative_set;
+  Global.set_indices_matter opts.config.logic.indices_matter;
+  Global.set_check_universes (not opts.config.logic.type_in_type);
+  Global.set_VM opts.config.enable_VM;
+  Global.set_native_compiler (match opts.config.native_compiler with NativeOff -> false | NativeOn _ -> true);
+  Global.set_rewrite_rules_allowed opts.config.logic.rewrite_rules;
+
+  (* XXX these flags should probably be in the summary *)
+  (* Native output dir *)
+  Nativelib.output_dir := opts.config.native_output_dir;
+  Nativelib.include_dirs := opts.config.native_include_dirs;
+
+  (* Default output dir *)
+  Flags.output_directory := opts.config.output_directory;
+
+  (* Test mode *)
+  Flags.test_mode := opts.config.test_mode;
+
+  (* beautify *)
+  if opts.config.beautify then begin
+    Flags.beautify := true;
+    Flags.record_comments := true;
+  end;
+
+  if opts.config.quiet then begin
+    Flags.quiet := true;
+    Flags.make_warn false;
+  end;
+
+  ()
+
+let warn_require_not_found =
+  CWarnings.create ~name:"compatibility-module-not-found"
+    ~category:CWarnings.CoreCategories.filesystem
+    Pp.(fun (prefix, lib) ->
+        strbrk "Did not find compatibility module " ++ Libnames.pr_qualid lib ++
+        pr_opt (fun prefix -> str "with prefix " ++ Libnames.pr_qualid prefix)
+          prefix ++ str ".")
+
+let require_file ~intern ~prefix ~lib ~export ~allow_failure =
   let mp = Libnames.qualid_of_string lib in
   let mfrom = Option.map Libnames.qualid_of_string prefix in
-  let exp = Option.map (fun e -> e, None) export in
-  Flags.silently (Vernacentries.vernac_require mfrom exp) [mp,Vernacexpr.ImportAll]
+  let exp = Option.map (function
+      | Coqargs.Import -> Vernacexpr.Import, None
+      | Coqargs.Export -> Vernacexpr.Export, None)
+      export
+  in
+  try
+    Flags.silently (Vernacentries.vernac_require ~intern mfrom exp) [mp,Vernacexpr.ImportAll]
+  with (Synterp.UnmappedLibrary _ | Synterp.NotFoundLibrary _) when allow_failure ->
+    warn_require_not_found (mfrom, mp)
 
 let warn_no_native_compiler =
   CWarnings.create_in Nativeconv.w_native_disabled
@@ -181,17 +246,38 @@ let warn_no_native_compiler =
                    strbrk " option ignored.")
 
 let warn_deprecated_native_compiler =
-  CWarnings.create ~name:"deprecated-native-compiler-option" ~category:CWarnings.CoreCategories.deprecated
+  CWarnings.create ~name:"deprecated-native-compiler-option" ~category:Deprecation.Version.v8_14
          (fun () ->
           Pp.strbrk "The native-compiler option is deprecated. To compile native \
           files ahead of time, use the coqnative binary instead.")
 
-let handle_injection = let open Coqargs in function
-  | RequireInjection {lib;prefix;export} -> require_file ~lib ~prefix ~export
+let interp_set_option (type a) opt (v:string) (k:a Goptions.option_kind) : a =
+  let opt = String.concat " " opt in
+  match k with
+  | BoolKind -> (Coqargs.get_bool ~opt v)
+  | IntKind -> (Coqargs.get_int_opt ~opt v)
+  | StringKind -> v
+  | StringOptKind -> Some v
+
+let interp_set_option opt =
+  { Goptions.check_and_cast = (fun v k -> interp_set_option opt v k ) }
+
+let set_option (opt,v) =
+  let open Goptions in
+  match (v:Coqargs.option_command) with
+  | OptionUnset -> unset_option_value_gen ~locality:OptLocal opt
+  | OptionSet None -> set_bool_option_value_gen ~locality:OptLocal opt true
+  | OptionSet (Some v) -> set_option_value ~locality:OptLocal (interp_set_option opt) opt v
+
+let handle_injection ~intern = let open Coqargs in function
+  | RequireInjection {lib;prefix;export;allow_failure} ->
+    require_file ~intern ~lib ~prefix ~export ~allow_failure
   | OptionInjection o -> set_option o
   | WarnNoNative s -> warn_no_native_compiler s
   | WarnNativeDeprecated -> warn_deprecated_native_compiler ()
 
-let start_library ~top injections =
+let start_library ~intern ~top injections =
   Flags.verbosely Declaremods.start_library top;
-  List.iter handle_injection injections
+  CWarnings.override_unknown_warning[@ocaml.warning "-3"] := true;
+  List.iter (handle_injection ~intern) injections;
+  CWarnings.override_unknown_warning[@ocaml.warning "-3"] := false

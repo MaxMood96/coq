@@ -1,5 +1,5 @@
 (************************************************************************)
-(*         *   The Coq Proof Assistant / The Coq Development Team       *)
+(*         *      The Rocq Prover / The Rocq Development Team           *)
 (*  v      *         Copyright INRIA, CNRS and contributors             *)
 (* <O___,, * (see version control and CREDITS file for authors & dates) *)
 (*   \VV/  **************************************************************)
@@ -20,7 +20,7 @@
 
 
 (** To help distinguish between exceptions raised by the IO monad from
-    the one used natively by Coq, the former are wrapped in
+    the one used natively by Rocq, the former are wrapped in
     [Exception].  It is only used internally so that [catch] blocks of
     the IO monad would only catch exceptions raised by the [raise]
     function of the IO monad, and not for instance, by system
@@ -58,7 +58,7 @@ struct
      applications can be significantly slower.
 
      Documentation of this behaviour can be found at:
-     https://ocaml.janestreet.com/?q=node/30 *)
+     https://blog.janestreet.com/the-dangers-of-being-too-partial/ *)
 
   include Monad.Make(struct
     type 'a t = unit -> 'a
@@ -69,7 +69,7 @@ struct
     let map f a = (); fun () -> f (a ())
   end)
 
-  type 'a ref = 'a Util.pervasives_ref
+  type 'a ref = 'a Stdlib.ref
 
   let ignore a = (); fun () -> ignore (a ())
 
