@@ -201,6 +201,7 @@ Environment variables
 ``$ROCQPATH`` can be used to specify the :term:`load path`. It is a list of directories separated by
 ``:`` (``;`` on Windows). Coq will also honor ``$XDG_DATA_HOME`` and
 ``$XDG_DATA_DIRS`` (see Section :ref:`logical-paths-load-path`).
+The added loadpaths are considered installed, see :cmd:`Print LoadPath`.
 
 .. TODO PR: Correct ref above?
 
@@ -302,6 +303,8 @@ and ``rocq repl``, unless stated otherwise:
   Loading files from packages made available with `-Q` must include
   the :term:`logical name` of the package in `From` clause of the :cmd:`Require`
   command *or* provide a fully qualified name.
+
+  The added loadpath is considered local, see :cmd:`Print LoadPath`.
 
 :-R *directory dirpath*: Similar to ``-Q`` *directory dirpath*, but allows using
   :cmd:`Require` with a partially qualified name (i.e. without a `From` clause).

@@ -192,6 +192,7 @@ type required_lib = {
 type section_data = {
   rev_env : Environ.env;
   rev_univ : Univ.ContextSet.t;
+  rev_qualities : Sorts.QVar.Set.t;
   rev_objlabels : Label.Set.t;
   rev_reimport : reimport list;
   rev_revstruct : structure_body;
@@ -1565,6 +1566,7 @@ let open_section senv =
   let custom = {
     rev_env = senv.env;
     rev_univ = senv.univ;
+    rev_qualities = senv.qualities;
     rev_objlabels = senv.objlabels;
     rev_reimport = [];
     rev_revstruct = senv.revstruct;
@@ -1583,10 +1585,10 @@ let close_section senv =
      were forced inside the section, they have been turned into global monomorphic
      that are going to be replayed. Those that are not forced are not readded
      by {!add_constant_aux}. *)
-  let { rev_env = env; rev_univ = univ; rev_objlabels = objlabels;
+  let { rev_env = env; rev_univ = univ; rev_qualities = qualities; rev_objlabels = objlabels;
         rev_reimport; rev_revstruct = revstruct; rev_paramresolver = paramresolver } = revert in
   let env = if Environ.rewrite_rules_allowed env0 then Environ.allow_rewrite_rules env else env in
-  let senv = { senv with env; revstruct; sections; univ; objlabels; paramresolver } in
+  let senv = { senv with env; revstruct; sections; univ; qualities; objlabels; paramresolver } in
   (* Second phase: replay Requires *)
   let senv = List.fold_left (fun senv (lib,vmtab,vodigest) -> snd (import lib vmtab vodigest senv))
       senv (List.rev rev_reimport)

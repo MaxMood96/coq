@@ -606,15 +606,16 @@ file is a particular case of a module called a *library file*.
    Exact matches are preferred when looking for a file with the logical name
    :n:`@dirpath.{* @ident__implicit. }@qualid` or
    :n:`{* @ident__implicit. }@qualid`
-   (that is, matches where the implicit part is empty). If the name exactly
-   matches in multiple `-R` or `-Q` options, the file corresponding to the last
-   `-R` or `-Q` specified is used.  (In :cmd:`Print LoadPath`, that's the first
-   match from the top.)
+   (that is, matches where the implicit part is empty).
+   For both exact and other matches, local loadpaths are considered first,
+   then installed ones.
+   Paths considered as installed are typically the `user-contrib`
+   directory and paths provided via the ``ROCQPATH`` environment
+   variable, see :cmd:`Print LoadPath`.
+   In each attempt (exact local, exact installed, local and installed),
+   several matching files are signaled by an error.
 
-   If there is no exact match, the
-   matches from the last `-R` or `-Q` are selected. If this
-   results in a unique match, the corresponding file is selected. If
-   this results in several matches, it is an error. The difference
+   The difference
    between the `-R` and the `-Q` option is that non-exact matches are
    allowed for `-Q` only if `From` is present.  Matching is done when the script
    is compiled or processed rather than when its .vo file is loaded.  .vo files use
@@ -634,8 +635,9 @@ file is a particular case of a module called a *library file*.
 
    .. exn:: Required library @qualid matches several files in path (found file__1.vo, file__2.vo, ...).
 
-      The file to load must be required with a more discriminating
-      suffix, or, at worst, with its full logical name.
+      Either the file to load must be required with a more discriminating
+      suffix (at worst, with its full logical name) or there is an error in the
+      configuration (command line arguments or environment variables).
 
    .. exn:: Compiled library @ident.vo makes inconsistent assumptions over library @qualid.
 
@@ -741,6 +743,8 @@ Load paths
    Displays the current Rocq :term:`load path`.  If :n:`@dirpath` is specified,
    displays only the paths that extend that prefix.  In the output,
    the logical path `<>` represents an empty logical path.
+   Also prints whether a loadpath is considered installed (``i``) or not,
+   see :cmd:`Require`.
 
 .. cmd:: Print ML Path
 
