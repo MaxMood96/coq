@@ -342,6 +342,7 @@ val exists_universe : full_path -> bool
 
 val full_name_modtype : qualid -> full_path
 val full_name_module : qualid -> full_path
+val full_name_open_mod : qualid -> full_path
 
 (** {6 Reverse lookup }
   Finding user names corresponding to the given

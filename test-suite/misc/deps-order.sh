@@ -1,6 +1,6 @@
 #!/bin/sh
 # Check that both coqdep and coqtop/coqc supports -R
-# Check that both coqdep and coqtop/coqc takes the later -R
+# Check that both coqdep and coqtop/coqc takes -R preferably to installed $ROCQPATH
 # See bugs 2242, 2337, 2339
 rm -f misc/deps/lib/*.vo misc/deps/client/*.vo
 output=misc/deps/deps.real
@@ -11,7 +11,8 @@ R=$?
 times
 $coqc -R misc/deps/lib lib misc/deps/lib/foo.v 2>&1
 $coqc -R misc/deps/lib lib -R misc/deps/client client misc/deps/client/foo.v 2>&1
-$coqc -R misc/deps/lib lib -R misc/deps/client client misc/deps/client/bar.v 2>&1
+export ROCQPATH=misc/deps
+$coqc -R misc/deps/client client misc/deps/client/bar.v 2>&1
 S=$?
 if [ $R = 0 ] && [ $S = 0 ]; then
     printf "coqdep and coqc agree\n"

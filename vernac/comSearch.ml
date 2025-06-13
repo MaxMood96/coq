@@ -19,15 +19,24 @@ open Search
 open Vernacexpr
 open Goptions
 
-let global_module qid =
-  try Nametab.full_name_module qid
+let open_or_global_module qid =
+  try Nametab.full_name_open_mod qid
   with Not_found ->
+    try Nametab.full_name_module qid
+    with Not_found ->
+      user_err ?loc:qid.CAst.loc
+       (str "Module/Section " ++ Ppconstr.pr_qualid qid ++ str " not found.")
+
+(*
+let global_module qid =
     user_err ?loc:qid.CAst.loc
      (str "Module/Section " ++ Ppconstr.pr_qualid qid ++ str " not found.")
-
+*)
 let interp_search_restriction = function
-  | SearchOutside l -> SearchOutside (List.map global_module l)
-  | SearchInside l -> SearchInside (List.map global_module l)
+  | SearchOutside l ->
+      SearchOutside (List.map open_or_global_module l)
+  | SearchInside l ->
+      SearchInside (List.map open_or_global_module l)
 
 let kind_searcher env = Decls.(function
   (* Kinds referring to the keyword introducing the object *)

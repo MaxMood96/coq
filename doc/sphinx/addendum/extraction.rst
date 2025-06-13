@@ -250,7 +250,7 @@ principles of extraction (logical parts and types).
    The extracted code will omit these arguments.
    Here :token:`qualid` can be
    any function or inductive constructor, and the :token:`ident`\s are
-   the names of the useless arguments.  Arguments can can also be
+   the names of the useless arguments.  Arguments can also be
    identified positionally by :token:`integer`\s starting from 1.
 
 When an actual extraction takes place, an error is normally raised if the

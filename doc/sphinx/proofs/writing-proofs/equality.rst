@@ -379,6 +379,7 @@ Rewriting with definitional equality
       :undocumented:
 
    .. exn:: Found an "at" clause without "with" clause
+      :name: Found an at clause without with clause
       :undocumented:
 
    .. tacn:: now_show @one_type

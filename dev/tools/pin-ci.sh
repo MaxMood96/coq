@@ -10,6 +10,7 @@ process_development() {
   local REPO=${!REPO_VAR}
   local BRANCH_VAR="${DEV}_CI_REF"
   local BRANCH=${!BRANCH_VAR}
+  local HASH
   if [[ -z "$BRANCH" ]]
   then
     echo "$DEV has no branch set, skipping"
@@ -21,24 +22,21 @@ process_development() {
     return 0
   fi
   echo "Resolving $DEV as $BRANCH from $REPO"
-  local HASH=$(git ls-remote --heads $REPO $BRANCH | cut -f 1)
+  HASH=$(git ls-remote --heads "$REPO" "$BRANCH" | cut -f 1)
   if [[ -z "$HASH" ]]
   then
     echo "Could not resolve reference $BRANCH for $DEV (something went wrong), skipping"
     return 0
   fi
-  read -p "Expand $DEV from $BRANCH to $HASH? [y/N] " -n 1 -r
-  echo
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    # use -i.bak to be compatible with MacOS; see, e.g., https://stackoverflow.com/a/7573438/377022
-    sed -i.bak -E "s|project +$DEV +.*|project $DEV '$REPO' '$HASH'|" $OVERLAYS
-  fi
+  echo "Expandin $DEV from $BRANCH to $HASH"
+  # use -i.bak to be compatible with MacOS; see, e.g., https://stackoverflow.com/a/7573438/377022
+  sed -i.bak -E "s|project +$DEV +.*|project $DEV '$REPO' '$HASH'|" $OVERLAYS
 }
 
 # Execute the script to set the overlay variables
 . $OVERLAYS
 
-for project in ${projects[@]}
+for project in "${projects[@]}"
 do
-  process_development $project
+  process_development "$project"
 done

@@ -146,9 +146,7 @@ exclude_patterns = [
     '.DS_Store',
     'introduction.rst',
     'refman-preamble.rst',
-    'README.rst',
-    'README.gen.rst',
-    'README.template.rst'
+    'README.rst'
 ] + ["*.{}.rst".format(fmt) for fmt in SUPPORTED_FORMATS]
 
 # The reST default role (used for this markup: `text`) to use for all
@@ -213,6 +211,7 @@ html_context = {
     'versions': [
         ("dev", "https://rocq-prover.org/doc/master/refman/"),
         ("stable", "https://rocq-prover.org/refman/"),
+        ("9.1", "https://rocq-prover.org/doc/v9.1/refman/"),
         ("9.0", "https://rocq-prover.org/doc/v9.0/refman/"),
         ("8.20", "https://rocq-prover.org/doc/V8.20.1/refman/"),
         ("8.19", "https://rocq-prover.org/doc/V8.19.2/refman/"),

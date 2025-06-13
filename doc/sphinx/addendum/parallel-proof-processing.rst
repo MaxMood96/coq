@@ -81,7 +81,7 @@ Alternatively, if the :cmd:`Proof using` included unneeded variables, they becom
 extra parameters of the theorem, which may generate errors.
 This :ref:`example <example-print-using>` shows an example of an unneeded variable.
 One possible error is `(in proof <theorem name>) Attempt to save an incomplete proof`,
-which may indicate that the named theorem refers to an an earlier theorem that has
+which may indicate that the named theorem refers to an earlier theorem that has
 an incorrect annotation.
 
 Automatic suggestion of proof annotations

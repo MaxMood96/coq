@@ -132,7 +132,7 @@ or :term:`constants <constant>` defined in the :term:`global environment` with t
    \WFE{\Gamma}
    (x:=t:T) ∈ Γ
    --------------
-   E[Γ] ⊢ x~\triangleright_Δ~t
+   E[Γ] ⊢ x~\triangleright_δ~t
 
 .. inference:: Delta-Global
 
@@ -307,7 +307,7 @@ types (differing only in universe levels) such that
 and
 
 .. math::
-   E[Γ] ⊢ c'~v_1' … v_m' : t'~ w_1' … w_m '
+   E[Γ] ⊢ c'~v_1' … v_m' : t~ w_1' … w_m '
 
 and we have
 

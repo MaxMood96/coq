@@ -157,7 +157,8 @@ let start_compilation s mp =
   }
   in
   synterp_state := st;
-  interp_state := initial_stk
+  interp_state := initial_stk;
+  Nametab.OpenMods.push (Until 1) path (DirOpenModule mp)
 
 let end_compilation_checks dir =
   let () = match find_entries_p is_opening_node !interp_state with

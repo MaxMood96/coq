@@ -214,7 +214,7 @@ let print_loadpath dir =
     let filter p = is_dirpath_prefix_of dir (Loadpath.logical p) in
     List.filter filter l
   in
-  str "Logical Path / Physical path:" ++ fnl () ++
+  str "Installed / Logical Path / Physical path:" ++ fnl () ++
     prlist_with_sep fnl Loadpath.pp l
 
 let print_libraries () =

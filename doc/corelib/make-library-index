@@ -14,6 +14,8 @@ echo -n "Building file index-list.prehtml... "
 
 LIBDIRS=$(find theories -type d ! -name .coq-native)
 
+missing=
+
 for k in $LIBDIRS; do
     d=$(basename "$k")
     p=$(echo "$k" | sed 's:^[^/]*/::' | sed 's:/:.:g')
@@ -36,15 +38,18 @@ for k in $LIBDIRS; do
                 # Skipping file from the index
                 :
             else
-                echo "Error: none of $FILE and $HIDDEN mention $k/$b.v" >&2
-                exit 1
+              missing="$missing $k/$b.v"
             fi
-
         fi
     done
     sed -e "s/#$d#//" "$tmp" > "$tmp2"
     mv -f "$tmp2" "$tmp"
 done
+
+if [ "$missing" ]; then
+  echo "Error: none of $FILE and $HIDDEN mention$missing" >&2
+  exit 1
+fi
 
 if a=$(grep theories "$tmp"); then echo Error: extra files: >&2; echo "$a" >&2; exit 1; fi
 mv "$tmp" "$FILE"

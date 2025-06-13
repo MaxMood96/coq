@@ -11,6 +11,8 @@
 
 Currently geared towards Coq's manual, rather than Coq source files, but one
 could imagine extending it.
+
+Refer to doc/sphinx/README.rst for the documentation of the coqrst domain.
 """
 
 # pylint: disable=missing-type-doc, missing-param-doc
@@ -324,27 +326,16 @@ class NotationObject(DocumentableObject):
         signode += addnodes.desc_name(signature, '', tacn_node)
 
 class GallinaObject(PlainObject):
-    r"""A theorem.
-
-    Example::
-
-       .. thm:: Bound on the ceiling function
-
-          Let :math:`p` be an integer and :math:`c` a rational constant. Then
-          :math:`p \ge c \rightarrow p \ge \lceil{c}\rceil`.
+    """ A Theorem object.
+    See the documentation of the ".. thm::" object in doc/sphinx/README.rst.
     """
     subdomain = "thm"
     index_suffix = "(theorem)"
     annotation = "Theorem"
 
 class VernacObject(NotationObject):
-    """A Coq command.
-
-    Example::
-
-       .. cmd:: Infix @string := @one_term {? ( {+, @syntax_modifier } ) } {? : @ident }
-
-          This command is equivalent to :n:`…`.
+    """A Coq command object.
+    See the documentation of the ".. cmd::" object in doc/sphinx/README.rst.
     """
     subdomain = "cmd"
     index_suffix = "(command)"
@@ -355,19 +346,8 @@ class VernacObject(NotationObject):
         return m.group(0).strip() if m else None
 
 class VernacVariantObject(VernacObject):
-    """A variant of a Coq command.
-
-    Example::
-
-       .. cmd:: Axiom @ident : @term.
-
-          This command links :token:`term` to the name :token:`term` as its specification in
-          the global environment. The fact asserted by :token:`term` is thus assumed as a
-          postulate.
-
-          .. cmdv:: Parameter @ident : @term.
-
-             This is equivalent to :n:`Axiom @ident : @term`.
+    """An object for a variant of a Coq command.
+    See the documentation of the ".. cmdv::" object in doc/sphinx/README.rst.
     """
     index_suffix = "(command variant)"
     annotation = "Variant"
@@ -376,24 +356,16 @@ class VernacVariantObject(VernacObject):
         return None
 
 class TacticObject(NotationObject):
-    """A tactic, or a tactic notation.
-
-    Example::
-
-       .. tacn:: do @natural @expr
-
-          :token:`expr` is evaluated to ``v`` which must be a tactic value. …
+    """An object for a tactic, or a tactic notation.
+    See the documentation of the ".. tacn::" object in doc/sphinx/README.rst.
     """
     subdomain = "tacn"
     index_suffix = "(tactic)"
     annotation = "Tactic"
 
 class AttributeObject(NotationObject):
-    """An attribute.
-
-    Example::
-
-       .. attr:: local
+    """An attribute object.
+    See the documentation of the ".. attr::" object in doc/sphinx/README.rst.
     """
     subdomain = "attr"
     index_suffix = "(attribute)"
@@ -403,21 +375,8 @@ class AttributeObject(NotationObject):
         return notation_to_string(signature)
 
 class TacticVariantObject(TacticObject):
-    """A variant of a tactic.
-
-    Example::
-
-       .. tacn:: fail
-
-          This is the always-failing tactic: it does not solve any goal. It is
-          useful for defining other tacticals since it can be caught by
-          :tacn:`try`, :tacn:`repeat`, :tacn:`match goal`, or the branching
-          tacticals. …
-
-          .. tacv:: fail @natural
-
-             The number is the failure level. If no level is specified, it
-             defaults to 0. …
+    """An object for a variant of a tactic.
+    See the documentation of the ".. tacv::" object in doc/sphinx/README.rst.
     """
     index_suffix = "(tactic variant)"
     annotation = "Variant"
@@ -426,71 +385,33 @@ class TacticVariantObject(TacticObject):
         return None
 
 class OptionObject(NotationObject):
-    """A Coq option (a setting with non-boolean value, e.g. a string or numeric value).
-
-    Example::
-
-       .. opt:: Hyps Limit @natural
-          :name Hyps Limit
-
-          Controls the maximum number of hypotheses displayed in goals after
-          application of a tactic.
+    """An object for a Coq option (a setting with non-boolean value, e.g. a
+    string or numeric value).
+    See the documentation of the ".. opt::" object in doc/sphinx/README.rst.
     """
     subdomain = "opt"
     index_suffix = "(option)"
     annotation = "Option"
 
 class FlagObject(NotationObject):
-    """A Coq flag (i.e. a boolean setting).
-
-    Example::
-
-       .. flag:: Nonrecursive Elimination Schemes
-
-          Controls whether types declared with the keywords
-          :cmd:`Variant` and :cmd:`Record` get an automatic declaration of
-          induction principles.
+    """An object for a Coq flag (i.e. a boolean setting).
+    See the documentation of the ".. flag::" object in doc/sphinx/README.rst.
     """
     subdomain = "flag"
     index_suffix = "(flag)"
     annotation = "Flag"
 
 class TableObject(NotationObject):
-    """A Coq table, i.e. a setting that is a set of values.
-
-    Example::
-
-       .. table:: Search Blacklist @string
-          :name: Search Blacklist
-
-          Controls ...
+    """An object for a Coq table, i.e. a setting that is a set of values.
+    See the documentation of the ".. table::" object in doc/sphinx/README.rst.
     """
     subdomain = "table"
     index_suffix = "(table)"
     annotation = "Table"
 
 class ProductionObject(CoqObject):
-    r"""A grammar production.
-
-    Use ``.. prodn`` to document grammar productions instead of Sphinx
-    `production lists
-    <http://www.sphinx-doc.org/en/stable/markup/para.html#directive-productionlist>`_.
-
-    prodn displays multiple productions together with alignment similar to ``.. productionlist``,
-    however unlike ``.. productionlist``\ s, this directive accepts notation syntax.
-
-    Example::
-
-        .. prodn:: occ_switch ::= { {? {| + | - } } {* @natural } }
-        term += let: @pattern := @term in @term
-        | second_production
-
-       The first line defines "occ_switch", which must be unique in the document.  The second
-       references and expands the definition of "term", whose main definition is elsewhere
-       in the document.  The third form is for continuing the
-       definition of a nonterminal when it has multiple productions.  It leaves the first
-       column in the output blank.
-
+    """A grammar production.
+    See the documentation of the ".. prodn::" object in doc/sphinx/README.rst.
     """
     subdomain = "prodn"
     #annotation = "Grammar production"
@@ -590,21 +511,8 @@ class ProductionObject(CoqObject):
         return [indexnode, table] # only this node goes into the doc
 
 class ExceptionObject(NotationObject):
-    """An error raised by a Coq command or tactic.
-
-    This commonly appears nested in the ``.. tacn::`` that raises the
-    exception.
-
-    Example::
-
-       .. tacv:: assert @form by @tactic
-
-          This tactic applies :n:`@tactic` to solve the subgoals generated by
-          ``assert``.
-
-          .. exn:: Proof is not complete
-
-             Raised if :n:`@tactic` does not fully solve the goal.
+    """An object for an error raised by a Coq command or tactic.
+    See the documentation of the ".. exn::" object in doc/sphinx/README.rst.
     """
     subdomain = "exn"
     index_suffix = "(error)"
@@ -616,18 +524,8 @@ class ExceptionObject(NotationObject):
         return notation_to_string(signature)
 
 class WarningObject(NotationObject):
-    """An warning raised by a Coq command or tactic..
-
-    Do not mistake this for ``.. warning::``; this directive is for warning
-    messages produced by Coq.
-
-
-    Example::
-
-       .. warn:: Ambiguous path
-
-          When the coercion :token:`qualid` is added to the inheritance graph, non
-          valid coercion paths are ignored.
+    """An object for a warning raised by a Coq command or tactic..
+    See the documentation of the ".. warn::" object in doc/sphinx/README.rst.
     """
     subdomain = "warn"
     index_suffix = "(warning)"
@@ -639,18 +537,8 @@ class WarningObject(NotationObject):
 
 def NotationRole(role, rawtext, text, lineno, inliner, options={}, content=[]):
     #pylint: disable=unused-argument, dangerous-default-value
-    """Any text using the notation syntax (``@id``, ``{+, …}``, etc.).
-
-    Use this to explain tactic equivalences.  For example, you might write
-    this::
-
-       :n:`generalize @term as @ident` is just like :n:`generalize @term`, but
-       it names the introduced hypothesis :token:`ident`.
-
-    Note that this example also uses ``:token:``.  That's because ``ident`` is
-    defined in the Coq manual as a grammar production, and ``:token:``
-    creates a link to that.  When referring to a placeholder that happens to be
-    a grammar production, ``:token:`…``` is typically preferable to ``:n:`@…```.
+    """A role for any text using the notation syntax (``@id``, ``{+, …}``, etc.).
+    See the documentation of the ":n:" role in doc/sphinx/README.rst.
     """
     notation = utils.unescape(text, 1)
     position = inliner.reporter.get_source_and_line(lineno)
@@ -658,13 +546,8 @@ def NotationRole(role, rawtext, text, lineno, inliner, options={}, content=[]):
 
 def coq_code_role(role, rawtext, text, lineno, inliner, options={}, content=[]):
     #pylint: disable=dangerous-default-value
-    """Coq code.
-
-    Use this for Gallina and Ltac snippets::
-
-       :g:`apply plus_comm; reflexivity`
-       :g:`Set Printing All.`
-       :g:`forall (x: t), P(x)`
+    """A Coq code role for Gallina and Ltac snippets.
+    See the documentation of the ":g:" role in doc/sphinx/README.rst.
     """
     options['language'] = 'Coq'
     return code_role(role, rawtext, text, lineno, inliner, options, content)
@@ -681,48 +564,8 @@ def coq_code_role(role, rawtext, text, lineno, inliner, options={}, content=[]):
 CoqCodeRole = coq_code_role
 
 class CoqtopDirective(Directive):
-    r"""A reST directive to describe interactions with Coqtop.
-
-    Usage::
-
-       .. rocqtop:: options…
-
-          Coq code to send to coqtop
-
-    Example::
-
-       .. rocqtop:: in reset
-
-          Print nat.
-          Definition a := 1.
-
-    The blank line after the directive is required.  If you begin a proof,
-    use the ``abort`` option to reset coqtop for the next example.
-
-    Here is a list of permissible options:
-
-    - Display options (choose exactly one)
-
-      - ``all``: Display input and output
-      - ``in``: Display only input
-      - ``out``: Display only output
-      - ``none``: Display neither (useful for setup commands)
-
-    - Behavior options
-
-      - ``reset``: Send a ``Reset Initial`` command before running this block
-      - ``fail``: Don't die if a command fails, implies ``warn`` (so no need to put both)
-      - ``warn``: Don't die if a command emits a warning
-      - ``restart``: Send a ``Restart`` command before running this block (only works in proof mode)
-      - ``abort``: Send an ``Abort All`` command after running this block (leaves all pending proofs if any)
-      - ``extra-foo``: if environment variable 'COQRST_EXTRA' is set to `all`
-        or to a `,`-separated list containing `foo` this is ignored, otherwise behaves as ``fail``
-        This is typically used to showcase examples of things outside coq-core or rocq-core.
-        `foo` should be the name of the external requirement, e.g. `stdlib` or `mathcomp`.
-
-    ``coqtop``\ 's state is preserved across consecutive ``.. rocqtop::`` blocks
-    of the same document (``coqrst`` creates a single ``coqtop`` process per
-    reST source file).  Use the ``reset`` option to reset Coq's state.
+    """A reST directive to describte interactions with Rocq Top.
+    See the documentation of the ".. rocqtop::" directive in doc/sphinx/README.rst.
     """
     has_content = True
     required_arguments = 1
@@ -742,19 +585,8 @@ class CoqtopDirective(Directive):
         return [node]
 
 class CoqdocDirective(Directive):
-    """A reST directive to display Coqtop-formatted source code.
-
-    Usage::
-
-       .. rocqdoc::
-
-          Coq code to highlight
-
-    Example::
-
-       .. rocqdoc::
-
-          Definition test := 1.
+    """A reST directive to display Rocq Doc-formatted source code.
+    See the documentation of the ".. rocqdoc::" directive in doc/sphinx/README.rst.
     """
     # TODO implement this as a Pygments highlighter?
     has_content = True
@@ -775,23 +607,7 @@ class CoqdocDirective(Directive):
 
 class ExampleDirective(BaseAdmonition):
     """A reST directive for examples.
-
-    This behaves like a generic admonition; see
-    http://docutils.sourceforge.net/docs/ref/rst/directives.html#generic-admonition
-    for more details.
-
-    Optionally, any text immediately following the ``.. example::`` header is
-    used as the example's title.
-
-    Example::
-
-       .. example:: Adding a hint to a database
-
-          The following adds ``plus_comm`` to the ``plu`` database:
-
-          .. rocqdoc::
-
-             Hint Resolve plus_comm : plu.
+    See the documentation of the ".. example::" directive in doc/sphinx/README.rst.
     """
     node_class = nodes.admonition
     directive_name = "example"
@@ -807,15 +623,8 @@ class ExampleDirective(BaseAdmonition):
         return super().run()
 
 class PreambleDirective(Directive):
-    r"""A reST directive to include a TeX file.
-
-    Mostly useful to let MathJax know about `\def`\s and `\newcommand`\s.  The
-    contents of the TeX file are wrapped in a math environment, as MathJax
-    doesn't process LaTeX definitions otherwise.
-
-    Usage::
-
-       .. preamble:: preamble.tex
+    """A reST directive to include a TeX file.
+    See the documentation of the ".. preamble::" directive in doc/sphinx/README.rst
     """
     has_content = False
     required_arguments = 1
@@ -844,28 +653,8 @@ class PreambleDirective(Directive):
         return [node]
 
 class InferenceDirective(Directive):
-    r"""A reST directive to format inference rules.
-
-    This also serves as a small illustration of the way to create new Sphinx
-    directives.
-
-    Usage::
-
-       .. inference:: name
-
-          newline-separated premises
-          --------------------------
-          conclusion
-
-    Example::
-
-       .. inference:: Prod-Pro
-
-          \WTEG{T}{s}
-          s \in \Sort
-          \WTE{\Gamma::(x:T)}{U}{\Prop}
-          -----------------------------
-          \WTEG{\forall~x:T,U}{\Prop}
+    """A reST directive to format inference rules.
+    See the documentation of the ".. inference::" directive in doc/sphinx/README.rst
     """
     required_arguments = 1
     optional_arguments = 0
@@ -1229,15 +1018,7 @@ class StdGlossaryIndex(Index):
 
 def GrammarProductionRole(typ, rawtext, text, lineno, inliner, options={}, content=[]):
     """A grammar production not included in a ``prodn`` directive.
-
-    Useful to informally introduce a production, as part of running text.
-
-    Example::
-
-       :production:`string` indicates a quoted string.
-
-    You're not likely to use this role very commonly; instead, use a ``prodn``
-    directive and reference its tokens using ``:token:`…```.
+    See the documentation of the ":production:" role in doc/sphinx/README.rst
     """
     #pylint: disable=dangerous-default-value, unused-argument
     env = inliner.document.settings.env
@@ -1254,15 +1035,8 @@ GrammarProductionRole.role_name = "production"
 
 
 def GlossaryDefRole(typ, rawtext, text, lineno, inliner, options={}, content=[]):
-    """Marks the definition of a glossary term inline in the text.  Matching :term:`XXX`
-    constructs will link to it.  Use the form :gdef:`text <term>` to display "text"
-    for the definition of "term", such as when "term" must be capitalized or plural
-    for grammatical reasons.  The term will also appear in the Glossary Index.
-
-    Examples::
-
-       A :gdef:`prime` number is divisible only by itself and 1.
-       :gdef:`Composite <composite>` numbers are the non-prime numbers.
+    """A role to mark the definition of a glossary term inline in the text.
+    See the documentation of the ":gdef:" role in doc/sphinx/README.rst
     """
     #pylint: disable=dangerous-default-value, unused-argument
     env = inliner.document.settings.env

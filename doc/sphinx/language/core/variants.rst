@@ -25,7 +25,7 @@ the type becomes recursive, in which case it can be either
 is reserved for non-recursive types. Natural numbers, lists or streams cannot
 be defined using :cmd:`Variant`.
 
-.. cmd:: Variant @ident_decl {* @binder } {? %| {* @binder } } {? : @type } := {? %| } {+| @constructor } {? @decl_notations }
+.. cmd:: Variant @ident_decl {* @binder } {? %| {* @binder } } {? : @type } := {? {? %| } {+| @constructor } } {? @decl_notations }
 
    Defines a variant type named :n:`@ident` (in :n:`@ident_decl`)
    with the given list of constructors.
@@ -236,7 +236,7 @@ branch and the whole pattern matching expression has a type determined
 by the specific dependencies in the type of the term being matched. This
 dependency of the return type in the indices of the inductive type
 is expressed with a clause in the form
-:n:`in @qualid {+ _ } {+ @pattern }`, where
+:n:`in @qualid {* _ } {+ @pattern }`, where
 
 -  :n:`@qualid` is the inductive type of the term being matched;
 

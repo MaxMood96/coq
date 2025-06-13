@@ -21,7 +21,7 @@ Defining record types
    .. insertprodn record_definition of_type_inst
 
    .. prodn::
-      record_definition ::= {? > } @ident_decl {* @binder } {? : @sort } {? := {? @ident } %{ {*; @record_field } {? ; } %} {? as @ident } }
+      record_definition ::= {? > } @ident_decl {* @binder } {? : @sort } {? := {? @ident } %{ {? {+; @record_field } {? ; } } %} {? as @ident } }
       record_field ::= {* #[ {+, @attribute } ] } @name {? @field_spec } {? %| @natural }
       field_spec ::= {* @binder } @of_type_inst
       | {* @binder } := @term
@@ -107,7 +107,7 @@ Defining record types
        :n:`:= fun {+ @binder } => @term`
 
      - :n:`{+ @binder } @of_type_inst := @term` is equivalent to
-       :n:`: forall {+ @binder } , @type := fun {+ @binder } => @term`
+       :n:`: forall {+ @binder } , @of_type_inst := fun {+ @binder } => @term`
 
      :n:`:= @term`, if present, gives the value of the field, which may depend
      on the fields that appear before it.  Since their values are already defined,
@@ -234,7 +234,7 @@ Constructing records
    .. insertprodn term_record field_val
 
    .. prodn::
-      term_record ::= %{%| {*; @field_val } {? ; } %|%}
+      term_record ::= %{%| {? {+; @field_val } {? ; } } %|%}
       field_val ::= @qualid {* @binder } := @term
 
    Instances of record types can be constructed using either *record form*

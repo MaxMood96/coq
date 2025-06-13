@@ -529,7 +529,7 @@ pattern_occs: [
 ]
 
 record_definition: [
-| OPT ">" ident_decl LIST0 binder OPT [ ":" sort ] OPT ( ":=" OPT ident "{" LIST0 record_field SEP ";" OPT ";" "}" OPT [ "as" ident ] )
+| OPT ">" ident_decl LIST0 binder OPT [ ":" sort ] OPT ( ":=" OPT ident "{" OPT [ LIST1 record_field SEP ";" OPT ";" ] "}" OPT [ "as" ident ] )
 ]
 
 record_field: [
@@ -547,7 +547,7 @@ of_type_inst: [
 ]
 
 term_record: [
-| "{|" LIST0 field_val SEP ";" OPT ";" "|}"
+| "{|" OPT [ LIST1 field_val SEP ";" OPT ";" ] "|}"
 ]
 
 field_val: [
@@ -555,7 +555,7 @@ field_val: [
 ]
 
 inductive_definition: [
-| ident OPT cumul_univ_decl LIST0 binder OPT [ "|" LIST0 binder ] OPT [ ":" type ] ":=" OPT "|" LIST1 constructor SEP "|" OPT decl_notations
+| ident OPT cumul_univ_decl LIST0 binder OPT [ "|" LIST0 binder ] OPT [ ":" type ] ":=" OPT [ OPT "|" LIST1 constructor SEP "|" ] OPT decl_notations
 ]
 
 constructor: [
@@ -934,7 +934,7 @@ command: [
 | "Rewrite" [ "Rule" | "Rules" ] ident ":=" OPT "|" LIST1 rewrite_rule SEP "|"
 | "CoInductive" inductive_definition LIST0 ( "with" inductive_definition )
 | "CoInductive" record_definition LIST0 ( "with" record_definition )
-| "Variant" ident_decl LIST0 binder OPT [ "|" LIST0 binder ] OPT [ ":" type ] ":=" OPT "|" LIST1 constructor SEP "|" OPT decl_notations
+| "Variant" ident_decl LIST0 binder OPT [ "|" LIST0 binder ] OPT [ ":" type ] ":=" OPT [ OPT "|" LIST1 constructor SEP "|" ] OPT decl_notations
 | [ "Record" | "Structure" ] record_definition
 | "Class" record_definition
 | "Class" ident_decl LIST0 binder OPT [ ":" sort ] ":=" constructor

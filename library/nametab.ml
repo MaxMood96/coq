@@ -802,6 +802,8 @@ let locate_module qid = Modules.locate qid
 
 let full_name_module qid = Modules.to_path (locate_module qid)
 
+let full_name_open_mod qid = OpenMods.to_path (locate_dir qid)
+
 let locate_section qid =
   match locate_dir qid with
     | GlobDirRef.DirOpenSection dir -> dir

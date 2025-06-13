@@ -395,10 +395,10 @@ term1: [
 term0: [
 | DELETE reference univ_annot
 | REPLACE "{|" record_declaration bar_cbrace
-| WITH "{|" LIST0 field_def SEP ";" OPT ";" bar_cbrace
+| WITH "{|" OPT [ LIST1 field_def SEP ";" OPT ";" ] bar_cbrace
 | MOVETO number_or_string NUMBER
 | MOVETO number_or_string string
-| MOVETO term_record "{|" LIST0 field_def SEP ";" OPT ";" bar_cbrace
+| MOVETO term_record "{|" OPT [ LIST1 field_def SEP ";" OPT ";" ] bar_cbrace
 | MOVETO term_generalizing "`{" term200 "}"
 | MOVETO term_generalizing "`(" term200 ")"
 | MOVETO term_ltac "ltac" ":" "(" ltac_expr5 ")"
@@ -554,7 +554,7 @@ record_definition: [
 
 (* No mixed inductive-record definitions, opt_coercion is meaningless for Inductive *)
 inductive_definition: [
-| cumul_ident_decl binders OPT [ "|" binders ] OPT [ ":" type ] ":=" OPT "|" LIST1 constructor SEP "|" decl_notations
+| cumul_ident_decl binders OPT [ "|" binders ] OPT [ ":" type ] ":=" OPT [ OPT "|" LIST1 constructor SEP "|" ] decl_notations
 ]
 
 (* No mutual recursion, no inductive classes, type must be a sort *)
@@ -565,7 +565,7 @@ singleton_class_definition: [
 
 (* No record syntax, opt_coercion not supported for Variant, := ... required *)
 variant_definition: [
-| ident_decl binders OPT [ "|" binders ] OPT [ ":" type ] ":=" OPT "|" LIST1 constructor SEP "|" decl_notations
+| ident_decl binders OPT [ "|" binders ] OPT [ ":" type ] ":=" OPT [ OPT "|" LIST1 constructor SEP "|" ] decl_notations
 ]
 
 gallina: [
@@ -631,7 +631,7 @@ record_field: [
 
 record_fields: [
 | REPLACE record_field ";" record_fields
-| WITH LIST0 record_field SEP ";" OPT ";"
+| WITH OPT [ LIST1 record_field SEP ";" OPT ";" ]
 | DELETE record_field
 | DELETE (* empty *)
 ]
