@@ -13,6 +13,8 @@
 val pp : Pp.t -> unit
 val pP : Pp.t -> unit (* with surrounding box *)
 
+val ppexninfo : Exninfo.info -> unit
+
 val pp_as_format : Pp.t -> unit
 
 val ppfuture : 'a Future.computation -> unit

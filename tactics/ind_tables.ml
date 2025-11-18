@@ -108,13 +108,11 @@ let lookup_scheme kind ind =
 
 type schemes = {
   sch_eff : Evd.side_effects;
-  sch_env : Safe_typing.safe_environment;
   sch_reg : (Id.t * Constant.t * Loc.t option * UState.named_universes_entry) list;
 }
 
-let empty_schemes senv = {
-  sch_eff = Evd.empty_side_effects;
-  sch_env = senv;
+let empty_schemes eff = {
+  sch_eff = eff;
   sch_reg = [];
 }
 
@@ -156,11 +154,10 @@ let define ?loc internal role id c poly uctx sch =
   let c = UState.nf_universes uctx c in
   let uctx = UState.restrict uctx (Vars.universes_of_constr c) in
   let univs = UState.univ_entry ~poly uctx in
-  let effs = sch.sch_eff, sch.sch_env in
+  let effs = sch.sch_eff in
   let cst, effs = !declare_definition_scheme ~univs ~role ~name:id ~effs c in
-  let effs, senv = effs in
   let reg = (id, cst, loc, univs) :: sch.sch_reg in
-  cst, { sch_eff = effs; sch_env = senv; sch_reg = reg }
+  cst, { sch_eff = effs; sch_reg = reg }
 
 module Locmap : sig
 
@@ -203,10 +200,10 @@ end = struct
   end
 
 let get_env sch =
-  Safe_typing.env_of_safe_env sch.sch_env
+  Safe_typing.env_of_safe_env (Evd.get_senv_side_effects sch.sch_eff)
 
 let globally_declare_schemes sch =
-  Global.Internal.reset_safe_env sch.sch_env
+  Global.Internal.reset_safe_env (Evd.get_senv_side_effects sch.sch_eff)
 
 (* Assumes that dependencies are already defined *)
 let rec define_individual_scheme_base ?loc kind suff f ~internal idopt (mind,i as ind) eff =
@@ -282,21 +279,24 @@ let force_find_scheme kind (mind,i as ind) =
   | None ->
     let senv = Evd.get_senv_side_effects eff in
     try
-      match Hashtbl.find scheme_object_table kind with
+      let eff, ans = match Hashtbl.find scheme_object_table kind with
       | s,IndividualSchemeFunction (f, deps) ->
         let env = Safe_typing.env_of_safe_env senv in
         let deps = match deps with None -> [] | Some deps -> deps env ind in
-        let sch = empty_schemes senv in
+        let sch = empty_schemes eff in
         let eff = List.fold_left (fun eff dep -> declare_scheme_dependence eff dep) sch deps in
         let c, eff = define_individual_scheme_base kind s f ~internal:true None ind eff in
-        Proofview.tclEFFECTS eff.sch_eff <*> Proofview.tclUNIT c
+        eff, c
       | s,MutualSchemeFunction (f, deps) ->
         let env = Safe_typing.env_of_safe_env senv in
         let deps = match deps with None -> [] | Some deps -> deps env mind in
-        let sch = empty_schemes senv in
+        let sch = empty_schemes eff in
         let eff = List.fold_left (fun eff dep -> declare_scheme_dependence eff dep) sch deps in
         let ca, eff = define_mutual_scheme_base kind s f ~internal:true [] mind eff in
-        Proofview.tclEFFECTS eff.sch_eff <*> Proofview.tclUNIT ca.(i)
+        eff, ca.(i)
+      in
+      let sigma = Evd.emit_side_effects eff.sch_eff sigma in
+      Proofview.Unsafe.tclEVARS sigma <*> Proofview.tclUNIT ans
     with Rocqlib.NotFoundRef _ as e ->
       let e, info = Exninfo.capture e in
       Proofview.tclZERO ~info e
@@ -308,14 +308,14 @@ let register_schemes sch =
   List.iter iter (List.rev sch.sch_reg)
 
 let define_individual_scheme ?loc kind names ind =
-  let sch = empty_schemes (Global.safe_env ()) in
+  let sch = empty_schemes Evd.empty_side_effects in
   let eff = define_individual_scheme ?loc kind ~internal:false names ind sch in
   let () = globally_declare_schemes eff in
   let () = register_schemes eff in
   redeclare_schemes eff
 
 let define_mutual_scheme ?locmap kind names mind =
-  let sch = empty_schemes (Global.safe_env ()) in
+  let sch = empty_schemes Evd.empty_side_effects in
   let eff = define_mutual_scheme ?locmap kind ~internal:false names mind sch in
   let () = globally_declare_schemes eff in
   let () = register_schemes eff in

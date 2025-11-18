@@ -729,7 +729,7 @@ let declare_constant ~loc ?(local = Locality.ImportDefaultBehavior) ~name ~kind 
   if unsafe || is_unsafe_typing_flags typing_flags then feedback_axiom();
   kn
 
-let declare_private_constant ?role ~name ~opaque de effs senv =
+let declare_private_constant ?role ?ts ~name ~opaque de effs =
   let de, ctx =
     if not opaque then
       let de, ctx = cast_pure_proof_entry de in
@@ -739,13 +739,7 @@ let declare_private_constant ?role ~name ~opaque de effs senv =
       OpaqueEff de, ctx
 
   in
-  let univs =
-    if Univ.Level.Set.is_empty (fst ctx) then None
-    else Some (UState.Monomorphic_entry ctx, UnivNames.empty_binders)
-  in
-  let (kn, eff), senv = Safe_typing.add_private_constant name ctx de senv in
-  let effs = Evd.push_side_effects eff senv ?univs ?role effs in
-  kn, effs, senv
+  Evd.push_side_effects ?role ?ts name de ctx effs
 
 let inline_private_constants ~uctx env (body, eff) =
   let body, ctx = Safe_typing.inline_private_constants env (body, SideEff.get eff) in
@@ -944,10 +938,9 @@ let ustate_of_proof = function
   | DefaultProof { proof = (_entries, uctx) } -> uctx
   | DeferredOpaqueProof { initial_euctx } -> initial_euctx
 
-let declare_definition_scheme ~univs ~role ~name ~effs:(effs, senv) c =
+let declare_definition_scheme ~univs ~role ~name ~effs c =
   let entry = pure_definition_entry ~univs c in
-  let kn, effs, senv = declare_private_constant ~role ~name ~opaque:false entry effs senv in
-  kn, (effs, senv)
+  declare_private_constant ~role ~name ~opaque:false entry effs
 
 let register_definition_scheme ~internal ~name ~const:kn ~univs ?loc () =
   let kind = Decls.(IsDefinition Scheme) in
@@ -2276,16 +2269,16 @@ let declare_abstract ~name ~poly ~sign ~secsign ~opaque ~solve_tac env sigma con
      `if poly && opaque && private_poly_univs ()` in `close_proof`
      kernel will boom. This deserves more investigation. *)
   let body, typ, args = ProofEntry.shrink_entry sign body const.proof_entry_type in
-  let senv = Evd.get_senv_side_effects (Evd.eval_side_effects sigma) in
-  let senv = Safe_typing.set_oracle (Environ.oracle env) senv in
-  let cst, effs, senv =
+  let ts = Environ.oracle env in
+  let cst, effs =
     (* No side-effects in the entry, they already exist in the ambient environment *)
     let const = { const with proof_entry_body = body; proof_entry_type = typ } in
-    declare_private_constant ~name ~opaque const (Evd.eval_side_effects sigma) senv
+    declare_private_constant ~name ~opaque ~ts const (Evd.eval_side_effects sigma)
   in
+  let sigma = Evd.emit_side_effects effs sigma in
   let inst = instance_of_univs const.proof_entry_universes in
   let lem = EConstr.of_constr (Constr.mkConstU (cst, inst)) in
-  effs, sigma, lem, args, safe
+  sigma, lem, args, safe
 
 let get_goal_context pf i =
   let p = get pf in

@@ -31,4 +31,4 @@ val declare_abstract :
   -> Environ.env
   -> Evd.evar_map
   -> EConstr.t
-  -> Evd.side_effects * Evd.evar_map * EConstr.t * EConstr.t list * bool) ref
+  -> Evd.evar_map * EConstr.t * EConstr.t list * bool) ref

@@ -406,41 +406,34 @@ let match_with_sigma_type env sigma t =
 
 let is_sigma_type env sigma t = Option.has_some (match_with_sigma_type env sigma t)
 
-(***** Destructing patterns bound to some theory *)
-
-let rec first_match matcher = function
-  | [] -> raise PatternMatchingFailure
-  | (pat,check,build_set)::l when check () ->
-      (try (build_set (),matcher pat)
-       with PatternMatchingFailure -> first_match matcher l)
-  | _::l -> first_match matcher l
-
 (*** Equality *)
 
-let match_eq env sigma eqn (ref, hetero) =
-  let ref =
-    try Lazy.force ref
-    with e when CErrors.noncritical e -> raise PatternMatchingFailure
-  in
-  match EConstr.kind sigma eqn with
-  | App (c, [|t; x; y|]) ->
-    if not hetero && isRefX env sigma ref c then PolymorphicLeibnizEq (t, x, y)
-    else raise PatternMatchingFailure
-  | App (c, [|t; x; t'; x'|]) ->
-    if hetero && isRefX env sigma ref c then HeterogenousEq (t, x, t', x')
-    else raise PatternMatchingFailure
-  | _ -> raise PatternMatchingFailure
-
-let no_check () = true
-let check_jmeq_loaded () = has_ref "core.JMeq.type"
+let match_eq env sigma eqn (data, hetero) =
+  match data () with
+  | exception Rocqlib.NotFoundRef _ -> None
+  | data ->
+    let ref = data.Rocqlib.eq in
+    let kind = match EConstr.kind sigma eqn with
+      | App (c, [|t; x; y|]) ->
+        if not hetero && isRefX env sigma ref c then Some (PolymorphicLeibnizEq (t, x, y))
+        else None
+      | App (c, [|t; x; t'; x'|]) ->
+        if hetero && isRefX env sigma ref c then Some (HeterogenousEq (t, x, t', x'))
+        else None
+      | _ -> None
+    in
+    kind |> Option.map @@ fun kind -> data, kind
 
 let equalities =
-  [(lazy(lib_ref "core.eq.type"), false), no_check, build_rocq_eq_data;
-   (lazy(lib_ref "core.JMeq.type"), true), check_jmeq_loaded, build_rocq_jmeq_data;
-   (lazy(lib_ref "core.identity.type"), false), no_check, build_rocq_identity_data]
+  [build_rocq_eq_data, false;
+   build_rocq_jmeq_data, true;
+   build_rocq_identity_data, false]
 
 let find_eq_data env sigma eqn = (* fails with PatternMatchingFailure *)
-  let d,k = first_match (match_eq env sigma eqn) equalities in
+  let d,k = match List.find_map (match_eq env sigma eqn) equalities with
+    | None -> raise PatternMatchingFailure
+    | Some v -> v
+  in
   let hd,u = destInd sigma (fst (destApp sigma eqn)) in
     d,u,k
 
@@ -458,7 +451,7 @@ let find_eq_data_decompose env sigma eqn =
 
 let find_this_eq_data_decompose env sigma eqn =
   let (lbeq,u,eq_args) =
-    try (*first_match (match_eq eqn) inversible_equalities*)
+    try
       find_eq_data env sigma eqn
     with PatternMatchingFailure ->
       user_err  (str "No primitive equality found.") in

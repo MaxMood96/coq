@@ -168,6 +168,10 @@ val index0 : 'a eq -> 'a -> 'a list -> int
 
 (** {6 Folding} *)
 
+val fold_left_error : ('c -> 'a -> ('c,'e) result) -> 'c -> 'a list -> ('c,'e) result
+(** acts like [Ok (fold_left f acc s)] while [f] returns
+    [Ok acc']; it stops returning [Error c] as soon as [f] returns [Error c]. *)
+
 val fold_left_until : ('c -> 'a -> 'c CSig.until) -> 'c -> 'a list -> 'c
 (** acts like [fold_left f acc s] while [f] returns
     [Cont acc']; it stops returning [c] as soon as [f] returns [Stop c]. *)

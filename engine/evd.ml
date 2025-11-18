@@ -1349,35 +1349,34 @@ let emit_side_effects eff evd =
   let effects = { effects with seff_safeenv = Some senv } in
   { evd with effects; universes = UState.emit_side_effects eff.seff_private evd.universes }
 
-let drop_side_effects evd =
-  { evd with effects = empty_side_effects; }
-
 let set_side_effects eff evd =
   { evd with effects = eff }
 
 let eval_side_effects evd = evd.effects
 
-let push_side_effects prv senv ?univs ?role effs =
-  let kn = match Safe_typing.constants_of_private prv with
-  | [cst] -> cst
-  | _ -> assert false
+let push_side_effects ?role ?ts name de ctx effs =
+  let senv = get_senv_side_effects effs in
+  let senv = match ts with
+  | None -> senv
+  | Some ts -> Safe_typing.set_oracle ts senv
   in
-  let seff_univs = match univs with
-  | None -> effs.seff_univs
-  | Some ctx -> Cmap_env.add kn ctx effs.seff_univs
+  let (kn, prv), senv = Safe_typing.add_private_constant name ctx de senv in
+  let seff_univs =
+    if Univ.Level.Set.is_empty (fst ctx) then effs.seff_univs
+    else Cmap_env.add kn (UState.Monomorphic_entry ctx, UnivNames.empty_binders) effs.seff_univs
   in
   let seff_roles = match role with
   | None -> effs.seff_roles
   | Some r -> Cmap_env.add kn r effs.seff_roles
   in
-  let seff_private = Safe_typing.concat_private prv effs.seff_private in
-  {
-    seff_private = Safe_typing.concat_private prv seff_private;
+  let effs = {
+    seff_private = Safe_typing.concat_private prv effs.seff_private;
     seff_labels = Id.Set.add (Constant.label kn) effs.seff_labels;
     seff_roles = seff_roles;
     seff_univs = seff_univs;
     seff_safeenv = Some senv;
-  }
+  } in
+  kn, effs
 
 let seff_mem_label id effs =
   Id.Set.mem id effs.seff_labels

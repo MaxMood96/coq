@@ -461,6 +461,13 @@ let index0 f x l = index_f f x l 0
 
 (** {6 Folding} *)
 
+let fold_left_error f accu s =
+  let rec aux accu = function
+    | [] -> Ok accu
+    | x :: xs -> match f accu x with Error _ as x -> x | Ok i -> aux i xs
+  in
+  aux accu s
+
 let fold_left_until f accu s =
   let rec aux accu = function
     | [] -> accu

@@ -887,15 +887,6 @@ let tclENV = Env.get
 
 (** {7 Put-like primitives} *)
 
-
-let emit_side_effects eff x =
-  { x with solution = Evd.emit_side_effects eff x.solution }
-
-let tclEFFECTS eff =
-  let open Proof in
-  return () >>= fun () -> (* The Global.env should be taken at exec time *)
-  Pv.modify (fun initial -> emit_side_effects eff initial)
-
 let mark_as_unsafe = Status.put false
 
 (** Gives up on the goal under focus. Reports an unsafe status. Proofs
@@ -1135,7 +1126,7 @@ module Unsafe = struct
 
   let purge_side_effects pv =
     let effs = Evd.eval_side_effects pv.solution in
-    { pv with solution = Evd.drop_side_effects pv.solution }, effs
+    { pv with solution = Evd.set_side_effects Evd.empty_side_effects pv.solution }, effs
 
 end
 

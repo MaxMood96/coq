@@ -102,9 +102,9 @@ val declare_definition_scheme :
   (univs:UState.named_universes_entry
    -> role:Evd.side_effect_role
    -> name:Id.t
-   -> effs:(Evd.side_effects * Safe_typing.safe_environment)
+   -> effs:Evd.side_effects
    -> Constr.t
-   -> Constant.t * (Evd.side_effects * Safe_typing.safe_environment)) ref
+   -> Constant.t * Evd.side_effects) ref
 
 val register_definition_scheme :
   (internal:bool

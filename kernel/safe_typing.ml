@@ -367,8 +367,14 @@ sig
 
   val universes : t -> Univ.ContextSet.t
 
-  (** Checks whether [dst] is a valid extension of [src], possibly adding universes and constraints. *)
+  (** Checks whether [dst] is a valid extension of [src] by 1 declaration,
+      possibly adding universes and constraints. *)
   val safe_extend : src:t -> dst:t -> t option
+
+  (** [compatible src dst] checks whether [dst] adds exactly 1 declaration
+      to an ancestor of [src].
+      If it does, the declaration is also valid in [src] (up to universes). *)
+  val compatible : safe_environment -> t -> bool
 end =
 struct
 
@@ -391,6 +397,19 @@ let safe_extend ~src ~dst =
     Some { certif_struc = dst.certif_struc;
            certif_univs = Univ.ContextSet.union src.certif_univs dst.certif_univs }
   else None
+
+let compatible src dst =
+  let dst = dst.certif_struc in
+  let src = src.revstruct in
+  match dst with
+  | [] -> false
+  | _ :: dst_base ->
+    let rec aux src =
+      src == dst_base || match src with
+      | [] -> false
+      | _ :: src -> aux src
+    in
+    aux src
 
 let universes c = c.certif_univs
 
@@ -874,27 +893,40 @@ let warn_failed_cert = CWarnings.create ~name:"failed-abstract-certificate"
         str " failed.")
 
 (* Given the list of signatures of side effects, checks if they match.
- * I.e. if they are ordered descendants of the current revstruct.
+ * I.e. if they are ordered descendants of an ancestor of the current revstruct.
    Returns the universes needed to trust the side effects (None if they can't be trusted). *)
 let check_signatures senv sl =
-  let curmb = Certificate.make senv in
-  let is_direct_ancestor accu (kn, mb) =
-    match accu with
-    | None -> None
-    | Some curmb ->
-        try
-          let mb = CEphemeron.get mb in
-          let mb = Certificate.safe_extend ~src:curmb ~dst:mb in
-          let () = if Option.is_empty mb then warn_failed_cert kn in
-          mb
-        with CEphemeron.InvalidKey -> None in
-  let sl = List.fold_left is_direct_ancestor (Some curmb) sl in
   match sl with
-  | None ->
+  | [] -> Ok Univ.ContextSet.empty
+  | (firstkn,first) :: rest ->
+    match CEphemeron.get first with
+    | exception CEphemeron.InvalidKey -> Error None
+    | first ->
+    if not (Certificate.compatible senv first) then Error (Some firstkn)
+    else
+      let is_direct_ancestor curmb (kn, mb) =
+        match CEphemeron.get mb with
+        | exception CEphemeron.InvalidKey -> Error None
+        | mb ->
+          let mb = Certificate.safe_extend ~src:curmb ~dst:mb in
+          match mb with
+          | None -> Error (Some kn)
+          | Some mb -> Ok mb
+      in
+      let accu = List.fold_left_error is_direct_ancestor first rest in
+      match accu with
+      | Error _ as e -> e
+      | Ok mb ->
+        let univs = Certificate.universes mb in
+        Ok (Univ.ContextSet.diff univs senv.univ)
+
+let check_signatures senv sl =
+  match check_signatures senv sl with
+  | Ok univs -> Some univs
+  | Error None ->
+    (* don't warn when the issue is an invalid ephemeron *)
     None
-  | Some mb ->
-    let univs = Certificate.universes mb in
-    Some (Univ.ContextSet.diff univs senv.univ)
+  | Error (Some kn) -> warn_failed_cert kn; None
 
 type side_effect_declaration =
 | DefinitionEff : Entries.definition_entry -> side_effect_declaration

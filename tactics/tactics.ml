@@ -2104,11 +2104,7 @@ let declare_intro_decomp_eq f = intro_decomp_eq_function := f
 
 let my_find_eq_data_decompose env sigma t =
   try Some (find_eq_data_decompose env sigma t)
-  with e when is_sync_anomaly e
-    (* Hack in case equality is not yet defined... one day, maybe,
-       known equalities will be dynamically registered *)
-      -> None
-  | Constr_matching.PatternMatchingFailure -> None
+  with Constr_matching.PatternMatchingFailure -> None
 
 let intro_decomp_eq ?loc l thin tac id =
   Proofview.Goal.enter begin fun gl ->
@@ -3224,25 +3220,27 @@ let with_set_strategy lvl_ql k =
     | GlobRef.VarRef id -> Evaluable.EvalVarRef id
     | _ -> user_err Pp.(str
                           "cannot set an inductive type or a constructor as transparent") in
+  let get_strategy env kl =
+    let ts = Environ.oracle env in
+    let map (_, k) = (Conv_oracle.get_strategy ts (Evaluable.to_kevaluable k), k) in
+    List.map map kl
+  in
+  let set_strategy env kl =
+    let fold accu (lvl, k) = Conv_oracle.set_strategy accu (Evaluable.to_kevaluable k) lvl in
+    let ts = List.fold_left fold (Environ.oracle env) kl in
+    Environ.set_oracle env ts
+  in
   let kl = List.concat (List.map (fun (lvl, ql) -> List.map (fun q -> (lvl, glob_key q)) ql) lvl_ql) in
   tclWRAPFINALLY
     (Proofview.tclENV >>= fun env ->
-     let orig_kl = List.map (fun (_lvl, k) ->
-         (Conv_oracle.get_strategy (Environ.oracle env) (Evaluable.to_kevaluable k), k))
-         kl in
-     let env = List.fold_left (fun env (lvl, k) ->
-         Environ.set_oracle env
-           (Conv_oracle.set_strategy (Environ.oracle env) (Evaluable.to_kevaluable k) lvl)) env kl in
+     let orig_kl = get_strategy env kl in
+     let env = set_strategy env kl in
      Proofview.Unsafe.tclSETENV env <*>
      Proofview.tclUNIT orig_kl)
     k
     (fun orig_kl ->
-       (* TODO: When abstract no longer depends on Global, remove this
-          [Proofview.tclLIFT] block *)
        Proofview.tclENV >>= fun env ->
-       let env = List.fold_left (fun env (lvl, k) ->
-           Environ.set_oracle env
-             (Conv_oracle.set_strategy (Environ.oracle env) (Evaluable.to_kevaluable k) lvl)) env orig_kl in
+       let env = set_strategy env orig_kl in
        Proofview.Unsafe.tclSETENV env)
 
 module Simple = struct

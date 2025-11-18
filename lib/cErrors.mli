@@ -102,6 +102,9 @@ val register_additional_error_info
   :  (Exninfo.info -> Pp.t option)
   -> unit
 
+(** Print using the printers given to [register_additional_error_info]. *)
+val print_extra : Exninfo.info -> Pp.t
+
 (** [to_result ~f x] reifies (non-critical) exceptions into a [('a,
     iexn) Result.t] type *)
 val to_result : f:('a -> 'b) -> 'a -> ('b, Exninfo.iexn) Result.t

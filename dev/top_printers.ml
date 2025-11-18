@@ -32,6 +32,13 @@ let with_env_evm f x =
 (* std_ppcmds *)
 let pp   x = Pp.pp_with !Topfmt.std_ft x
 
+let ppexninfo e =
+  let loc =
+    Loc.get_loc e |> Option.map Pp.(fun loc -> str "exn loc: " ++ Loc.pr loc ++ fnl())
+    |> Option.default (mt())
+  in
+  pp (loc ++ CErrors.print_extra e)
+
 (** Future printer *)
 
 let ppfuture kx = pp (Future.print (fun _ -> str "_") kx)

@@ -1,4 +1,5 @@
 install_printer Top_printers.pP
+install_printer Top_printers.ppexninfo
 install_printer Top_printers.ppfuture
 install_printer Top_printers.ppid
 install_printer Top_printers.ppmbid
