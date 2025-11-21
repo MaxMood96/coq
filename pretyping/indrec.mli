@@ -18,6 +18,7 @@ open Evd
 type recursion_scheme_error =
   | NotAllowedCaseAnalysis of evar_map * (*isrec:*) bool * Sorts.t * Constr.pinductive
   | NotMutualInScheme of inductive * inductive
+  | DuplicateInductiveBlock of inductive
   | NotAllowedDependentAnalysis of (*isrec:*) bool * inductive
 
 exception RecursionSchemeError of env * recursion_scheme_error
@@ -61,7 +62,7 @@ val build_induction_scheme : env -> evar_map -> inductive puniverses ->
 
 val build_mutual_induction_scheme :
   env -> evar_map -> ?force_mutual:bool ->
-  (inductive puniverses * dep_flag * EConstr.ESorts.t) list -> evar_map * constr list
+  (inductive * dep_flag * EConstr.ESorts.t) list -> einstance -> evar_map * constr list
 
 (** Default dependence of eliminations for Prop inductives *)
 

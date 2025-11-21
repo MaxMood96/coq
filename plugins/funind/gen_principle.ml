@@ -1300,10 +1300,10 @@ let make_scheme evd (fas : (Constant.t EConstr.puniverses * UnivGen.QualityOrSet
     List.map
       (fun idx ->
         let ind = (first_fun_kn, idx) in
-        ((ind, snd first_fun), true, EConstr.ESorts.prop))
+        (ind, true, EConstr.ESorts.prop))
       funs_indexes
   in
-  let sigma, schemes = Indrec.build_mutual_induction_scheme env !evd ind_list in
+  let sigma, schemes = Indrec.build_mutual_induction_scheme env !evd ind_list (snd first_fun) in
   let _ = evd := sigma in
   let l_schemes =
     List.map
@@ -1526,12 +1526,11 @@ let derive_correctness (funs : Constant.t EConstr.puniverses list) (graphs : ind
       let sigma, scheme =
         let sigma, inds = CArray.fold_left_map_i (fun i sigma _ ->
             let sigma, s = Evd.fresh_sort_in_quality ~rigid:UnivRigid sigma UnivGen.QualityOrSet.qtype in
-            sigma, (((kn, i), u), true, s))
+            sigma, ((kn, i), true, s))
             !evd
             mib.mind_packets
         in
-        Indrec.build_mutual_induction_scheme env sigma
-          (Array.to_list inds)
+        Indrec.build_mutual_induction_scheme env sigma (Array.to_list inds) u
       in
       let schemes = Array.map_of_list EConstr.Unsafe.to_constr scheme in
       let proving_tac =

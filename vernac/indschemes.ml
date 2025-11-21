@@ -221,8 +221,13 @@ let declare_one_induction_scheme ?loc ind =
   let kind = Indrec.pseudo_sort_quality_for_elim ind mip in
   let from_prop = Sorts.Quality.is_qprop kind in
   let depelim = Inductiveops.has_dependent_elim specif in
-  let kelim = Inductiveops.constant_sorts_below
+  let kelim mip = Inductiveops.constant_sorts_below
               @@ Inductiveops.elim_sort (mib,mip) in
+  let kelim =
+    List.fold_right (fun x acc ->
+      List.intersect UnivGen.QualityOrSet.equal acc x)
+    (List.map kelim (Array.to_list mib.mind_packets))
+    [UnivGen.QualityOrSet.qtype; UnivGen.QualityOrSet.prop; UnivGen.QualityOrSet.set; UnivGen.QualityOrSet.sprop] in
   let kelim =
     if Global.sprop_allowed ()
     then kelim
@@ -381,15 +386,15 @@ let do_mutual_induction_scheme ~register ?(force_mutual=false) env ?(isrec=true)
   let sigma, lrecspec =
     List.fold_left_map (fun sigma (_,dep,ind,sort) ->
         let sigma, sort = Evd.fresh_sort_in_quality ~rigid:UnivRigid sigma sort in
-        (sigma, ((ind,inst),dep,sort)))
+        (sigma, (ind,dep,sort)))
       sigma
       l
   in
   let sigma, listdecl =
-    if isrec then Indrec.build_mutual_induction_scheme env sigma ~force_mutual lrecspec
+    if isrec then Indrec.build_mutual_induction_scheme env sigma ~force_mutual lrecspec inst
     else
       List.fold_left_map (fun sigma (ind,dep,sort) ->
-          let sigma, c = Indrec.build_case_analysis_scheme env sigma ind dep sort in
+          let sigma, c = Indrec.build_case_analysis_scheme env sigma (ind, inst) dep sort in
           let c, _ = Indrec.eval_case_analysis c in
           sigma, c)
         sigma lrecspec

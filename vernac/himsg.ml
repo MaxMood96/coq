@@ -1539,13 +1539,12 @@ let error_inductive_missing_constraints env (us,ind_univ) =
 (* Recursion schemes errors *)
 
 let error_not_mutual_in_scheme env ind ind' =
-  if QInd.equal env ind ind' then
-    str "The inductive type " ++ pr_inductive env ind ++
-    str " occurs twice."
-  else
     str "The inductive types " ++ pr_inductive env ind ++ spc () ++
     str "and" ++ spc () ++ pr_inductive env ind' ++ spc () ++
     str "are not mutually defined."
+
+let error_twice_in_scheme env ind  =
+  str "The inductive type " ++ pr_inductive env ind ++ str " occurs twice."
 
 (* Inductive constructions errors *)
 
@@ -1594,6 +1593,7 @@ let explain_recursion_scheme_error env = function
     explain_elim_arity env sigma i None (Some k)
       (* error_not_allowed_case_analysis env isrec k i *)
   | NotMutualInScheme (ind,ind')-> error_not_mutual_in_scheme env ind ind'
+  | DuplicateInductiveBlock ind -> error_twice_in_scheme env ind
   | NotAllowedDependentAnalysis (isrec, i) ->
      Inductiveops.error_not_allowed_dependent_analysis env isrec i
 
